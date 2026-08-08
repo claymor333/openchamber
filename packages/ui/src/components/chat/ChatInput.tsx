@@ -1982,18 +1982,37 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     // otherwise re-focus after the blur) and also blurs whatever is actually
     // focused, since CodeMirror's own blur may not release the input on Android.
     const prevSessionForBlurRef = React.useRef(currentSessionId);
+    const mountedForBlurRef = React.useRef(false);
+    const blurTimersRef = React.useRef<number[]>([]);
     React.useEffect(() => {
+        const clearBlurTimers = () => {
+            blurTimersRef.current.forEach((t) => window.clearTimeout(t));
+            blurTimersRef.current = [];
+        };
+        clearBlurTimers();
         if (isMobile) return;
+        const justMounted = !mountedForBlurRef.current;
+        mountedForBlurRef.current = true;
         const previous = prevSessionForBlurRef.current;
         prevSessionForBlurRef.current = currentSessionId;
-        if (currentSessionId && currentSessionId !== previous && !newSessionDraftOpen) {
-            requestAnimationFrame(() => {
+        // Blur on mount (the app restores the last session and would otherwise
+        // leave the composer focused, raising the OSK on launch) and on any
+        // existing-session switch. New-session drafts keep their focus. Multiple
+        // staggered blurs beat any late re-focus (draft restore rAF, editor
+        // creation focus) that lands shortly after the switch.
+        const shouldBlur =
+            currentSessionId && !newSessionDraftOpen && (justMounted || currentSessionId !== previous);
+        if (shouldBlur) {
+            const doBlur = () => {
                 composerRef.current?.blur();
                 if (document.activeElement instanceof HTMLElement) {
                     document.activeElement.blur();
                 }
-            });
+            };
+            requestAnimationFrame(doBlur);
+            blurTimersRef.current = [200, 500].map((ms) => window.setTimeout(doBlur, ms));
         }
+        return clearBlurTimers;
     }, [currentSessionId, isMobile, newSessionDraftOpen]);
 
     React.useEffect(() => {

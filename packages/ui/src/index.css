@@ -716,22 +716,22 @@ html:not(.dark) .chat-scroll {
    the drag, and the strip highlights like a mouse hover would. Applies to
    every vertical resize separator (sessions sidebar, context panel, editor
    tree, walkthrough TOC, VS Code layout). */
-:root.oc-capacitor-app [role="separator"][aria-orientation="vertical"]::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: -10px;
-  right: -10px;
-}
+ :root.oc-capacitor-app [role="separator"][aria-orientation="vertical"]::before {
+   content: '';
+   position: absolute;
+   top: 0;
+   bottom: 0;
+   left: -5px;
+   right: -5px;
+ }
 
-:root.oc-capacitor-app [role="separator"][aria-orientation="horizontal"]::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: -10px;
-  bottom: -10px;
+ :root.oc-capacitor-app [role="separator"][aria-orientation="horizontal"]::before {
+   content: '';
+   position: absolute;
+   left: 0;
+   right: 0;
+   top: -5px;
+   bottom: -5px;
 }
 
 .dark * {

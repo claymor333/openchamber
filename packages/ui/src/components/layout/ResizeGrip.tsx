@@ -3,24 +3,24 @@ import React from 'react';
 import { cn } from '@/lib/utils';
 
 /** How long the pill stays visible after the pointer lifts. */
-const HIDE_DELAY_MS = 1600;
+const HIDE_DELAY_MS = 450;
 
 /**
  * Tap-to-reveal drag grip for window borders.
  *
  * Hidden at rest. On tap it expands from the center of the border into a
- * themed capsule that overhangs both adjacent panes, with three grip bars (a
- * hamburger, rotated for the border's orientation) as the grab affordance —
- * matching the reference grip on the Catppuccin theme. The reveal springs in
- * with a slight overshoot; while a drag is active the bars breathe gently to
- * signal the live gesture. It stays up for the duration of the drag and
- * lingers briefly after release before hiding again, so a tap that reveals the
- * handle doesn't blink it away.
+ * thin themed capsule that overhangs both adjacent panes, with three subtle
+ * grip bars (a hamburger, rotated for the border's orientation) as the grab
+ * affordance. The reveal springs in with a slight overshoot; while a drag is
+ * active the bars breathe gently. It stays up for the duration of the drag and
+ * fades quickly after release so it never lingers over the session rows and
+ * blocks a tap.
  *
  * Pairs with the full-height resize separator: the separator owns the gesture
  * and the widened touch hit-area (the ::before in index.css), this renders the
- * affordance. Uses the theme's surface + border + muted-foreground tokens so it
- * reads correctly in Catppuccin and every other theme.
+ * affordance. The pill itself is pointer-events-none — only the separator's
+ * hit-area can intercept input, and a short linger keeps it from overlapping
+ * session-row taps for long.
  */
 export const ResizeGrip: React.FC<{
   /** True while a drag is in progress — keeps the pill up + pulses the bars. */
@@ -38,16 +38,13 @@ export const ResizeGrip: React.FC<{
       setLinger(true);
       return;
     }
-    // Not dragging: keep showing briefly, then hide.
+    // Not dragging: fade out quickly so the handle never lingers over content.
     const timer = setTimeout(() => setLinger(false), HIDE_DELAY_MS);
     return () => clearTimeout(timer);
   }, [active]);
 
   const show = active || linger;
 
-  // Three grip bars. For a vertical border the capsule is tall and the bars run
-  // horizontally (a hamburger); for a horizontal border the capsule is wide and
-  // the bars run vertically.
   const bars = [0, 1, 2];
 
   return (
@@ -60,18 +57,18 @@ export const ResizeGrip: React.FC<{
     >
       <div
         className={cn(
-          'flex items-center justify-center rounded-full border border-border bg-popover shadow-lg',
-          'transition-[transform,opacity] duration-200 ease-[cubic-bezier(0.34,1.56,0.64,1)]',
-          isVertical ? 'h-10 w-7 flex-col gap-[5px]' : 'h-7 w-10 gap-[5px]',
-          show ? 'scale-100 opacity-100' : 'scale-0 opacity-0',
+          'flex items-center justify-center rounded-full border border-border/70 bg-background/85 shadow-md',
+          'transition-[transform,opacity] duration-150 ease-out',
+          isVertical ? 'h-9 w-6 flex-col gap-[5px]' : 'h-6 w-9 gap-[5px]',
+          show ? 'scale-100 opacity-100' : 'scale-50 opacity-0',
         )}
       >
         {bars.map((i) => (
           <span
             key={i}
             className={cn(
-              'block rounded-full bg-muted-foreground',
-              isVertical ? 'h-[2.5px] w-4' : 'h-4 w-[2.5px]',
+              'block rounded-full bg-muted-foreground/60',
+              isVertical ? 'h-[2px] w-3' : 'h-3 w-[2px]',
               active && 'animate-oc-grip-breathe',
             )}
           />
