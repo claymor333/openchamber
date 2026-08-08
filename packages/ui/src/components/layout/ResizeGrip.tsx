@@ -60,9 +60,9 @@ export const ResizeGrip: React.FC<{
     >
       <div
         className={cn(
-          'flex items-center justify-center rounded-full border border-border/80 bg-popover/80 shadow-md',
+          'flex items-center justify-center rounded-full border border-border bg-popover shadow-lg',
           'transition-[transform,opacity] duration-200 ease-[cubic-bezier(0.34,1.56,0.64,1)]',
-          isVertical ? 'h-14 w-9 flex-col gap-[6px]' : 'h-9 w-14 gap-[6px]',
+          isVertical ? 'h-10 w-7 flex-col gap-[5px]' : 'h-7 w-10 gap-[5px]',
           show ? 'scale-100 opacity-100' : 'scale-0 opacity-0',
         )}
       >
@@ -70,8 +70,8 @@ export const ResizeGrip: React.FC<{
           <span
             key={i}
             className={cn(
-              'block rounded-full bg-muted-foreground/80',
-              isVertical ? 'h-[3px] w-6' : 'h-6 w-[3px]',
+              'block rounded-full bg-muted-foreground',
+              isVertical ? 'h-[2.5px] w-4' : 'h-4 w-[2.5px]',
               active && 'animate-oc-grip-breathe',
             )}
           />

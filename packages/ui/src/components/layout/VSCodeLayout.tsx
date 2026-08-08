@@ -562,7 +562,7 @@ export const VSCodeLayout: React.FC = () => {
         <div className="flex h-full">
           {/* Sessions sidebar */}
           <div
-            className={cn('relative h-full border-r border-border overflow-hidden flex-shrink-0', isResizingExpandedSidebar && 'select-none')}
+            className={cn('relative h-full border-r border-border flex-shrink-0', isResizingExpandedSidebar && 'select-none')}
             style={{ width: expandedSidebarWidth, minWidth: expandedSidebarWidth, maxWidth: expandedSidebarWidth }}
           >
             <SessionSidebar

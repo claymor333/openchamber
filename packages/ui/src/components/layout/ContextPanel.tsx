@@ -381,13 +381,15 @@ const EditorTreeColumn: React.FC<{ visible: boolean }> = ({ visible }) => {
     <div
       ref={columnRef}
       className={cn(
-        'relative h-full flex-shrink-0 overflow-hidden border-l border-border bg-background will-change-[width] motion-reduce:transition-none',
+        // overflow-x: visible so the resize grip pill overhangs into the chat —
+        // the inner file tree clips itself.
+        'relative h-full flex-shrink-0 border-l border-border bg-background will-change-[width] motion-reduce:transition-none',
         !visible && 'border-l-0',
       )}
       style={{
         width: `${isResizing ? (liveWidthRef.current ?? appliedWidth) : appliedWidth}px`,
         ['--oc-editor-tree-width' as string]: `${isResizing ? (liveWidthRef.current ?? width) : width}px`,
-        overflowX: 'clip',
+        overflowX: 'visible',
         transitionProperty: isResizing ? 'none' : 'width',
         transitionDuration: '200ms',
         transitionTimingFunction: 'cubic-bezier(0.22, 1, 0.36, 1)',
@@ -2854,7 +2856,7 @@ export const ContextPanel: React.FC = () => {
       : {
           width: 'min(var(--oc-context-panel-width), 100%)',
           maxWidth: '100%',
-          overflowX: 'clip',
+          overflowX: 'visible',
           ['--oc-context-panel-width' as string]: `${width}px`,
         };
 
@@ -2865,7 +2867,9 @@ export const ContextPanel: React.FC = () => {
       tabIndex={-1}
       inert={!isOpen || undefined}
       className={cn(
-        'flex min-h-0 flex-col overflow-hidden bg-background',
+        // overflow-x: visible so the resize grip pill overhangs into the chat —
+        // the panel's own inner scroller clips its content.
+        'flex min-h-0 flex-col bg-background',
         // Right-anchored while expanded: `inset-0` would teleport the left
         // edge instantly (position does not transition), so only the width
         // animates and the panel grows leftwards from its docked position.

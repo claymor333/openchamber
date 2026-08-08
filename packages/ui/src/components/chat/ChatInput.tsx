@@ -1978,13 +1978,21 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     // focused while navigating re-raises the OSK. Blur it on an existing-
     // session switch so the keyboard stays down until the user taps the input.
     // New-session drafts keep their focus (that's the "start typing" moment).
+    // The blur runs in a rAF to outrun the draft-restore rAF (which would
+    // otherwise re-focus after the blur) and also blurs whatever is actually
+    // focused, since CodeMirror's own blur may not release the input on Android.
     const prevSessionForBlurRef = React.useRef(currentSessionId);
     React.useEffect(() => {
         if (isMobile) return;
         const previous = prevSessionForBlurRef.current;
         prevSessionForBlurRef.current = currentSessionId;
         if (currentSessionId && currentSessionId !== previous && !newSessionDraftOpen) {
-            composerRef.current?.blur();
+            requestAnimationFrame(() => {
+                composerRef.current?.blur();
+                if (document.activeElement instanceof HTMLElement) {
+                    document.activeElement.blur();
+                }
+            });
         }
     }, [currentSessionId, isMobile, newSessionDraftOpen]);
 

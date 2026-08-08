@@ -127,7 +127,10 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, isMobile, children, cl
         <aside
             ref={sidebarRef}
             className={cn(
-                'relative flex h-full overflow-hidden border-r border-border will-change-[width] motion-reduce:transition-none',
+                // overflow-x: visible so the resize grip pill can overhang into
+                // the neighbor pane — the content column below clips itself
+                // (overflow-x hidden + the inner scroller), so nothing bleeds.
+                'relative flex h-full border-r border-border will-change-[width] motion-reduce:transition-none',
                 'bg-sidebar oc-vibrancy-surface',
                 isOpen && 'shadow-[inset_-2px_0_10px_-2px_rgb(0_0_0_/_0.06)]',
                 !isOpen && 'border-r-0',
@@ -138,7 +141,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, isMobile, children, cl
                 minWidth: `${currentWidth}px`,
                 maxWidth: `${currentWidth}px`,
                 ['--oc-left-sidebar-width' as string]: `${isResizing ? currentWidth : openWidth}px`,
-                overflowX: 'clip',
+                overflowX: 'visible',
                 transitionProperty: isResizing ? 'none' : 'width, min-width, max-width',
                 transitionDuration: '200ms',
                 transitionTimingFunction: 'cubic-bezier(0.22, 1, 0.36, 1)',
