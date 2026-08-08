@@ -3,7 +3,7 @@ import React from 'react';
 import { cn } from '@/lib/utils';
 
 /** How long the pill stays visible after the pointer lifts. */
-const HIDE_DELAY_MS = 450;
+const HIDE_DELAY_MS = 2000;
 
 /**
  * Tap-to-reveal drag grip for window borders.
