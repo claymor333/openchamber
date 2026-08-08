@@ -27,6 +27,7 @@ import {
     type DesktopWindowControlsStyle,
 } from '@/lib/desktop';
 import { useDeviceInfo } from '@/lib/device';
+import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
 import { usePwaDetection } from '@/hooks/usePwaDetection';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { CODE_FONT_OPTIONS, DEFAULT_MONO_FONT, DEFAULT_UI_FONT, UI_FONT_OPTIONS, type MonoFontOption, type UiFontOption } from '@/lib/fontOptions';
@@ -279,7 +280,7 @@ const normalizeUserMessageRenderingMode = (mode: unknown): 'markdown' | 'plain' 
     return mode === 'markdown' ? 'markdown' : 'plain';
 };
 
-type VisibleSetting = 'sessionAssist' | 'sessionGoal' | 'theme' | 'windowControlsPosition' | 'pwaInstallName' | 'pwaOrientation' | 'mobileKeyboardMode' | 'timeFormat' | 'weekStart' | 'fontSize' | 'terminalFontSize' | 'terminalShell' | 'terminalLoginShell' | 'editorFontSize' | 'spacing' | 'inputBarOffset' | 'mermaidRendering' | 'userMessageRendering' | 'chatRenderMode' | 'messageTransport' | 'activityRenderMode' | 'collapsibleUserMessages' | 'stickyUserHeader' | 'promptNavigatorEnabled' | 'wideChatLayout' | 'codeBlockLineWrap' | 'splitAssistantMessageActions' | 'subagentReadOnlyBanner' | 'diffLayout' | 'mobileStatusBar' | 'dotfiles' | 'fileViewerPreview' | 'reasoning' | 'showToolFileIcons' | 'showTurnChangedFiles' | 'expandedTools' | 'followUpBehavior' | 'terminalQuickKeys' | 'fileEditorKeymap' | 'persistDraft' | 'inputSpellcheck' | 'reportUsage' | 'expandedEditorToolbar' | 'autoSaveEnabled';
+type VisibleSetting = 'sessionAssist' | 'sessionGoal' | 'theme' | 'windowControlsPosition' | 'pwaInstallName' | 'pwaOrientation' | 'mobileKeyboardMode' | 'timeFormat' | 'weekStart' | 'fontSize' | 'terminalFontSize' | 'terminalShell' | 'terminalLoginShell' | 'editorFontSize' | 'spacing' | 'inputBarOffset' | 'mermaidRendering' | 'userMessageRendering' | 'chatRenderMode' | 'messageTransport' | 'activityRenderMode' | 'collapsibleUserMessages' | 'stickyUserHeader' | 'promptNavigatorEnabled' | 'wideChatLayout' | 'codeBlockLineWrap' | 'splitAssistantMessageActions' | 'subagentReadOnlyBanner' | 'diffLayout' | 'mobileStatusBar' | 'dotfiles' | 'fileViewerPreview' | 'reasoning' | 'showToolFileIcons' | 'showTurnChangedFiles' | 'expandedTools' | 'followUpBehavior' | 'terminalQuickKeys' | 'fileEditorKeymap' | 'persistDraft' | 'inputSpellcheck' | 'enterToSend' | 'tabletUiMode' | 'reportUsage' | 'expandedEditorToolbar' | 'autoSaveEnabled';
 
 const WINDOW_CONTROLS_POSITION_OPTIONS: Array<{ id: DesktopWindowControlsPosition; labelKey: string }> = [
     { id: 'left', labelKey: 'settings.openchamber.desktopNetwork.option.windowControlsLeft' },
@@ -370,6 +371,10 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const setFollowUpBehavior = useMessageQueueStore(state => state.setFollowUpBehavior);
     const persistChatDraft = useUIStore(state => state.persistChatDraft);
     const setPersistChatDraft = useUIStore(state => state.setPersistChatDraft);
+    const enterToSend = useUIStore(state => state.enterToSend);
+    const setEnterToSend = useUIStore(state => state.setEnterToSend);
+    const tabletUiMode = useUIStore(state => state.tabletUiMode);
+    const setTabletUiMode = useUIStore(state => state.setTabletUiMode);
     const inputSpellcheckEnabled = useUIStore(state => state.inputSpellcheckEnabled);
     const setInputSpellcheckEnabled = useUIStore(state => state.setInputSpellcheckEnabled);
     const showToolFileIcons = useUIStore(state => state.showToolFileIcons);
@@ -545,6 +550,16 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         setInputSpellcheckEnabled(enabled);
         void updateDesktopSettings({ inputSpellcheckEnabled: enabled });
     }, [setInputSpellcheckEnabled]);
+
+    const handleEnterToSendChange = React.useCallback((enabled: boolean) => {
+        setEnterToSend(enabled);
+        void updateDesktopSettings({ enterToSend: enabled });
+    }, [setEnterToSend]);
+
+    const handleTabletUiModeChange = React.useCallback((mode: 'auto' | 'mobile' | 'desktop') => {
+        setTabletUiMode(mode);
+        void updateDesktopSettings({ tabletUiMode: mode });
+    }, [setTabletUiMode]);
 
     const handleChatRenderModeChange = React.useCallback((mode: 'sorted' | 'live') => {
         setChatRenderMode(mode);
@@ -2036,12 +2051,23 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                 </SettingsSection>
                                 )}
 
-                                {(shouldShow('persistDraft') || (!isMobile && shouldShow('inputSpellcheck'))) && (
+                                {(shouldShow('persistDraft') || (!isMobile && shouldShow('inputSpellcheck')) || shouldShow('enterToSend')) && (
                                 <SettingsSection
                                     title={t('settings.openchamber.visual.section.composer')}
                                     settingsItem="chat.composer"
                                     contentClassName={SETTINGS_OPTION_STACK_CLASS}
                                 >
+                                {shouldShow('enterToSend') && (
+                                    <SettingsCheckboxRow
+                                        checked={enterToSend}
+                                        onChange={handleEnterToSendChange}
+                                        label={t('settings.openchamber.visual.field.enterToSend')}
+                                        info={t('settings.openchamber.visual.field.enterToSendHint')}
+                                        ariaLabel={t('settings.openchamber.visual.field.enterToSendAria')}
+                                        settingsItem="chat.enter-to-send"
+                                    />
+                                )}
+
                                 {shouldShow('persistDraft') && (
                                     <SettingsCheckboxRow
                                         checked={persistChatDraft}
@@ -2066,6 +2092,32 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                             </>
                         )}
                     </>
+                )}
+
+                {shouldShow('tabletUiMode') && isMobileSurfaceRuntime() && (
+                <SettingsSection
+                    title={t('settings.openchamber.visual.section.tablet')}
+                    info={t('settings.openchamber.visual.section.tabletHint')}
+                    settingsItem="tablet.ui-mode"
+                    contentClassName={SETTINGS_OPTION_STACK_CLASS}
+                >
+                    <SettingsRadioGroup aria-label={t('settings.openchamber.visual.section.tablet')}>
+                        {([
+                            ['auto', 'settings.openchamber.visual.field.tabletUiMode.auto', 'settings.openchamber.visual.field.tabletUiMode.autoDesc'],
+                            ['mobile', 'settings.openchamber.visual.field.tabletUiMode.mobile', 'settings.openchamber.visual.field.tabletUiMode.mobileDesc'],
+                            ['desktop', 'settings.openchamber.visual.field.tabletUiMode.desktop', 'settings.openchamber.visual.field.tabletUiMode.desktopDesc'],
+                        ] as const).map(([mode, labelKey, descriptionKey]) => (
+                            <SettingsRadioOption
+                                key={mode}
+                                selected={tabletUiMode === mode}
+                                onSelect={() => handleTabletUiModeChange(mode)}
+                                label={t(labelKey)}
+                                description={t(descriptionKey)}
+                                ariaLabel={t(labelKey)}
+                            />
+                        ))}
+                    </SettingsRadioGroup>
+                </SettingsSection>
                 )}
 
                 {/* --- Privacy & Data --- */}

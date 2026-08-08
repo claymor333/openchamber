@@ -335,6 +335,18 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['draft', 'message'],
   },
   {
+    id: 'chat.enter-to-send',
+    page: 'chat',
+    titleKey: 'settings.openchamber.visual.field.enterToSend',
+    keywords: ['enter', 'return', 'send', 'newline', 'shift'],
+  },
+  {
+    id: 'tablet.ui-mode',
+    page: 'appearance',
+    titleKey: 'settings.openchamber.visual.section.tablet',
+    keywords: ['tablet', 'ipad', 'layout', 'mobile ui', 'desktop ui', 'phone', 'shell'],
+  },
+  {
     id: 'chat.composer',
     page: 'chat',
     titleKey: 'settings.openchamber.visual.section.composer',

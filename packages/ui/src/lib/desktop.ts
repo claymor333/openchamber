@@ -2,6 +2,7 @@ import type { ProjectEntry, RuntimeAPIs, TerminalShell } from '@/lib/api/types';
 import { getInjectedBootOutcome } from '@/lib/desktopBoot';
 import type { DraftStarterRef } from '@/lib/draftStarters';
 import type { MobileKeyboardMode } from '@/lib/mobileKeyboardMode';
+import type { TabletUiMode } from '@/lib/device';
 import { getRuntimeApiBaseUrl, getRuntimeKey } from '@/lib/runtime-switch';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 
@@ -151,6 +152,8 @@ export type DesktopSettings = {
   desktopWindowControlsPosition?: DesktopWindowControlsPosition;
   desktopWindowControlsStyle?: DesktopWindowControlsStyle;
   inputSpellcheckEnabled?: boolean;
+  enterToSend?: boolean;
+  tabletUiMode?: TabletUiMode;
   showOpenCodeUpdateNotifications?: boolean;
   agentControlToolEnabled?: boolean;
   optimizeSystemPrompt?: boolean;

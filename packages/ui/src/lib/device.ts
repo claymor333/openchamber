@@ -255,11 +255,14 @@ const startDeviceInfoSource = (): (() => void) => {
     : null;
   const cleanupPointer = attachMediaQueryListener(pointerQuery, scheduleDeviceInfoUpdate);
   const cleanupHover = attachMediaQueryListener(hoverQuery, scheduleDeviceInfoUpdate);
+  // The tablet-layout preference can flip the device class (and shell) live.
+  const cleanupTabletUiMode = subscribeTabletUiModePreference(scheduleDeviceInfoUpdate);
 
   return () => {
     window.removeEventListener('resize', scheduleDeviceInfoUpdate);
     cleanupPointer();
     cleanupHover();
+    cleanupTabletUiMode();
     if (deviceInfoFrameId !== undefined) {
       window.cancelAnimationFrame(deviceInfoFrameId);
       deviceInfoFrameId = undefined;
@@ -401,6 +404,32 @@ export interface TabletLayout {
   roomyForPanels: boolean;
 }
 
+export type TabletUiMode = 'auto' | 'mobile' | 'desktop';
+
+/**
+ * The user's tablet-layout preference, kept in a tiny module-level store so
+ * the (deliberately dependency-light) device layer can read it without pulling
+ * in the settings store. `useUIStore.setTabletUiMode` writes here too; the
+ * persisted value is applied on startup through that setter.
+ */
+let tabletUiModePreference: TabletUiMode = 'auto';
+const tabletUiModePreferenceListeners = new Set<() => void>();
+
+export const getTabletUiModePreference = (): TabletUiMode => tabletUiModePreference;
+export const setTabletUiModePreference = (mode: TabletUiMode): void => {
+  if (mode === tabletUiModePreference) return;
+  tabletUiModePreference = mode;
+  for (const listener of tabletUiModePreferenceListeners) {
+    listener();
+  }
+};
+export const subscribeTabletUiModePreference = (listener: () => void): (() => void) => {
+  tabletUiModePreferenceListeners.add(listener);
+  return () => {
+    tabletUiModePreferenceListeners.delete(listener);
+  };
+};
+
 export const readTabletLayout = (): TabletLayout => {
   if (typeof window === 'undefined') return { enabled: false, roomyForPanels: false };
   const width = window.innerWidth;
@@ -419,7 +448,12 @@ export const readTabletLayout = (): TabletLayout => {
   // iPads answer this on identity too: iPadOS reports odd viewports in Slide
   // Over / Split View, and a device we KNOW is a tablet should not flip to the
   // phone layout because it was given a narrow slice.
-  const enabled = isIPadApp() || stableShortSide >= TABLET_LAYOUT_MIN_SHORT_SIDE_PX;
+  const tabletCapable = isIPadApp() || stableShortSide >= TABLET_LAYOUT_MIN_SHORT_SIDE_PX;
+  const enabled = tabletUiModePreference === 'mobile'
+    ? false
+    : tabletUiModePreference === 'desktop'
+      ? true
+      : tabletCapable;
   return {
     enabled,
     roomyForPanels: enabled && width > height && width >= WORKSPACE_PANEL_MIN_WIDTH_PX,
@@ -458,9 +492,13 @@ export function useTabletLayout(): TabletLayout {
     window.addEventListener('resize', schedule);
     const orientationQuery = window.matchMedia?.('(orientation: landscape)') ?? null;
     const detachOrientation = attachMediaQueryListener(orientationQuery, schedule);
+    // The preference can change the decision live (Settings > Tablet), so the
+    // hook must re-evaluate when it does, not only on resize/fold.
+    const detachTabletUiMode = subscribeTabletUiModePreference(update);
     return () => {
       window.removeEventListener('resize', schedule);
       detachOrientation();
+      detachTabletUiMode();
       if (frame !== undefined) window.cancelAnimationFrame(frame);
     };
   }, []);

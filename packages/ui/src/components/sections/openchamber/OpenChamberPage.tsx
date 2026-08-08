@@ -174,6 +174,7 @@ const VisualSectionContent: React.FC = () => {
         'editorFontSize',
         'spacing',
         'inputBarOffset',
+        'tabletUiMode',
     ]} />;
 };
 
@@ -206,6 +207,7 @@ const ChatSectionContent: React.FC = () => {
                 'followUpBehavior',
                 'persistDraft',
                 'inputSpellcheck',
+                'enterToSend',
             ]}
         />
     );

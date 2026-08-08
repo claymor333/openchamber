@@ -382,6 +382,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     const setImagePreviewOpen = useUIStore((state) => state.setImagePreviewOpen);
     const inputBarOffset = useUIStore((state) => state.inputBarOffset);
     const persistChatDraft = useUIStore((state) => state.persistChatDraft);
+    const enterToSend = useUIStore((state) => state.enterToSend);
     const inputSpellcheckEnabled = useUIStore((state) => state.inputSpellcheckEnabled);
     const isExpandedInput = useUIStore((state) => state.isExpandedInput);
     const setExpandedInput = useUIStore((state) => state.setExpandedInput);
@@ -1533,8 +1534,11 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             return;
         }
 
-        // Handle Enter/Ctrl+Enter based on selected follow-up behavior.
-        if (e.key === 'Enter' && !e.shiftKey && (!isMobile || e.ctrlKey || e.metaKey)) {
+        // Handle Enter / Shift+Enter / Ctrl+Enter based on the "Enter to send"
+        // preference and the selected follow-up behavior. With Enter-to-send on,
+        // Enter sends and Shift+Enter inserts a newline; off, the two swap.
+        // Ctrl/Cmd+Enter always sends regardless.
+        if (e.key === 'Enter' && (e.ctrlKey || e.metaKey || (enterToSend ? !e.shiftKey : e.shiftKey))) {
             e.preventDefault();
 
             const isCtrlEnter = e.ctrlKey || e.metaKey;

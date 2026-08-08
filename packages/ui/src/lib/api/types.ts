@@ -657,6 +657,10 @@ export interface SettingsPayload {
   queueModeEnabled?: boolean;
   gitmojiEnabled?: boolean;
   inputSpellcheckEnabled?: boolean;
+  /** Enter sends in the composer (Shift+Enter newline); off flips the two. */
+  enterToSend?: boolean;
+  /** Tablet layout choice: auto (size heuristic), force mobile UI, or force desktop UI. */
+  tabletUiMode?: 'auto' | 'mobile' | 'desktop';
   showOpenCodeUpdateNotifications?: boolean;
   openCodeUpdateToastDismissedVersion?: string;
   showToolFileIcons?: boolean;

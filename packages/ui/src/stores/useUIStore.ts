@@ -11,6 +11,7 @@ import { getRuntimeKey } from '@/lib/runtime-switch';
 import type { TerminalShell } from '@/lib/api/types';
 import { useFilesViewTabsStore } from './useFilesViewTabsStore';
 import { isWindowsArm64 } from '@/lib/platform';
+import { setTabletUiModePreference, type TabletUiMode } from '@/lib/device';
 
 export type MainTab = 'chat' | 'plan' | 'git' | 'diff' | 'terminal' | 'files' | 'context' | 'diagram';
 export type PendingDiffScope = 'working' | 'staged' | 'turn';
@@ -689,6 +690,10 @@ interface UIStore {
 
   showTerminalQuickKeysOnDesktop: boolean;
   persistChatDraft: boolean;
+  /** Enter sends (Shift+Enter newline); off means Enter newline, Shift+Enter sends. */
+  enterToSend: boolean;
+  /** Tablet layout choice: auto (size heuristic), force the mobile UI, or force the desktop UI. */
+  tabletUiMode: TabletUiMode;
   showOpenCodeUpdateNotifications: boolean;
   agentControlToolEnabled: boolean;
   inputSpellcheckEnabled: boolean;
@@ -853,6 +858,8 @@ interface UIStore {
   setSummaryLength: (value: number) => void;
   setMaxLastMessageLength: (value: number) => void;
   setPersistChatDraft: (value: boolean) => void;
+  setEnterToSend: (value: boolean) => void;
+  setTabletUiMode: (mode: TabletUiMode) => void;
   setShowOpenCodeUpdateNotifications: (value: boolean) => void;
   setAgentControlToolEnabled: (value: boolean) => void;
   setInputSpellcheckEnabled: (value: boolean) => void;
@@ -1004,6 +1011,8 @@ export const useUIStore = create<UIStore>()(
 
         showTerminalQuickKeysOnDesktop: false,
         persistChatDraft: true,
+        enterToSend: true,
+        tabletUiMode: 'auto',
         showOpenCodeUpdateNotifications: !isWindowsArm64(),
         agentControlToolEnabled: true,
         inputSpellcheckEnabled: false,
@@ -2159,6 +2168,16 @@ export const useUIStore = create<UIStore>()(
         setPersistChatDraft: (value) => {
           set({ persistChatDraft: value });
         },
+        setEnterToSend: (value) => {
+          set({ enterToSend: value });
+        },
+        setTabletUiMode: (mode) => {
+          set({ tabletUiMode: mode });
+          // The device layer reads this preference module directly (it cannot
+          // depend on the store); keep the two in sync so the shell, the CSS
+          // device classes and useTabletLayout all re-evaluate live.
+          setTabletUiModePreference(mode);
+        },
         setShowOpenCodeUpdateNotifications: (value) => {
           set({ showOpenCodeUpdateNotifications: value });
         },
@@ -2475,6 +2494,8 @@ export const useUIStore = create<UIStore>()(
           summaryLength: state.summaryLength,
           maxLastMessageLength: state.maxLastMessageLength,
           persistChatDraft: state.persistChatDraft,
+          enterToSend: state.enterToSend,
+          tabletUiMode: state.tabletUiMode,
           showOpenCodeUpdateNotifications: state.showOpenCodeUpdateNotifications,
           agentControlToolEnabled: state.agentControlToolEnabled,
           inputSpellcheckEnabled: state.inputSpellcheckEnabled,
