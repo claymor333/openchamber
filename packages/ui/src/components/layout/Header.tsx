@@ -1756,7 +1756,7 @@ export const Header: React.FC<HeaderProps> = ({
     if (isDesktopApp && isMacPlatform && !isDesktopWindowFullscreen) {
       return '5.5rem';
     }
-    if (isTabletStandalonePwa) {
+    if (isTabletStandalonePwa && !isCapacitorApp()) {
       return 'max(calc(0.75rem + var(--oc-wco-left-inset, 0px)), 5.5rem)';
     }
     if ((!isDesktopApp || usesFramelessChrome) && !isVSCode) {

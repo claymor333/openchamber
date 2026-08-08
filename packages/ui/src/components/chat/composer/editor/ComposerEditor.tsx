@@ -56,6 +56,10 @@ export interface ComposerChange {
 export interface ComposerEditorHandle {
     focus(options?: { preventScroll?: boolean }): void;
     blur(): void;
+    /** Take the editor out of the focusable path (or restore it). Used to
+        shield the composer from the browser's native focus hand-off during a
+        session switch, which would otherwise raise the soft keyboard. */
+    setFocusable(focusable: boolean): void;
     isFocused(): boolean;
     getValue(): string;
     getSelection(): ComposerSelection;
@@ -476,6 +480,14 @@ export const ComposerEditor = React.forwardRef<ComposerEditorHandle, ComposerEdi
             },
             blur() {
                 viewRef.current?.contentDOM.blur();
+            },
+            setFocusable(focusable) {
+                const view = viewRef.current;
+                if (!view) return;
+                // tabindex -1 keeps the element out of the browser's focus
+                // restoration/navigation set while still allowing an explicit
+                // focus() (used by a user tap after the shield drops).
+                view.contentDOM.tabIndex = focusable ? 0 : -1;
             },
             isFocused() {
                 return viewRef.current?.hasFocus ?? false;

@@ -71,6 +71,49 @@ export function SidebarHeader(props: Props): React.ReactNode {
   const stickyZoneHeaders = useSessionDisplayStore((state) => state.stickyZoneHeaders);
   const toggleStickyZoneHeaders = useSessionDisplayStore((state) => state.toggleStickyZoneHeaders);
 
+  // Dragging the sidebar very narrow clips the rightmost toolbar control (the
+  // sort/display-mode menu) behind the sidebar's overflow-hidden. Hide it only
+  // when it actually overflows — a fixed width threshold can't serve both the
+  // 24px desktop buttons and the 36px touch buttons — and bring it back once
+  // the row fits again.
+  const toolbarRowRef = React.useRef<HTMLDivElement | null>(null);
+  const sortMenuWrapRef = React.useRef<HTMLDivElement | null>(null);
+  const sortMenuWidthRef = React.useRef(0);
+  const [sortMenuOverflow, setSortMenuOverflow] = React.useState(false);
+  const sortMenuOverflowRef = React.useRef(false);
+  React.useLayoutEffect(() => {
+    const row = toolbarRowRef.current;
+    const sortWrap = sortMenuWrapRef.current;
+    if (!row || !sortWrap) return;
+    const measure = () => {
+      const hidden = sortMenuOverflowRef.current;
+      if (!hidden && sortWrap.offsetWidth > 0) {
+        sortMenuWidthRef.current = sortWrap.offsetWidth;
+      }
+      // Minimum width the row needs: both clusters plus the fixed gap between
+      // them. The right cluster's rect excludes the hidden sort menu, so add
+      // its cached width back when hidden to decide whether it would fit.
+      let content = 0;
+      const childCount = row.children.length;
+      for (let i = 0; i < childCount; i++) {
+        content += (row.children[i] as HTMLElement).getBoundingClientRect().width;
+      }
+      if (hidden && sortMenuWidthRef.current > 0) {
+        content += sortMenuWidthRef.current;
+      }
+      content += (childCount - 1) * 8; // gap-2 between the two clusters
+      const next = content > row.clientWidth + 1;
+      if (next !== sortMenuOverflowRef.current) {
+        sortMenuOverflowRef.current = next;
+        setSortMenuOverflow(next);
+      }
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(row);
+    return () => observer.disconnect();
+  }, []);
+
   if (hideDirectoryControls) {
     return null;
   }
@@ -78,7 +121,7 @@ export function SidebarHeader(props: Props): React.ReactNode {
   return (
     <div className="select-none flex-shrink-0 px-2.5 py-1">
       <div className="flex h-auto min-h-8 flex-col gap-1">
-        <div className="flex h-8 items-center justify-between gap-2">
+        <div className="flex h-8 items-center justify-between gap-2" ref={toolbarRowRef}>
           {/* Quiet toolbar under the New-session CTA: project/surface entry
               points at left, list controls at right. ml-[3px] compensates the
               icon inset inside the 24px buttons so the first glyph lines up
@@ -179,82 +222,84 @@ export function SidebarHeader(props: Props): React.ReactNode {
               </TooltipContent>
             </Tooltip>
 
-            <DropdownMenu>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <DropdownMenuTrigger asChild>
-                    <button
-                      type="button"
-                      className={cn(headerActionButtonClass, 'text-muted-foreground hover:text-foreground hover:bg-transparent')}
-                      aria-label={t('sessions.sidebar.header.displayMode.label')}
+            <div ref={sortMenuWrapRef} className={sortMenuOverflow ? 'hidden' : undefined}>
+              <DropdownMenu>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <DropdownMenuTrigger asChild>
+                      <button
+                        type="button"
+                        className={cn(headerActionButtonClass, 'text-muted-foreground hover:text-foreground hover:bg-transparent')}
+                        aria-label={t('sessions.sidebar.header.displayMode.label')}
+                      >
+                        <Icon name="equalizer-2" className={headerActionIconClass} />
+                      </button>
+                    </DropdownMenuTrigger>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom" sideOffset={4}><p>{t('sessions.sidebar.header.displayMode.label')}</p></TooltipContent>
+                </Tooltip>
+                <DropdownMenuContent align="end" className="min-w-[180px]">
+                  <DropdownMenuLabel>{t('sessions.sidebar.header.actions.sortProjects')}</DropdownMenuLabel>
+                  {([
+                    ['manual', 'sessions.sidebar.header.projectSort.manual'],
+                    ['a-z', 'sessions.sidebar.header.projectSort.aToZ'],
+                    ['z-a', 'sessions.sidebar.header.projectSort.zToA'],
+                    ['date-added', 'sessions.sidebar.header.projectSort.dateAdded'],
+                    ['recent', 'sessions.sidebar.header.projectSort.recent'],
+                  ] as const).map(([order, labelKey]) => (
+                    <DropdownMenuItem
+                      key={order}
+                      onClick={() => setProjectSortOrder(order)}
+                      className="flex items-center justify-between"
                     >
-                      <Icon name="equalizer-2" className={headerActionIconClass} />
-                    </button>
-                  </DropdownMenuTrigger>
-                </TooltipTrigger>
-                <TooltipContent side="bottom" sideOffset={4}><p>{t('sessions.sidebar.header.displayMode.label')}</p></TooltipContent>
-              </Tooltip>
-              <DropdownMenuContent align="end" className="min-w-[180px]">
-                <DropdownMenuLabel>{t('sessions.sidebar.header.actions.sortProjects')}</DropdownMenuLabel>
-                {([
-                  ['manual', 'sessions.sidebar.header.projectSort.manual'],
-                  ['a-z', 'sessions.sidebar.header.projectSort.aToZ'],
-                  ['z-a', 'sessions.sidebar.header.projectSort.zToA'],
-                  ['date-added', 'sessions.sidebar.header.projectSort.dateAdded'],
-                  ['recent', 'sessions.sidebar.header.projectSort.recent'],
-                ] as const).map(([order, labelKey]) => (
+                      <span>{t(labelKey)}</span>
+                      {projectSortOrder === order ? <Icon name="check" className="h-4 w-4 text-primary" /> : null}
+                    </DropdownMenuItem>
+                  ))}
+                  <DropdownMenuSeparator />
+                  <DropdownMenuLabel>{t('sessions.sidebar.header.grouping.label')}</DropdownMenuLabel>
+                  {([
+                    ['by-worktree', 'sessions.sidebar.header.grouping.byWorktree'],
+                    ['flat', 'sessions.sidebar.header.grouping.flat'],
+                  ] as const).map(([mode, labelKey]) => (
+                    <DropdownMenuItem
+                      key={mode}
+                      onClick={() => setSessionGroupingMode(mode)}
+                      className="flex items-center justify-between"
+                    >
+                      <span>{t(labelKey)}</span>
+                      {sessionGroupingMode === mode ? <Icon name="check" className="h-4 w-4 text-primary" /> : null}
+                    </DropdownMenuItem>
+                  ))}
+                  <DropdownMenuSeparator />
+                  {showRecentControls ? (
+                    <DropdownMenuItem
+                      onClick={toggleRecentSection}
+                      className="flex items-center justify-between"
+                    >
+                      <span>{t('sessions.sidebar.header.displayMode.showRecent')}</span>
+                      {showRecentSection ? <Icon name="check" className="h-4 w-4 text-primary" /> : null}
+                    </DropdownMenuItem>
+                  ) : null}
                   <DropdownMenuItem
-                    key={order}
-                    onClick={() => setProjectSortOrder(order)}
+                    onClick={toggleStickyZoneHeaders}
                     className="flex items-center justify-between"
                   >
-                    <span>{t(labelKey)}</span>
-                    {projectSortOrder === order ? <Icon name="check" className="h-4 w-4 text-primary" /> : null}
+                    <span>{t('sessions.sidebar.header.displayMode.stickyHeaders')}</span>
+                    {stickyZoneHeaders ? <Icon name="check" className="h-4 w-4 text-primary" /> : null}
                   </DropdownMenuItem>
-                ))}
-                <DropdownMenuSeparator />
-                <DropdownMenuLabel>{t('sessions.sidebar.header.grouping.label')}</DropdownMenuLabel>
-                {([
-                  ['by-worktree', 'sessions.sidebar.header.grouping.byWorktree'],
-                  ['flat', 'sessions.sidebar.header.grouping.flat'],
-                ] as const).map(([mode, labelKey]) => (
-                  <DropdownMenuItem
-                    key={mode}
-                    onClick={() => setSessionGroupingMode(mode)}
-                    className="flex items-center justify-between"
-                  >
-                    <span>{t(labelKey)}</span>
-                    {sessionGroupingMode === mode ? <Icon name="check" className="h-4 w-4 text-primary" /> : null}
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={collapseAllProjects} className="flex items-center gap-2">
+                    <Icon name="contract-up-down" className="h-4 w-4" />
+                    <span>{t('sessions.sidebar.header.displayMode.collapseAll')}</span>
                   </DropdownMenuItem>
-                ))}
-                <DropdownMenuSeparator />
-                {showRecentControls ? (
-                  <DropdownMenuItem
-                    onClick={toggleRecentSection}
-                    className="flex items-center justify-between"
-                  >
-                    <span>{t('sessions.sidebar.header.displayMode.showRecent')}</span>
-                    {showRecentSection ? <Icon name="check" className="h-4 w-4 text-primary" /> : null}
+                  <DropdownMenuItem onClick={expandAllProjects} className="flex items-center gap-2">
+                    <Icon name="expand-up-down" className="h-4 w-4" />
+                    <span>{t('sessions.sidebar.header.displayMode.expandAll')}</span>
                   </DropdownMenuItem>
-                ) : null}
-                <DropdownMenuItem
-                  onClick={toggleStickyZoneHeaders}
-                  className="flex items-center justify-between"
-                >
-                  <span>{t('sessions.sidebar.header.displayMode.stickyHeaders')}</span>
-                  {stickyZoneHeaders ? <Icon name="check" className="h-4 w-4 text-primary" /> : null}
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={collapseAllProjects} className="flex items-center gap-2">
-                  <Icon name="contract-up-down" className="h-4 w-4" />
-                  <span>{t('sessions.sidebar.header.displayMode.collapseAll')}</span>
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={expandAllProjects} className="flex items-center gap-2">
-                  <Icon name="expand-up-down" className="h-4 w-4" />
-                  <span>{t('sessions.sidebar.header.displayMode.expandAll')}</span>
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
           </div>
         </div>
 

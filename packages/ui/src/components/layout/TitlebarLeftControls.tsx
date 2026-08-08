@@ -82,7 +82,14 @@ export const TitlebarLeftControls: React.FC = () => {
     <div
       className="app-region-no-drag absolute left-0 top-0 z-30 flex select-none items-center pr-2"
       style={{
-        height: 'var(--oc-header-height, 3rem)',
+        // The desktop chrome assumes an OS title bar, which a native tablet
+        // has no equivalent of: the header height includes the status-bar
+        // safe area, so centering the controls in the full height leaves them
+        // stranded high above the sidebar's "New session" row with an empty
+        // band between. Anchor the cluster below the safe area and span only
+        // the non-safe header height, aligning it with the header content.
+        top: 'var(--oc-safe-area-top, 0px)',
+        height: 'calc(var(--oc-header-height, 3rem) - var(--oc-safe-area-top, 0px))',
         paddingLeft: 'var(--oc-titlebar-left-inset, 0.75rem)',
       }}
     >

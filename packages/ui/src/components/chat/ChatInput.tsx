@@ -54,6 +54,7 @@ import { toast } from '@/components/ui';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { useTabletLayout } from '@/lib/device';
 import { useHardwareKeyboard } from '@/lib/hardwareKeyboard';
+import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
 import { isIMECompositionEvent } from '@/lib/ime';
 import { getCycledPrimaryAgentName, type MobileControlsPanel } from './mobileControlsUtils';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
@@ -264,6 +265,23 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     const [mobileDraftPickerQuery, setMobileDraftPickerQuery] = React.useState('');
     // Message history navigation state (up/down arrow to recall previous messages)
     const composerRef = React.useRef<ComposerEditorHandle>(null);
+    // Focus shield state (armed on launch / existing-session switch on the
+    // tablet surface): while armed, the composer is kept out of the browser's
+    // native focus hand-off so the soft keyboard cannot rise on session open.
+    // Declared before setComposerRef because that ref callback reads the flag
+    // when the editor (re)mounts.
+    const composerFocusShieldRef = React.useRef(false);
+    const composerUserTapRef = React.useRef(false);
+    const shieldTimerRef = React.useRef<number | null>(null);
+    const setComposerRef = React.useCallback((instance: ComposerEditorHandle | null) => {
+        composerRef.current = instance;
+        // The editor can mount after the shield has already been armed (session
+        // hydration finishing after the switch) — keep it out of the focus
+        // path in that case, or the browser will still target it.
+        if (instance && composerFocusShieldRef.current) {
+            instance.setFocusable(false);
+        }
+    }, []);
     // The mobile composer swaps between the collapsed pill and the full
     // composer, which unmounts the editor. Building a CodeMirror view is far
     // from free, and it would happen inside the tap that expands the pill —
@@ -358,6 +376,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     const isMobile = useUIStore((state) => state.isMobile);
     const hasHardwareKeyboard = useHardwareKeyboard();
     const { enabled: isTabletLayout } = useTabletLayout();
+    // The tablet-desktop surface: the native app's wide layout (not a large
+    // desktop window, where readTabletLayout also returns enabled).
+    const tabletSurface = isMobileSurfaceRuntime() && isTabletLayout;
     const setImagePreviewOpen = useUIStore((state) => state.setImagePreviewOpen);
     const inputBarOffset = useUIStore((state) => state.inputBarOffset);
     const persistChatDraft = useUIStore((state) => state.persistChatDraft);
@@ -1973,14 +1994,89 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         }
     }, [isMobile]);
 
-    // Switching to an existing session must not pop the soft keyboard: the
-    // composer may be focused from a previous interaction, and leaving it
-    // focused while navigating re-raises the OSK. Blur it on an existing-
-    // session switch so the keyboard stays down until the user taps the input.
-    // New-session drafts keep their focus (that's the "start typing" moment).
-    // The blur runs in a rAF to outrun the draft-restore rAF (which would
-    // otherwise re-focus after the blur) and also blurs whatever is actually
-    // focused, since CodeMirror's own blur may not release the input on Android.
+    // Switching to an existing session must not pop the soft keyboard. The
+    // composer can receive focus during the switch even though nothing calls
+    // focus(): a session-row button focused by the tap is removed while the
+    // new composer is live, and the browser hands the orphaned focus to the
+    // editor. Blurring after the fact only hides a keyboard that has already
+    // started rising, so on the tablet surface we SHIELD the composer for a
+    // short window instead: it is taken out of the focusable path
+    // (tabIndex -1) and any focus that still lands is cancelled synchronously
+    // in a capture-phase focusin, before the WebView opens its input
+    // connection. A real tap on the composer drops the shield, so the user can
+    // always start typing. New-session drafts keep their focus ("start
+    // typing"). Desktop keeps the plain blur (no soft keyboard involved).
+    const endComposerFocusShield = React.useCallback(() => {
+        composerFocusShieldRef.current = false;
+        if (shieldTimerRef.current !== null) {
+            window.clearTimeout(shieldTimerRef.current);
+            shieldTimerRef.current = null;
+        }
+        composerRef.current?.setFocusable(true);
+    }, []);
+    const armComposerFocusShield = React.useCallback(() => {
+        composerFocusShieldRef.current = true;
+        composerRef.current?.setFocusable(false);
+        // Belt and suspenders: if the composer somehow held focus from the
+        // previous interaction, release it now rather than wait for a focusin.
+        composerRef.current?.blur();
+        if (document.activeElement instanceof HTMLElement) {
+            document.activeElement.blur();
+        }
+        if (shieldTimerRef.current !== null) window.clearTimeout(shieldTimerRef.current);
+        shieldTimerRef.current = window.setTimeout(endComposerFocusShield, 900);
+    }, [endComposerFocusShield]);
+    const prevSessionForShieldRef = React.useRef(currentSessionId);
+    const mountedForShieldRef = React.useRef(false);
+    React.useEffect(() => {
+        if (!tabletSurface) return;
+        const justMounted = !mountedForShieldRef.current;
+        mountedForShieldRef.current = true;
+        const previous = prevSessionForShieldRef.current;
+        prevSessionForShieldRef.current = currentSessionId;
+        if (currentSessionId && !newSessionDraftOpen && (justMounted || currentSessionId !== previous)) {
+            armComposerFocusShield();
+        }
+    }, [tabletSurface, currentSessionId, newSessionDraftOpen, armComposerFocusShield]);
+
+    React.useEffect(() => {
+        if (!tabletSurface) return;
+        const handlePointerDown = (event: PointerEvent | MouseEvent) => {
+            const target = event.target;
+            if (!(target instanceof Element)) return;
+            if (target.closest('[data-chat-input]')) {
+                composerUserTapRef.current = true;
+                endComposerFocusShield();
+            }
+        };
+        const handleFocusIn = (event: FocusEvent) => {
+            const target = event.target;
+            if (!(target instanceof HTMLElement) || !target.closest?.('.cm-editor')) return;
+            if (composerUserTapRef.current) {
+                // The user tapped the composer to type — this focus is wanted.
+                composerUserTapRef.current = false;
+                return;
+            }
+            if (!composerFocusShieldRef.current) return;
+            // Cancelled before the WebView can open its input connection.
+            target.blur();
+            if (document.activeElement instanceof HTMLElement) {
+                document.activeElement.blur();
+            }
+        };
+        document.addEventListener('pointerdown', handlePointerDown, true);
+        document.addEventListener('focusin', handleFocusIn, true);
+        return () => {
+            document.removeEventListener('pointerdown', handlePointerDown, true);
+            document.removeEventListener('focusin', handleFocusIn, true);
+            if (shieldTimerRef.current !== null) window.clearTimeout(shieldTimerRef.current);
+        };
+    }, [tabletSurface, endComposerFocusShield]);
+
+    // The desktop/phone blur that predates the tablet shield: on a real
+    // desktop the composer may hold focus from a previous interaction, so blur
+    // it on an existing-session switch to keep focus neutral. Skipped on the
+    // tablet surface, where the shield above owns this behaviour.
     const prevSessionForBlurRef = React.useRef(currentSessionId);
     const mountedForBlurRef = React.useRef(false);
     const blurTimersRef = React.useRef<number[]>([]);
@@ -1990,16 +2086,11 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             blurTimersRef.current = [];
         };
         clearBlurTimers();
-        if (isMobile) return;
+        if (isMobile || tabletSurface) return;
         const justMounted = !mountedForBlurRef.current;
         mountedForBlurRef.current = true;
         const previous = prevSessionForBlurRef.current;
         prevSessionForBlurRef.current = currentSessionId;
-        // Blur on mount (the app restores the last session and would otherwise
-        // leave the composer focused, raising the OSK on launch) and on any
-        // existing-session switch. New-session drafts keep their focus. Multiple
-        // staggered blurs beat any late re-focus (draft restore rAF, editor
-        // creation focus) that lands shortly after the switch.
         const shouldBlur =
             currentSessionId && !newSessionDraftOpen && (justMounted || currentSessionId !== previous);
         if (shouldBlur) {
@@ -2013,7 +2104,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             blurTimersRef.current = [200, 500].map((ms) => window.setTimeout(doBlur, ms));
         }
         return clearBlurTimers;
-    }, [currentSessionId, isMobile, newSessionDraftOpen]);
+    }, [currentSessionId, isMobile, newSessionDraftOpen, tabletSurface]);
 
     React.useEffect(() => {
         if (abortPromptSessionId && abortPromptSessionId !== currentSessionId) {
@@ -2693,7 +2784,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                 : undefined}
                         >
                             <ComposerEditor
-                                ref={composerRef}
+                                ref={setComposerRef}
                                 viewStore={composerViewStore}
                                 data-testid="chat-input"
                                 value={message}
