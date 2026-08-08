@@ -7,6 +7,16 @@ export const isMissingUpdateFeedError = (error) => {
 };
 
 export const checkForDesktopUpdate = async ({ autoUpdater, currentVersion, pendingUpdate, compareVersions }) => {
+  // Dev runs have no auto-updater (see main.mjs); there is nothing to check.
+  if (!autoUpdater) {
+    return {
+      available: false,
+      updateInfo: null,
+      updateResult: null,
+      nextVersion: currentVersion,
+      pendingUpdate: null,
+    };
+  }
   let updateResult;
   try {
     updateResult = await autoUpdater.checkForUpdates();

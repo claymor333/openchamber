@@ -238,7 +238,10 @@ const INSTALLED_APPS_CACHE_TTL_SECS = 60 * 60 * 24;
 const INSTALLED_APPS_CACHE_FILE = 'discovered-apps.json';
 const LINUX_DESKTOP_ENTRIES_CACHE_TTL_MS = 30_000;
 const OPENCODE_SHUTDOWN_GRACE_MS = 100;
-const { autoUpdater } = updaterPkg;
+// Instantiating the auto-updater in dev rejects the unpackaged app's non-semver
+// version and crashes Electron before the window opens. setupAutoUpdater already
+// skips dev; keep the object itself lazy too.
+const autoUpdater = app.isPackaged ? updaterPkg.autoUpdater : null;
 
 const state = {
   serverHandle: null,
