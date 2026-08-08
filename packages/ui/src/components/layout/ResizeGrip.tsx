@@ -9,19 +9,18 @@ const HIDE_DELAY_MS = 1600;
  * Tap-to-reveal drag grip for window borders.
  *
  * Hidden at rest. On tap it expands from the center of the border into a
- * themed pill that overhangs both adjacent panes, with two bars (a "||"
- * rotated for the border's orientation) as the grab affordance. The reveal
- * springs in with a slight overshoot; while a drag is active the bars breathe
- * gently to signal the live gesture. It stays up for the duration of the drag
- * and lingers briefly after release before hiding again, so a tap that reveals
- * the handle doesn't blink it away.
+ * themed capsule that overhangs both adjacent panes, with three grip bars (a
+ * hamburger, rotated for the border's orientation) as the grab affordance —
+ * matching the reference grip on the Catppuccin theme. The reveal springs in
+ * with a slight overshoot; while a drag is active the bars breathe gently to
+ * signal the live gesture. It stays up for the duration of the drag and
+ * lingers briefly after release before hiding again, so a tap that reveals the
+ * handle doesn't blink it away.
  *
  * Pairs with the full-height resize separator: the separator owns the gesture
  * and the widened touch hit-area (the ::before in index.css), this renders the
- * affordance. Uses `bg-muted-foreground/40` so it stays visible in every theme:
- * muted-foreground is a readable mid-gray by contract, while surface tokens
- * like `--muted`/`--popover` are near-black in many dark themes and blend into
- * the panel background.
+ * affordance. Uses the theme's surface + border + muted-foreground tokens so it
+ * reads correctly in Catppuccin and every other theme.
  */
 export const ResizeGrip: React.FC<{
   /** True while a drag is in progress — keeps the pill up + pulses the bars. */
@@ -46,6 +45,11 @@ export const ResizeGrip: React.FC<{
 
   const show = active || linger;
 
+  // Three grip bars. For a vertical border the capsule is tall and the bars run
+  // horizontally (a hamburger); for a horizontal border the capsule is wide and
+  // the bars run vertically.
+  const bars = [0, 1, 2];
+
   return (
     <div
       aria-hidden
@@ -56,26 +60,22 @@ export const ResizeGrip: React.FC<{
     >
       <div
         className={cn(
-          'flex items-center justify-center rounded-full border border-border/80 bg-muted-foreground/40 shadow-md',
+          'flex items-center justify-center rounded-full border border-border/80 bg-popover/80 shadow-md',
           'transition-[transform,opacity] duration-200 ease-[cubic-bezier(0.34,1.56,0.64,1)]',
-          isVertical ? 'h-14 w-8 gap-1' : 'h-8 w-14 gap-1',
+          isVertical ? 'h-14 w-9 flex-col gap-[6px]' : 'h-9 w-14 gap-[6px]',
           show ? 'scale-100 opacity-100' : 'scale-0 opacity-0',
         )}
       >
-        <span
-          className={cn(
-            'block rounded-full bg-foreground/80',
-            isVertical ? 'h-6 w-[3px]' : 'h-[3px] w-6',
-            active && 'animate-oc-grip-breathe',
-          )}
-        />
-        <span
-          className={cn(
-            'block rounded-full bg-foreground/80',
-            isVertical ? 'h-6 w-[3px]' : 'h-[3px] w-6',
-            active && 'animate-oc-grip-breathe',
-          )}
-        />
+        {bars.map((i) => (
+          <span
+            key={i}
+            className={cn(
+              'block rounded-full bg-muted-foreground/80',
+              isVertical ? 'h-[3px] w-6' : 'h-6 w-[3px]',
+              active && 'animate-oc-grip-breathe',
+            )}
+          />
+        ))}
       </div>
     </div>
   );
