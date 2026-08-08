@@ -7,7 +7,6 @@ import {
   DropdownMenuLabel,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
@@ -335,7 +334,6 @@ export const WalkthroughView = ({ directory }: WalkthroughViewProps) => {
 
   const [sourceMenuOpen, setSourceMenuOpen] = useState(false);
   const [languageMenuOpen, setLanguageMenuOpen] = useState(false);
-  const sourceValue = source.kind === 'working-tree' ? source.scope : source.kind;
   const sourceLabel = source.kind === 'branch'
     ? t('walkthrough.scope.branch')
     : source.kind === 'pr'
@@ -500,27 +498,24 @@ export const WalkthroughView = ({ directory }: WalkthroughViewProps) => {
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start" className="w-48">
+            {/* Grouped so "everything" is visibly scoped to uncommitted work:
+                on its own next to "This branch" it read as "all changes that
+                exist", which is the opposite of what it selects. Labels and
+                separators stay outside the radio groups: a role="group" whose
+                children mix radios with plain elements throws off touch
+                hit-testing on the radio items in the Android WebView, so each
+                group holds only radio items (the same shape the language menu
+                uses). */}
+            <DropdownMenuLabel className={SCOPE_GROUP_LABEL_CLASS}>
+              {t('walkthrough.scope.group.workingTree')}
+            </DropdownMenuLabel>
             <DropdownMenuRadioGroup
-              value={sourceValue}
+              value={source.kind === 'working-tree' ? source.scope : ''}
               onValueChange={(value) => {
                 setSourceMenuOpen(false);
-                if (value === 'branch') {
-                  if (branchSource) requestSource(directory, branchSource);
-                  return;
-                }
-                if (value === 'pr') {
-                  if (prSource) requestSource(directory, prSource);
-                  return;
-                }
                 selectWorkingTree(value as WalkthroughWorkingTreeScope);
               }}
             >
-              {/* Grouped so "everything" is visibly scoped to uncommitted work:
-                  on its own next to "This branch" it read as "all changes that
-                  exist", which is the opposite of what it selects. */}
-              <DropdownMenuLabel className={SCOPE_GROUP_LABEL_CLASS}>
-                {t('walkthrough.scope.group.workingTree')}
-              </DropdownMenuLabel>
               {SCOPES.map((value) => (
                 <DropdownMenuRadioItem key={value} value={value}>
                   {value === 'all'
@@ -530,25 +525,39 @@ export const WalkthroughView = ({ directory }: WalkthroughViewProps) => {
                       : t('walkthrough.scope.working')}
                 </DropdownMenuRadioItem>
               ))}
-              {(branchSource || prSource) && (
-                <>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuLabel className={SCOPE_GROUP_LABEL_CLASS}>
-                    {t('walkthrough.scope.group.committed')}
-                  </DropdownMenuLabel>
-                </>
-              )}
-              {branchSource && (
-                <DropdownMenuRadioItem value="branch">
-                  {t('walkthrough.scope.branch')}
-                </DropdownMenuRadioItem>
-              )}
-              {prSource && (
-                <DropdownMenuRadioItem value="pr">
-                  {t('walkthrough.scope.pullRequest', { number: prSource.number })}
-                </DropdownMenuRadioItem>
-              )}
             </DropdownMenuRadioGroup>
+            {(branchSource || prSource) && (
+              <DropdownMenuLabel className={cn(SCOPE_GROUP_LABEL_CLASS, 'mt-2')}>
+                {t('walkthrough.scope.group.committed')}
+              </DropdownMenuLabel>
+            )}
+            {(branchSource || prSource) && (
+              <DropdownMenuRadioGroup
+                value={source.kind === 'branch' || source.kind === 'pr' ? source.kind : ''}
+                onValueChange={(value) => {
+                  setSourceMenuOpen(false);
+                  if (value === 'branch') {
+                    if (branchSource) requestSource(directory, branchSource);
+                    return;
+                  }
+                  if (value === 'pr') {
+                    if (prSource) requestSource(directory, prSource);
+                    return;
+                  }
+                }}
+              >
+                {branchSource && (
+                  <DropdownMenuRadioItem value="branch">
+                    {t('walkthrough.scope.branch')}
+                  </DropdownMenuRadioItem>
+                )}
+                {prSource && (
+                  <DropdownMenuRadioItem value="pr">
+                    {t('walkthrough.scope.pullRequest', { number: prSource.number })}
+                  </DropdownMenuRadioItem>
+                )}
+              </DropdownMenuRadioGroup>
+            )}
           </DropdownMenuContent>
         </DropdownMenu>
 
