@@ -256,11 +256,14 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
     ? (showOpenInEditorAction
         ? 'group-hover:pr-14'
         : 'group-hover:pr-8')
-    // Reserve just enough room for the hover-revealed menu button (16px),
-    // anchored at the row edge past the title's own end, so it never overlaps
-    // the title without leaving a large hole.
-    : 'group-hover:pr-3 group-focus-within:pr-3';
-  const alwaysActionPaddingClass = showOpenInEditorAction ? 'pr-14' : 'pr-7';
+    // Reserve just enough room for the hover-revealed quick actions (archive +
+    // menu on wide sidebars, menu alone on narrow ones) anchored at the row
+    // edge past the title's own end, so they never overlap the title. The
+    // archive button only shows when the sidebar is wide enough (see the
+    // session-actions container query in index.css), so the reservation is a
+    // CSS variable the container query can widen.
+    : 'group-hover:[padding-right:var(--oc-session-actions-reveal-reserve,0.75rem)] group-focus-within:[padding-right:var(--oc-session-actions-reveal-reserve,0.75rem)]';
+  const alwaysActionPaddingClass = showOpenInEditorAction ? 'pr-14' : '[padding-right:var(--oc-session-actions-reserve,1.75rem)]';
   const suppressNextSelectRef = React.useRef(false);
   const [isTouchPressed, setIsTouchPressed] = React.useState(false);
   const editingIdRef = React.useRef(editingId);
@@ -1287,6 +1290,28 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
                 </TooltipTrigger>
                 <TooltipContent side="left" sideOffset={8}>
                   {t('sessions.sidebar.session.actions.openInEditor')}
+                </TooltipContent>
+              </Tooltip>
+            ) : null}
+            {!archivedBucket && !isVSCode ? (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    className={cn(
+                      'oc-session-archive-action items-center justify-center rounded-md text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 transition-opacity',
+                      !alwaysShowActions ? 'h-4 w-4' : 'h-6 w-6',
+                    )}
+                    aria-label={t('sessions.sidebar.bulkActions.archive')}
+                    title={t('sessions.sidebar.bulkActions.archive')}
+                    onClick={() => handleDeleteSession(session, { archivedBucket: false })}
+                    onKeyDown={(event) => event.stopPropagation()}
+                  >
+                    <Icon name="inbox-archive" className={cn(!alwaysShowActions ? 'h-2.5 w-2.5' : 'h-3.5 w-3.5')} />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="left" sideOffset={8}>
+                  {t('sessions.sidebar.bulkActions.archive')}
                 </TooltipContent>
               </Tooltip>
             ) : null}

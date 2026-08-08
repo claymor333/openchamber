@@ -939,6 +939,31 @@ html:not(.dark) .chat-scroll {
   }
 }
 
+/* Session quick-archive button: shown on each session row once the sidebar is
+   wide enough to fit it without crowding the title (container =
+   @container/session-actions on the sidebar root). The row's action-padding
+   reservation is a CSS variable this query widens so the always/hover-revealed
+   archive + menu buttons never overlap the title. */
+.oc-session-sidebar-row {
+  --oc-session-actions-reveal-reserve: 0.75rem;
+  --oc-session-actions-reserve: 1.75rem;
+}
+.oc-session-archive-action {
+  display: inline-flex;
+}
+@container session-actions (min-width: 18rem) {
+  .oc-session-sidebar-row {
+    --oc-session-actions-reveal-reserve: 2.25rem;
+    --oc-session-actions-reserve: 3.25rem;
+  }
+}
+@container session-actions (max-width: 18rem) {
+  .oc-session-archive-action {
+    display: none;
+  }
+}
+
+
 /* Diff toolbar: the walkthrough label goes first. Review is the primary action
    in this row, so it keeps its label longest; the walkthrough is reachable from
    the rail as well and reads fine as an icon. */

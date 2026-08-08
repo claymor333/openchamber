@@ -38,7 +38,7 @@ export const DraggableSessionRow: React.FC<{
       ref={setNodeRef}
       {...attributes}
       onPointerDown={handlePointerDown}
-      className={isDragging ? 'opacity-30' : undefined}
+      className={isDragging ? 'oc-session-sidebar-row opacity-30' : 'oc-session-sidebar-row'}
     >
       {children}
     </div>

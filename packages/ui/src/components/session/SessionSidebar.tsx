@@ -1802,7 +1802,7 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
     <div
       ref={sessionSearchContainerRef}
       className={cn(
-        'relative flex h-full flex-col text-foreground overflow-x-hidden',
+        '@container/session-actions relative flex h-full flex-col text-foreground overflow-x-hidden',
         mobileVariant ? '' : 'bg-transparent',
       )}
     >
