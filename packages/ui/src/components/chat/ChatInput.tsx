@@ -793,7 +793,16 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             identity: initialDraftIdentityRef.current,
         },
         onIdentityChange: () => setInputMode('normal'),
-        onDraftRestored: () => composerRef.current?.selectAll(),
+        // On a new-session draft, selecting the text is the prompt to start
+        // typing (and opens the keyboard). On an existing session, a restored
+        // draft should NOT steal focus — switching sessions must not pop the
+        // keyboard. Gate on newSessionDraftOpen so existing-session opens stay
+        // quiet.
+        onDraftRestored: () => {
+            if (newSessionDraftOpen) {
+                composerRef.current?.selectAll();
+            }
+        },
     });
 
     // Focus textarea when new session draft is opened
@@ -1959,17 +1968,25 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     };
 
     React.useEffect(() => {
-
-        if (currentSessionId && composerRef.current && !isMobile) {
-            composerRef.current.focus();
-        }
-    }, [currentSessionId, isMobile]);
-
-    React.useEffect(() => {
         if (!isMobile) {
             setMobileControlsPanel(null);
         }
     }, [isMobile]);
+
+    // Switching to an existing session must not pop the soft keyboard: the
+    // composer may be focused from a previous interaction, and leaving it
+    // focused while navigating re-raises the OSK. Blur it on an existing-
+    // session switch so the keyboard stays down until the user taps the input.
+    // New-session drafts keep their focus (that's the "start typing" moment).
+    const prevSessionForBlurRef = React.useRef(currentSessionId);
+    React.useEffect(() => {
+        if (isMobile) return;
+        const previous = prevSessionForBlurRef.current;
+        prevSessionForBlurRef.current = currentSessionId;
+        if (currentSessionId && currentSessionId !== previous && !newSessionDraftOpen) {
+            composerRef.current?.blur();
+        }
+    }, [currentSessionId, isMobile, newSessionDraftOpen]);
 
     React.useEffect(() => {
         if (abortPromptSessionId && abortPromptSessionId !== currentSessionId) {

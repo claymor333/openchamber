@@ -53,7 +53,6 @@ const PANEL_ROW_HEIGHT_PX = 54;
 const PANEL_ROW_INSET_Y_PX = 4;
 const PANEL_MAX_ROWS = 8;
 const PANEL_SCROLL_MARGIN_ROWS = 2;
-const PANEL_HIDE_DELAY_MS = 160;
 
 const buildPromptEntries = (
     turnIds: string[],
@@ -156,6 +155,7 @@ export function PromptNavigatorRail({
     const promptsLengthRef = React.useRef(prompts.length);
     promptsLengthRef.current = prompts.length;
     const pointerYRef = React.useRef<number | null>(null);
+    const capturedPointerIdRef = React.useRef<number | null>(null);
     const carouselTimerRef = React.useRef<number | null>(null);
     const carouselDirRef = React.useRef<0 | 1 | -1>(0);
 
@@ -283,30 +283,13 @@ export function PromptNavigatorRail({
         }
     }, []);
 
-    // Leaving the gutter hides the panel after a short grace period so the
-    // pointer can travel into the panel and interact with the list directly.
-    const hideTimerRef = React.useRef<number | null>(null);
-    const cancelScheduledHide = React.useCallback(() => {
-        if (hideTimerRef.current !== null) {
-            window.clearTimeout(hideTimerRef.current);
-            hideTimerRef.current = null;
+    const handlePointerDown = React.useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+        try {
+            event.currentTarget.setPointerCapture(event.pointerId);
+        } catch {
+            // ignore
         }
-    }, []);
-    const scheduleHide = React.useCallback(() => {
-        cancelScheduledHide();
-        hideTimerRef.current = window.setTimeout(() => {
-            hideTimerRef.current = null;
-            setHighlightedIndex(null);
-        }, PANEL_HIDE_DELAY_MS);
-    }, [cancelScheduledHide]);
-    React.useEffect(() => () => {
-        if (hideTimerRef.current !== null) {
-            window.clearTimeout(hideTimerRef.current);
-        }
-    }, []);
-
-    const handlePointerMove = React.useCallback((event: React.MouseEvent<HTMLDivElement>) => {
-        cancelScheduledHide();
+        capturedPointerIdRef.current = event.pointerId;
         pointerYRef.current = event.clientY;
         const relative = relativeIndexFromPointer(event.clientY);
         if (relative !== null) {
@@ -315,17 +298,69 @@ export function PromptNavigatorRail({
             );
         }
         updateCarousel(event.clientY);
-    }, [cancelScheduledHide, relativeIndexFromPointer, updateCarousel]);
+    }, [relativeIndexFromPointer, updateCarousel]);
 
-    const handlePointerLeave = React.useCallback(() => {
+    const handlePointerMove = React.useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+        pointerYRef.current = event.clientY;
+        const relative = relativeIndexFromPointer(event.clientY);
+        if (relative !== null) {
+            setHighlightedIndex(
+                Math.min(promptsLengthRef.current - 1, windowStartRef.current + relative),
+            );
+        }
+        updateCarousel(event.clientY);
+    }, [relativeIndexFromPointer, updateCarousel]);
+
+    const handlePointerEnd = React.useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+        if (capturedPointerIdRef.current === event.pointerId) {
+            try {
+                event.currentTarget.releasePointerCapture(event.pointerId);
+            } catch {
+                // ignore
+            }
+            capturedPointerIdRef.current = null;
+        }
         pointerYRef.current = null;
         stopCarousel();
-        scheduleHide();
-    }, [scheduleHide, stopCarousel]);
+    }, [stopCarousel]);
+
+    const handlePointerLeave = React.useCallback(() => {
+        // With pointer capture active (touch drag), leave events still fire when
+        // the finger travels outside the gutter's bounds — ignore them so the
+        // highlight keeps following the gesture.
+        if (capturedPointerIdRef.current !== null) {
+            return;
+        }
+        pointerYRef.current = null;
+        stopCarousel();
+    }, [stopCarousel]);
 
     const closeKeyboardNav = React.useCallback(() => {
         setPromptNavigatorPanelOpen(false);
     }, [setPromptNavigatorPanelOpen]);
+
+    // The preview persists after the pointer leaves — it only ends on a click.
+    // Clicking a step (gutter or panel row) selects it via handleSelect; clicking
+    // anywhere outside the rail dismisses the panel.
+    React.useEffect(() => {
+        if (highlightedIndex === null) {
+            return;
+        }
+        const handleDocumentClick = (event: MouseEvent) => {
+            const nav = navRef.current;
+            if (!nav) {
+                return;
+            }
+            if (nav.contains(event.target as Node)) {
+                return;
+            }
+            stopCarousel();
+            setHighlightedIndex(null);
+            closeKeyboardNav();
+        };
+        document.addEventListener('click', handleDocumentClick);
+        return () => document.removeEventListener('click', handleDocumentClick);
+    }, [closeKeyboardNav, highlightedIndex, stopCarousel]);
 
     const handleSelect = React.useCallback((index: number | null) => {
         if (index === null) {
@@ -525,9 +560,13 @@ export function PromptNavigatorRail({
                         type="button"
                         tabIndex={-1}
                         className={cn(
-                            // Nudge so the icon centers over the tick column
-                            // (ticks sit at right-1 with a 10px base width).
-                            '-mr-px mb-1.5 flex size-5 shrink-0 items-center justify-center rounded-full',
+                            // Anchor the button's right edge to the same
+                            // right-1 the ticks use, and give it the tick bar's
+                            // width so the 14px icon centers over the column.
+                            // A plain right-aligned size-5 button lands off-axis
+                            // (the touch min-width scales it wider than the
+                            // gutter, drifting the icon left of the ticks).
+                            'oc-prompt-rail-chevron mb-1.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full',
                             'text-[var(--surface-mutedForeground)] transition-colors',
                             'hover:bg-[var(--interactive-hover)]/60 hover:text-[var(--surface-foreground)]',
                             isLoadingOlder ? 'cursor-wait opacity-70' : undefined,
@@ -556,13 +595,16 @@ export function PromptNavigatorRail({
                     aria-activedescendant={
                         highlightedPrompt ? `prompt-rail-tick-${highlightedPrompt.turnId}` : undefined
                     }
-                    className="relative cursor-pointer outline-none"
+                    className="relative cursor-pointer touch-none outline-none"
                     style={{
                         width: `${isNarrowGutter ? GUTTER_NARROW_WIDTH_PX : GUTTER_WIDTH_PX}px`,
                         height: `${visibleCount * TICK_PITCH_PX}px`,
                     }}
-                    onMouseMove={handlePointerMove}
-                    onMouseLeave={handlePointerLeave}
+                    onPointerDown={handlePointerDown}
+                    onPointerMove={handlePointerMove}
+                    onPointerUp={handlePointerEnd}
+                    onPointerCancel={handlePointerEnd}
+                    onPointerLeave={handlePointerLeave}
                     onClick={handleGutterClick}
                     onKeyDown={handleKeyDown}
                     onBlur={handleBlur}
@@ -622,9 +664,7 @@ export function PromptNavigatorRail({
                                 'w-[min(20rem,calc(100vw-6rem))] overflow-hidden rounded-xl',
                                 'border border-[var(--interactive-border)]/60 bg-[var(--surface-elevated)] py-1 shadow-md',
                             )}
-                            onMouseEnter={cancelScheduledHide}
-                            onMouseLeave={scheduleHide}
-                            onMouseMove={(event) => event.stopPropagation()}
+                            onPointerMove={(event) => event.stopPropagation()}
                             onClick={(event) => event.stopPropagation()}
                         >
                             <div
@@ -655,13 +695,12 @@ export function PromptNavigatorRail({
                                                 aria-selected={isHighlighted}
                                                 aria-current={isActive ? 'true' : undefined}
                                                 title={isActive ? currentPromptLabel : undefined}
-                                                className="absolute inset-x-0 cursor-pointer px-1.5"
+                                                className="absolute inset-x-0 cursor-pointer touch-none px-1.5"
                                                 style={{
                                                     top: `${index * PANEL_ROW_HEIGHT_PX + PANEL_ROW_INSET_Y_PX}px`,
                                                     height: `${PANEL_ROW_HEIGHT_PX - PANEL_ROW_INSET_Y_PX * 2}px`,
                                                 }}
-                                                onMouseMove={() => {
-                                                    cancelScheduledHide();
+                                                onPointerMove={() => {
                                                     if (highlightedIndexRef.current !== index) {
                                                         ensureWindowContains(index);
                                                         setHighlightedIndex(index);

@@ -69,6 +69,7 @@ import { useTerminalStore } from '@/stores/useTerminalStore';
 import { ProjectActionsButton } from '@/components/layout/ProjectActionsButton';
 import { SessionSwitcherDropdown } from '@/components/session/SessionSwitcherDropdown';
 import { canUseElectronDesktopIPC, invokeDesktop, isDesktopLocalOriginActive, isDesktopShell, isVSCodeRuntime, startDesktopWindowDrag, type UpdateInfo } from '@/lib/desktop';
+import { isCapacitorApp } from '@/lib/platform';
 import { desktopHostsGet, getDesktopHostApiUrl, locationMatchesHost, redactSensitiveUrl } from '@/lib/desktopHosts';
 import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
@@ -2171,6 +2172,25 @@ export const Header: React.FC<HeaderProps> = ({
 
   const desktopSidebarActions = (
     <>
+      {isCapacitorApp() ? (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              aria-label={t('mobile.menu.instances')}
+              className={cn(DESKTOP_HEADER_ICON_BUTTON_CLASS, 'mr-1')}
+              onClick={() => {
+                window.dispatchEvent(new CustomEvent('openchamber:open-instances'));
+              }}
+            >
+              <Icon name="server" className="h-[18px] w-[18px]" />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent>
+            <p>{t('mobile.menu.instances')}</p>
+          </TooltipContent>
+        </Tooltip>
+      ) : null}
       <OpenInAppButton directory={actionDirectory} className="mr-1" />
       <DesktopServicesMenu
         isDesktopApp={isDesktopApp}

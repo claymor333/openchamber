@@ -294,7 +294,7 @@ export const MainLayout: React.FC = () => {
                 data-page-scroll-lock="true"
                 className={cn(
                     'main-content-safe-area',
-                    isMobile ? 'flex h-[100dvh] flex-col' : 'relative flex h-[100dvh]',
+                    isMobile ? 'flex h-[var(--oc-shell-height,100dvh)] flex-col' : 'relative flex h-[var(--oc-shell-height,100dvh)]',
                     'bg-background'
                 )}
             >

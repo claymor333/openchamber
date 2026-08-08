@@ -38,7 +38,6 @@ import { useHasSessionActivityDuration } from '@/sync/session-activity-timing';
 import { SessionActivityDuration } from '@/components/session/SessionActivityDuration';
 import { useSessionMultiSelectStore } from '@/stores/useSessionMultiSelectStore';
 import { useI18n } from '@/lib/i18n';
-import { useShiftKeyHeld } from '@/hooks/useShiftKeyHeld';
 import { getSessionGoal } from '@/lib/sessionGoalMetadata';
 import { sessionGoalStatusColor, sessionGoalStatusLabelKey } from '@/lib/sessionGoalPresentation';
 import { getRuntimeBearerTokenSync } from '@/lib/runtime-auth';
@@ -189,68 +188,6 @@ const holdSessionRowPosition = (target: HTMLElement): void => {
   frameId = window.requestAnimationFrame(restore);
 };
 
-type QuickSessionActionProps = {
-  archiveLabel: string;
-  deleteLabel: string;
-  buttonSizeClass: string;
-  iconSizeClass: string;
-  onPointerDown: (event: React.PointerEvent<HTMLButtonElement>) => void;
-  onMouseDown: (event: React.MouseEvent<HTMLButtonElement>) => void;
-  onArchive: (event: React.MouseEvent<HTMLButtonElement>) => void;
-  onDelete: (event: React.MouseEvent<HTMLButtonElement>) => void;
-};
-
-// Extracted so only this small button re-renders when Shift is pressed/released,
-// instead of every mounted session row.
-const QuickSessionAction = React.memo(function QuickSessionAction({
-  archiveLabel,
-  deleteLabel,
-  buttonSizeClass,
-  iconSizeClass,
-  onPointerDown,
-  onMouseDown,
-  onArchive,
-  onDelete,
-}: QuickSessionActionProps): React.ReactNode {
-  const shiftHeld = useShiftKeyHeld();
-  const label = shiftHeld ? deleteLabel : archiveLabel;
-
-  const handleClick = (event: React.MouseEvent<HTMLButtonElement>) => {
-    if (shiftHeld || event.shiftKey) {
-      onDelete(event);
-      return;
-    }
-    onArchive(event);
-  };
-
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <button
-          type="button"
-          className={cn(
-            'inline-flex items-center justify-center rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 transition-opacity',
-            shiftHeld
-              ? 'text-destructive hover:text-destructive'
-              : 'text-muted-foreground hover:text-foreground',
-            buttonSizeClass,
-          )}
-          aria-label={label}
-          onPointerDown={onPointerDown}
-          onMouseDown={onMouseDown}
-          onClick={handleClick}
-          onKeyDown={(event) => event.stopPropagation()}
-        >
-          <Icon name={shiftHeld ? 'delete-bin' : 'archive'} className={iconSizeClass} />
-        </button>
-      </TooltipTrigger>
-      <TooltipContent side="left" sideOffset={8}>
-        {label}
-      </TooltipContent>
-    </Tooltip>
-  );
-});
-
 function SessionNodeItemComponent(props: Props): React.ReactNode {
   streamPerfCount('ui.sidebar_session_node.render');
   const { t } = useI18n();
@@ -311,24 +248,19 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
     ? 'group-hover:opacity-0'
     : 'group-hover:opacity-0 group-focus-within:opacity-0';
   const showOpenInEditorAction = isVSCode;
-  const showQuickArchiveAction = !archivedBucket && !mobileVariant;
   const revealPaddingClass = isVSCode
-    // VS Code rows reveal up to three actions on hover
-    // (open-in-editor + quick-archive + menu, each h-4). The date sits in the
-    // row flow, so the title must shrink enough to clear the actions or they
-    // overlap the timestamp. Open-in-editor is always present in VS Code.
-    ? (showQuickArchiveAction && showOpenInEditorAction
-        ? 'group-hover:pr-18'
-        : showQuickArchiveAction || showOpenInEditorAction
-          ? 'group-hover:pr-14'
-          : 'group-hover:pr-8')
-    // Reserve just enough room for the hover-revealed actions (two 16px
-    // buttons + gap, anchored at the row edge past the title's own end) so
-    // they never overlap the title without leaving a large hole.
-    : (showQuickArchiveAction
-        ? 'group-hover:pr-7 group-focus-within:pr-7'
-        : 'group-hover:pr-3 group-focus-within:pr-3');
-  const alwaysActionPaddingClass = showQuickArchiveAction ? 'pr-13' : 'pr-7';
+    // VS Code rows reveal up to two actions on hover (open-in-editor + menu,
+    // each h-4). The date sits in the row flow, so the title must shrink enough
+    // to clear the actions or they overlap the timestamp. Open-in-editor is
+    // always present in VS Code.
+    ? (showOpenInEditorAction
+        ? 'group-hover:pr-14'
+        : 'group-hover:pr-8')
+    // Reserve just enough room for the hover-revealed menu button (16px),
+    // anchored at the row edge past the title's own end, so it never overlaps
+    // the title without leaving a large hole.
+    : 'group-hover:pr-3 group-focus-within:pr-3';
+  const alwaysActionPaddingClass = showOpenInEditorAction ? 'pr-14' : 'pr-7';
   const suppressNextSelectRef = React.useRef(false);
   const [isTouchPressed, setIsTouchPressed] = React.useState(false);
   const editingIdRef = React.useRef(editingId);
@@ -803,30 +735,6 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
   const handleMenuTriggerMouseDown = (event: React.MouseEvent<HTMLButtonElement>) => {
     event.preventDefault();
     event.stopPropagation();
-  };
-
-  const handleQuickArchivePointerDown = (event: React.PointerEvent<HTMLButtonElement>) => {
-    event.preventDefault();
-    event.stopPropagation();
-  };
-
-  const handleQuickArchiveMouseDown = (event: React.MouseEvent<HTMLButtonElement>) => {
-    event.preventDefault();
-    event.stopPropagation();
-  };
-
-  const handleQuickArchiveClick = (event: React.MouseEvent<HTMLButtonElement>) => {
-    event.preventDefault();
-    event.stopPropagation();
-    setOpenSidebarMenuKey(null);
-    handleDeleteSession(session, { archivedBucket });
-  };
-
-  const handleQuickDeleteClick = (event: React.MouseEvent<HTMLButtonElement>) => {
-    event.preventDefault();
-    event.stopPropagation();
-    setOpenSidebarMenuKey(null);
-    handleDeleteSession(session, { archivedBucket, hardDelete: true, skipConfirm: true });
   };
 
   const handleOpenInEditorPointerDown = (event: React.PointerEvent<HTMLButtonElement>) => {
@@ -1359,18 +1267,6 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
                 ? 'opacity-100'
                 : cn('opacity-0', revealOnHoverClass),
           )}>
-            {showQuickArchiveAction ? (
-              <QuickSessionAction
-                archiveLabel={t('sessions.sidebar.bulkActions.archive')}
-                deleteLabel={t('sessions.sidebar.bulkActions.delete')}
-                buttonSizeClass={!alwaysShowActions ? 'h-4 w-4' : 'h-6 w-6'}
-                iconSizeClass={!alwaysShowActions ? 'h-2.5 w-2.5' : 'h-3.5 w-3.5'}
-                onPointerDown={handleQuickArchivePointerDown}
-                onMouseDown={handleQuickArchiveMouseDown}
-                onArchive={handleQuickArchiveClick}
-                onDelete={handleQuickDeleteClick}
-              />
-            ) : null}
             {showOpenInEditorAction ? (
               <Tooltip>
                 <TooltipTrigger asChild>

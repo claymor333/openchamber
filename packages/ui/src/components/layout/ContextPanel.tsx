@@ -18,6 +18,7 @@ const GitView = lazyWithChunkRecovery(() => import('@/components/views/GitView')
 const PlanView = lazyWithChunkRecovery(() => import('@/components/views/PlanView').then((m) => ({ default: m.PlanView })));
 import { ProjectContextPanel } from './RightSidebarTabs';
 import { SidebarFilesTree } from './SidebarFilesTree';
+import { ResizeGrip } from './ResizeGrip';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { openExternalUrl } from '@/lib/url';
 import { copyTextToClipboard } from '@/lib/clipboard';
@@ -396,8 +397,8 @@ const EditorTreeColumn: React.FC<{ visible: boolean }> = ({ visible }) => {
       {visible && (
         <div
           className={cn(
-            'absolute left-0 top-0 z-20 h-full w-[3px] cursor-col-resize transition-colors hover:bg-[var(--interactive-border)]/80',
-            isResizing && 'bg-[var(--interactive-border)]'
+            'group absolute left-0 top-0 z-20 h-full w-[3px] cursor-col-resize touch-none transition-colors hover:bg-[var(--interactive-border)]/80',
+            isResizing && 'bg-muted-foreground/50'
           )}
           onPointerDown={handlePointerDown}
           onPointerMove={handlePointerMove}
@@ -406,7 +407,9 @@ const EditorTreeColumn: React.FC<{ visible: boolean }> = ({ visible }) => {
           role="separator"
           aria-orientation="vertical"
           aria-label={t('contextPanel.actions.resizePanelAria')}
-        />
+        >
+          <ResizeGrip active={isResizing} />
+        </div>
       )}
       <div
         className={cn(
@@ -2889,14 +2892,16 @@ export const ContextPanel: React.FC = () => {
       {!isExpanded && (
         <div
           className={cn(
-            'absolute left-0 top-0 z-50 h-full w-[3px] cursor-col-resize transition-colors hover:bg-[var(--interactive-border)]/80',
-            isResizing && 'bg-[var(--interactive-border)]'
+            'group absolute left-0 top-0 z-50 h-full w-[3px] cursor-col-resize touch-none transition-colors hover:bg-[var(--interactive-border)]/80',
+            isResizing && 'bg-muted-foreground/50'
           )}
           onPointerDown={handleResizeStart}
           role="separator"
           aria-orientation="vertical"
           aria-label={t('contextPanel.actions.resizePanelAria')}
-        />
+        >
+          <ResizeGrip active={isResizing} />
+        </div>
       )}
       <div
         className={cn(

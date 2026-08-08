@@ -1,6 +1,6 @@
 import React from 'react';
 import { isDesktopShell, isVSCodeRuntime } from '@/lib/desktop';
-import { isIPadApp } from '@/lib/platform';
+import { isCapacitorApp, isIPadApp } from '@/lib/platform';
 import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
 
 type DeviceType = 'desktop' | 'mobile' | 'tablet';
@@ -118,15 +118,26 @@ export function getDeviceInfo(): DeviceInfo {
     isDesktop = true;
     deviceType = 'desktop';
   } else if (isMobileSurfaceRuntime()) {
-    // The mobile surface (Capacitor shell or hosted MobileApp) IS the phone
-    // UI: every component in that tree is built mobile-first, so wide devices
-    // (iPad, Android tablets, rotated phones) must not fall into
-    // tablet/desktop branches scattered across shared components.
-    // Tablet layout upgrades gate on useTabletLayout() (a size class) instead.
-    isMobile = true;
-    isTablet = false;
-    isDesktop = false;
-    deviceType = 'mobile';
+    // The mobile surface (Capacitor shell or hosted MobileApp) renders the
+    // phone UI on phones, but the native Capacitor shell hands tablets the
+    // full desktop layout (the shared MainLayout — see the tablet branch in
+    // MobileApp). Report the size-class truth there so MainLayout takes its
+    // desktop branch, and the device-tablet + mobile-pointer root classes
+    // engage the touch-optimized CSS (larger hit targets, safe areas, type).
+    // Phones keep the mobile forcing so their mobile-first tree never falls
+    // into desktop branches; hosted mobile.html on a wide browser is left on
+    // the phone behavior it has today.
+    if (isCapacitorApp() && readTabletLayout().enabled) {
+      isMobile = false;
+      isTablet = true;
+      isDesktop = false;
+      deviceType = 'tablet';
+    } else {
+      isMobile = true;
+      isTablet = false;
+      isDesktop = false;
+      deviceType = 'mobile';
+    }
   } else if (isMobile) {
     deviceType = 'mobile';
   } else if (isTablet) {
@@ -394,10 +405,21 @@ export const readTabletLayout = (): TabletLayout => {
   if (typeof window === 'undefined') return { enabled: false, roomyForPanels: false };
   const width = window.innerWidth;
   const height = window.innerHeight;
+  // On the native mobile surface the software keyboard resizes the WebView
+  // (adjustResize), so innerHeight collapses while the keyboard is up (e.g. a
+  // portrait tablet 800 → ~470). Basing the size class on that would flip the
+  // tablet to the phone layout, which dismisses the keyboard and re-flips —
+  // an infinite flicker loop. The physical screen short side (screen.width /
+  // screen.height, in CSS px) is immune to both the keyboard and orientation,
+  // so use it as the stable anchor there. Desktop/web keep the real window
+  // dims (screen would be the whole monitor).
+  const stableShortSide = isMobileSurfaceRuntime()
+    ? Math.min(window.screen?.width ?? width, window.screen?.height ?? height)
+    : Math.min(width, height);
   // iPads answer this on identity too: iPadOS reports odd viewports in Slide
   // Over / Split View, and a device we KNOW is a tablet should not flip to the
   // phone layout because it was given a narrow slice.
-  const enabled = isIPadApp() || Math.min(width, height) >= TABLET_LAYOUT_MIN_SHORT_SIDE_PX;
+  const enabled = isIPadApp() || stableShortSide >= TABLET_LAYOUT_MIN_SHORT_SIDE_PX;
   return {
     enabled,
     roomyForPanels: enabled && width > height && width >= WORKSPACE_PANEL_MIN_WIDTH_PX,

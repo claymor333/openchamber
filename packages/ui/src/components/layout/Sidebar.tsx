@@ -3,6 +3,7 @@ import { cn } from '@/lib/utils';
 import { ErrorBoundary } from '../ui/ErrorBoundary';
 import { useI18n } from '@/lib/i18n';
 import { useUIStore } from '@/stores/useUIStore';
+import { ResizeGrip } from './ResizeGrip';
 
 const SIDEBAR_CONTENT_WIDTH = 280;
 const SIDEBAR_MIN_WIDTH = 280;
@@ -147,7 +148,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, isMobile, children, cl
             {isOpen && (
                 <div
                     className={cn(
-                        'absolute right-0 top-0 z-20 h-full w-[3px] cursor-col-resize hover:bg-[var(--interactive-border)]/80 transition-colors',
+                        'group absolute right-0 top-0 z-20 h-full w-[3px] cursor-col-resize touch-none hover:bg-[var(--interactive-border)]/80 transition-colors',
                         isResizing && 'bg-[var(--interactive-border)]'
                     )}
                     onPointerDown={handlePointerDown}
@@ -157,7 +158,9 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, isMobile, children, cl
                     role="separator"
                     aria-orientation="vertical"
                     aria-label={t('sidebar.resize.leftPanelAria')}
-                />
+                >
+                    <ResizeGrip active={isResizing} />
+                </div>
             )}
             <div
                 className={cn(

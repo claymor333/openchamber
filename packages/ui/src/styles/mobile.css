@@ -161,6 +161,91 @@
 
 }
 
+/* Native tablet desktop layout (Capacitor): the shared MainLayout renders the
+   desktop chrome, so the touch-target sizing above (gated at ≤1024px for the
+   phone shell) must extend to the tablet at any width — iPad landscape and 13"
+   Android tablets exceed that gate. Scoped to the native shell (.oc-capacitor-app)
+   so browser tablets keep their current desktop behavior unchanged. */
+:root.oc-capacitor-app.device-tablet:not(.desktop-runtime) {
+  --text-markdown: 1rem;
+  --text-code: 0.875rem;
+  --text-ui-header: 0.9375rem;
+  --text-ui-label: 0.875rem;
+  --text-meta: 0.875rem;
+  --text-micro: 0.8125rem;
+  --text-settings-page-title: 1.125rem;
+}
+
+:root.oc-capacitor-app.device-tablet:not(.desktop-runtime) button:not([role="radio"]):not([role="checkbox"]):not([role="switch"]),
+:root.oc-capacitor-app.device-tablet:not(.desktop-runtime) .btn,
+:root.oc-capacitor-app.device-tablet:not(.desktop-runtime) [role="button"],
+:root.oc-capacitor-app.device-tablet:not(.desktop-runtime) .oc-static-tool-row {
+  min-height: 36px;
+  min-width: 36px;
+}
+
+/* The prompt-navigator rail chevron must stay 20px so its icon centers over
+   the tick column; the generic 36px touch minimum would widen it and drift
+   the glyph off-axis. It sits at the rail edge where the gutter's own hit
+   area keeps it tappable. */
+:root.oc-capacitor-app.device-tablet:not(.desktop-runtime) .oc-prompt-rail-chevron {
+   min-height: 20px !important;
+   min-width: 20px !important;
+}
+
+/* Session sidebar rows: the generic 36px button minimum inflates every row to
+   ~44px tall (36px button + py-1), much airier than the desktop list. Exclude
+   session rows from it entirely so they render at the natural PC size — the
+   whole row is the tap target (its handlers live on the inner button), so the
+   row needs no forced minimum. Also zero the row's my-0.5 margins on the
+   tablet: in the virtualized (absolutely positioned) flow those margins don't
+   collapse the way they do in PC's normal flow, so they'd inflate the measured
+   row slot and add a gap that PC doesn't have. !important is required because
+   the generic minimum is emitted into a separate CSS chunk and would otherwise
+   win the cascade for this button. */
+:root.oc-capacitor-app.device-tablet:not(.desktop-runtime) [data-session-row] button {
+  min-height: 20px !important;
+  min-width: 0 !important;
+}
+
+/* The dnd/drop-target row wrapper carries role="button", which the generic 36px
+   touch rule would also inflate (it matched [role="button"]). Zero it too so the
+   virtualizer measures the natural row, not the inflated wrapper. The wrapper is
+   the role="button" ancestor of a session row. */
+:root.oc-capacitor-app.device-tablet:not(.desktop-runtime) [role="button"]:has(> [data-session-row]) {
+  min-height: 0 !important;
+  min-width: 0 !important;
+}
+
+:root.oc-capacitor-app.device-tablet:not(.desktop-runtime) [data-session-row] {
+  margin-top: 0 !important;
+   margin-bottom: 0 !important;
+}
+
+:root.oc-capacitor-app.device-tablet:not(.desktop-runtime) input,
+:root.oc-capacitor-app.device-tablet:not(.desktop-runtime) textarea,
+:root.oc-capacitor-app.device-tablet:not(.desktop-runtime) select {
+  min-height: 36px;
+}
+
+:root.oc-capacitor-app.device-tablet:not(.desktop-runtime) input[type="text"],
+:root.oc-capacitor-app.device-tablet:not(.desktop-runtime) input[type="search"],
+:root.oc-capacitor-app.device-tablet:not(.desktop-runtime) input[type="email"],
+:root.oc-capacitor-app.device-tablet:not(.desktop-runtime) input[type="password"],
+:root.oc-capacitor-app.device-tablet:not(.desktop-runtime) textarea {
+  font-size: 16px !important; /* Prevents iOS zoom */
+}
+
+/* Prevent keyboard on non-input elements */
+:root.oc-capacitor-app.device-tablet:not(.desktop-runtime)
+  button:not([type="submit"]):not([type="button"]):not([type="reset"]),
+:root.oc-capacitor-app.device-tablet:not(.desktop-runtime) .btn,
+:root.oc-capacitor-app.device-tablet:not(.desktop-runtime) [role="button"] {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
 /* iOS PWA Adaptations */
 
 /* iOS safe area defaults (applies to PWA + Safari) */
@@ -491,6 +576,21 @@
      inset cancels it out (the home indicator is hidden and the composer should sit
      flush above the keyboard). The shell keeps its own bg behind this padding. */
   padding-bottom: max(0px, calc(var(--oc-app-bottom-safe, 0px) - var(--oc-kb-layout, 0px)));
+}
+
+/* The tablet desktop shell uses the same native keyboard choreography as the
+   phone shell. --oc-keyboard-inset is set the moment keyboardWillShow fires
+   (full target height), --oc-kb-layout only at settle; max() keeps the shell
+   shrunk through both the rise and the hide slide, which is exactly what the
+   phone shell's FLIP movers achieve visually. MainLayout's root fills the
+   wrapper's content box by reading --oc-shell-height: 100%, so the desktop
+   chrome (chat column + composer) shrinks by the keyboard height. The safe-area
+   leg is the same trade as the phone shell — give up the home-indicator room
+   only while the keyboard is down. */
+:root.oc-capacitor-app .oc-tablet-desktop-shell {
+  --oc-shell-height: 100%;
+  height: calc(100dvh - max(var(--oc-keyboard-inset, 0px), var(--oc-kb-layout, 0px)));
+  padding-bottom: max(0px, calc(var(--oc-app-bottom-safe, 0px) - max(var(--oc-keyboard-inset, 0px), var(--oc-kb-layout, 0px))));
 }
 
 /* Portal surfaces (bottom sheets, overlay panels) render at <body> level, outside

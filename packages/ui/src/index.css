@@ -686,6 +686,54 @@ html:not(.dark) .chat-scroll {
   height: 0 !important;
 }
 
+/* Native touch shell (Capacitor tablet/phone): the chat's reserved 10px webkit
+   scrollbar sits exactly on the chat's right edge — the same edge as the
+   context-panel resize separator. On touch the bar is interactable and steals
+   the drag gesture. Make it a thin, non-interactive overlay on touch so it
+   never captures the pointer, and drop the reserved gutter so resizing has the
+   full panel edge to grab. (Web, desktop, and VS Code keep their scrollbars.) */
+:root.oc-capacitor-app .chat-scroll,
+:root.oc-capacitor-app [data-scrollbar="chat"].chat-scroll {
+  scrollbar-gutter: auto !important;
+}
+
+:root.oc-capacitor-app .chat-scroll::-webkit-scrollbar,
+:root.oc-capacitor-app [data-scrollbar="chat"]::-webkit-scrollbar {
+  width: 6px !important;
+  height: 6px !important;
+  pointer-events: none !important;
+}
+
+:root.oc-capacitor-app .chat-scroll::-webkit-scrollbar-thumb,
+:root.oc-capacitor-app [data-scrollbar="chat"]::-webkit-scrollbar-thumb {
+  pointer-events: none !important;
+}
+
+/* Native touch shell: the 3px resize strip is too thin to grab with a finger
+   (the same reason IpadSidebarResizeHandle uses a ~24px zone). Widen the hit
+   area via an invisible pseudo-element centered on the strip — the visual line
+   and the ResizeGrip stay put, but a finger anywhere in the ~24px zone starts
+   the drag, and the strip highlights like a mouse hover would. Applies to
+   every vertical resize separator (sessions sidebar, context panel, editor
+   tree, walkthrough TOC, VS Code layout). */
+:root.oc-capacitor-app [role="separator"][aria-orientation="vertical"]::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -10px;
+  right: -10px;
+}
+
+:root.oc-capacitor-app [role="separator"][aria-orientation="horizontal"]::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -10px;
+  bottom: -10px;
+}
+
 .dark * {
   scrollbar-color: oklch(0.6 0.02 80 / 0.3) transparent;
 }
@@ -1676,6 +1724,23 @@ input[aria-label="Terminal input"] {
 
 .animate-busy-pulse {
   animation: oc-busy-pulse 1.2s ease-in-out infinite;
+}
+
+/* Gentle breathing of the drag-grip bars while a border resize is in progress.
+   Animates only transform + opacity (compositor-friendly). */
+@keyframes oc-grip-breathe {
+  0%, 100% {
+    transform: scaleY(1);
+    opacity: 0.75;
+  }
+  50% {
+    transform: scaleY(1.25);
+    opacity: 1;
+  }
+}
+
+.animate-oc-grip-breathe {
+  animation: oc-grip-breathe 1s ease-in-out infinite;
 }
 
 @keyframes navrail-dot-wave {

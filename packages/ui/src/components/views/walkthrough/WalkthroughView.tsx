@@ -11,6 +11,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { ResizeGrip } from '@/components/layout/ResizeGrip';
 import { useI18n, type Locale } from '@/lib/i18n';
 import { openExternalUrl } from '@/lib/url';
 import { buildWalkthroughView } from '@/lib/walkthrough/model';
@@ -801,12 +802,14 @@ export const WalkthroughView = ({ directory }: WalkthroughViewProps) => {
                   onPointerDown={handleTocResizeStart}
                   onKeyDown={handleTocResizeKey}
                   className={cn(
-                    'group relative w-1 shrink-0 cursor-col-resize',
+                    'group relative w-1 shrink-0 cursor-col-resize touch-none',
                     'before:absolute before:inset-y-0 before:-left-1 before:-right-1 before:content-[\'\']',
                     'hover:bg-interactive-selection focus-visible:bg-interactive-selection focus-visible:outline-none',
                     draggingToc && 'bg-interactive-selection'
                   )}
-                />
+                >
+                  <ResizeGrip active={draggingToc} />
+                </div>
               </>
             )}
             <WalkthroughStream

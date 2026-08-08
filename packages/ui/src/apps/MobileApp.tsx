@@ -48,6 +48,7 @@ import { SyncProvider } from '@/sync/sync-context';
 import { SyncAppEffects } from './AppEffects';
 import { BusyDots } from '@/components/chat/message/parts/BusyDots';
 import { MobileConnectionWelcome, type MobileConnectionNotice } from './MobileConnectionWelcome';
+import { TabletDesktopShell } from './TabletDesktopShell';
 import { MobileHeader } from './MobileHeader';
 import { MobileInstancesSurface } from './MobileInstancesSurface';
 import { MobileSessionsSheet } from './MobileSessionsSheet';
@@ -645,6 +646,10 @@ export function MobileApp({ apis }: MobileAppProps) {
   // no remount. The value itself is unused; only the re-render matters.
   const [, bumpTransportSwitch] = React.useReducer((count: number) => count + 1, 0);
   const isNativeMobileApp = React.useMemo(() => isCapacitorMobileApp(), []);
+  // Native tablets render the shared desktop layout (TabletDesktopShell) instead
+  // of the phone shell — a live size class so folding shut returns to the phone.
+  const { enabled: isTabletLayout } = useTabletLayout();
+  const isNativeTabletDesktop = isNativeMobileApp && isTabletLayout;
   const lastNativeResumeSyncEventAtRef = React.useRef(0);
   const nativeResumeValidationSeqRef = React.useRef(0);
 
@@ -872,8 +877,13 @@ export function MobileApp({ apis }: MobileAppProps) {
   }, []);
 
   React.useEffect(() => {
-    setIsMobile(true);
-  }, [setIsMobile]);
+    // The store's isMobile flag drives the mobile vs desktop branch of shared
+    // components (composer, dialogs, header). On a native tablet the desktop
+    // layout runs, so it must be false — device.ts reports tablet there, and
+    // MainLayout keeps the store in sync. Phones (and hosted mobile.html)
+    // force it true so their mobile-first tree stays put.
+    if (!isNativeTabletDesktop) setIsMobile(true);
+  }, [isNativeTabletDesktop, setIsMobile]);
 
   React.useEffect(() => {
     // Never bootstrap without a runtime endpoint on native: with apiBaseUrl ''
@@ -1208,10 +1218,17 @@ export function MobileApp({ apis }: MobileAppProps) {
               <SyncAppEffects embeddedBackgroundWorkEnabled={isInitialized} />
               <OpenCodeUpdateToast />
               <MobileAppUpdateToast />
-              <MobileShell onActiveConnectionDeleted={() => {
-                switchRuntimeEndpoint({ apiBaseUrl: '', clientToken: null, runtimeKey: 'mobile-disconnected' });
-                setConnectionEpoch((value) => value + 1);
-              }} />
+              {isNativeTabletDesktop ? (
+                <TabletDesktopShell onActiveConnectionDeleted={() => {
+                  switchRuntimeEndpoint({ apiBaseUrl: '', clientToken: null, runtimeKey: 'mobile-disconnected' });
+                  setConnectionEpoch((value) => value + 1);
+                }} />
+              ) : (
+                <MobileShell onActiveConnectionDeleted={() => {
+                  switchRuntimeEndpoint({ apiBaseUrl: '', clientToken: null, runtimeKey: 'mobile-disconnected' });
+                  setConnectionEpoch((value) => value + 1);
+                }} />
+              )}
               <Toaster position="top-center" offset="calc(var(--oc-safe-area-top, 0px) + 16px)" />
               {isInitialized ? <ConfigUpdateOverlay /> : null}
             </div>

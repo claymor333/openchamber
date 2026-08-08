@@ -16,6 +16,7 @@ import { SessionsTabTitle } from '@/components/session/SessionsTabTitle';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { cn } from '@/lib/utils';
+import { ResizeGrip } from './ResizeGrip';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -571,7 +572,7 @@ export const VSCodeLayout: React.FC = () => {
             />
             <div
               className={cn(
-                'absolute right-0 top-0 z-20 h-full w-[3px] cursor-col-resize transition-colors hover:bg-[var(--interactive-border)]/80',
+                'group absolute right-0 top-0 z-20 h-full w-[3px] cursor-col-resize touch-none transition-colors hover:bg-[var(--interactive-border)]/80',
                 isResizingExpandedSidebar && 'bg-[var(--interactive-border)]'
               )}
               onPointerDown={handleExpandedSidebarResizeStart}
@@ -581,7 +582,9 @@ export const VSCodeLayout: React.FC = () => {
               role="separator"
               aria-orientation="vertical"
               aria-label={t('vscodeLayout.actions.resizeSessionsSidebarAria')}
-            />
+            >
+              <ResizeGrip active={isResizingExpandedSidebar} />
+            </div>
           </div>
           {/* Chat content */}
           <div className="flex-1 flex flex-col min-w-0">

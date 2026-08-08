@@ -1,4 +1,5 @@
 import React from 'react';
+import { ResizeGrip } from '@/components/layout/ResizeGrip';
 import {
   DndContext,
   PointerSensor,
@@ -957,14 +958,16 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
         {todos.length >= 7 && (
           <div
             className={cn(
-              'h-[3px] w-full cursor-row-resize hover:bg-[var(--interactive-border)]/80 transition-colors',
+              'group h-[3px] w-full cursor-row-resize touch-none hover:bg-[var(--interactive-border)]/80 transition-colors',
               isTodoPanelResizing && 'bg-[var(--interactive-border)]'
             )}
             onPointerDown={handleTodoPanelResizeStart}
             role="separator"
             aria-orientation="horizontal"
             aria-label={t('rightSidebar.contextNotesTodo.todo.resizeAria')}
-          />
+          >
+            <ResizeGrip active={isTodoPanelResizing} orientation="horizontal" />
+          </div>
         )}
       </div>
 
