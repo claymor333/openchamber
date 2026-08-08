@@ -503,6 +503,14 @@
   --oc-app-bottom-safe: max(16px, calc(var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)) * 0.5));
 }
 
+/* Tablets have no rounded hardware corners to clip bottom chrome, so the phone
+   guard of a fixed 16px leaves bottom controls floating above a dead band.
+   Reserve only the real gesture inset there — which is 0 on tablets with no
+   nav bar — so the footer and composer sit flush against the screen edge. */
+:root.oc-capacitor-app.device-tablet {
+  --oc-app-bottom-safe: calc(var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)) * 0.5);
+}
+
 /* Android native safe areas. Every --oc-safe-area-* definition above is gated
    behind -webkit-touch-callout (iOS) or display-mode: standalone, neither of
    which matches the Capacitor Android WebView — so the Android app used to rely
