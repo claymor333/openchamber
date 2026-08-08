@@ -3,6 +3,7 @@ import { getDefaultTheme } from '@/lib/theme/themes';
 import type { Theme } from '@/types/theme';
 import {
   buildEmbeddedSessionChatURL,
+  canHostEmbeddedSessionChatPanel,
   EMBEDDED_RUNTIME_BOOTSTRAP_REQUEST,
   EMBEDDED_RUNTIME_BOOTSTRAP_RESPONSE,
   getOrCreateEmbeddedSessionChatURL,
@@ -178,6 +179,26 @@ describe('isEmbeddedSessionChat', () => {
     // Still true after another rewrite.
     installWindowLocation('http://127.0.0.1:5173/app');
     expect(isEmbeddedSessionChat()).toBe(true);
+  });
+});
+
+describe('canHostEmbeddedSessionChatPanel', () => {
+  test('true on a plain desktop surface', () => {
+    installWindowLocation('http://127.0.0.1:5173/app?session=ses_1');
+    resetEmbeddedSessionChatCache();
+    expect(canHostEmbeddedSessionChatPanel()).toBe(true);
+  });
+
+  test('false inside the embedded session-chat iframe', () => {
+    installWindowLocation('http://127.0.0.1:5173/app?ocPanel=session-chat&sessionId=ses_1');
+    resetEmbeddedSessionChatCache();
+    expect(canHostEmbeddedSessionChatPanel()).toBe(false);
+  });
+
+  test('true on the mobile surface (tablet panel hosts embedded chat too)', () => {
+    installWindowLocation('http://127.0.0.1:5173/app?surface=mobile');
+    resetEmbeddedSessionChatCache();
+    expect(canHostEmbeddedSessionChatPanel()).toBe(true);
   });
 });
 

@@ -17,6 +17,7 @@ import { useUIStore } from '@/stores/useUIStore';
 import { optimisticSend, patchSessionMetadata, waitForConnectionOrThrow } from '@/sync/session-actions';
 import { useSelectionStore } from '@/sync/selection-store';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { canHostEmbeddedSessionChatPanel } from '@/components/layout/contextPanelEmbeddedChat';
 import { getSyncMessages, getSyncParts, getSyncSessionStatus, registerSessionDirectory } from '@/sync/sync-refs';
 import { markPendingUserSendAnimation } from '@/lib/userSendAnimation';
 import { getRuntimeKey } from '@/lib/runtime-switch';
@@ -412,6 +413,12 @@ const requestChatForceScrollBottom = (sessionId: string): void => {
 };
 
 const openReviewSessionPanel = (directory: string, session: Session): void => {
+  // Surfaces without a context-panel chat iframe (the embedded session-chat
+  // iframe) open the review session in the main chat instead.
+  if (!canHostEmbeddedSessionChatPanel()) {
+    useSessionUIStore.getState().setCurrentSession(session.id, directory);
+    return;
+  }
   useUIStore.getState().openContextPanelTab(directory, {
     mode: 'chat',
     dedupeKey: `session:${session.id}`,

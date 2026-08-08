@@ -53,7 +53,7 @@ import {
     sendImplementationResponseToReviewer,
     sendReviewFeedbackToOriginal,
 } from '@/lib/reviewFlow';
-import { isEmbeddedSessionChat } from '@/components/layout/contextPanelEmbeddedChat';
+import { canHostEmbeddedSessionChatPanel } from '@/components/layout/contextPanelEmbeddedChat';
 import { useProviderLogo } from '@/hooks/useProviderLogo';
 import { getAgentColor } from '@/lib/agentColors';
 
@@ -260,7 +260,7 @@ const UserSubtaskPart: React.FC<{ part: SubtaskPartLike }> = ({ part }) => {
                             // session-chat iframe) or single-surface layouts
                             // (mobile, VS Code), navigate in place. Otherwise
                             // open a new side-panel tab.
-                            if (isEmbeddedSessionChat() || isMobile || isVSCodeRuntime()) {
+                            if (isMobile || isVSCodeRuntime() || !canHostEmbeddedSessionChatPanel()) {
                                 setCurrentSession(taskSessionID, effectiveDirectory);
                                 return;
                             }

@@ -1,6 +1,5 @@
 import React from 'react';
 import { MainLayout } from '@/components/layout/MainLayout';
-import { ChatView } from '@/components/views/ChatView';
 import { FireworksProvider } from '@/contexts/FireworksContext';
 import { Toaster } from '@/components/ui/sonner';
 import { Button } from '@/components/ui/button';
@@ -39,7 +38,6 @@ import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-sw
 import { useAutoReviewStore } from '@/stores/useAutoReviewStore';
 import { resumeAutoReviewRun } from '@/lib/reviewFlow';
 import { SyncProvider } from '@/sync/sync-context';
-import { useSync } from '@/sync/use-sync';
 import { ConfigUpdateOverlay } from '@/components/ui/ConfigUpdateOverlay';
 import { AboutDialog } from '@/components/ui/AboutDialog';
 import { RuntimeAPIProvider } from '@/contexts/RuntimeAPIProvider';
@@ -54,7 +52,12 @@ import { MCP_OAUTH_CALLBACK_PATH } from '@/components/sections/mcp/mcpOAuth';
 import { lazyWithChunkRecovery } from '@/lib/chunkLoadRecovery';
 import { useI18n } from '@/lib/i18n';
 import { applyMobileKeyboardMode } from '@/lib/mobileKeyboardMode';
-import { isEmbeddedSessionChat } from '@/components/layout/contextPanelEmbeddedChat';
+import { EmbeddedSessionChatApp } from '@/apps/EmbeddedSessionChatApp';
+import {
+  readEmbeddedSessionChatConfig,
+  type EmbeddedSessionChatConfig,
+  type EmbeddedVisibilityPayload,
+} from '@/components/layout/contextPanelEmbeddedChat';
 import { SyncAppEffects } from '@/apps/AppEffects';
 import { resetAppForRuntimeEndpointChange } from '@/apps/runtimeEndpointReset';
 import { useAppFontEffects } from '@/apps/useAppFontEffects';
@@ -102,107 +105,12 @@ type AppProps = {
   apis: RuntimeAPIs;
 };
 
-type EmbeddedSessionChatConfig = {
-  sessionId: string;
-  directory: string | null;
-  readOnly: boolean;
-};
-
-type EmbeddedVisibilityPayload = {
-  visible?: unknown;
-};
-
-const normalizeEmbeddedDirectory = (value: string | null | undefined): string => {
-  if (!value) return '';
-  return value.replace(/\\/g, '/').replace(/\/+$/g, '');
-};
-
-const readEmbeddedSessionChatConfig = (): EmbeddedSessionChatConfig | null => {
-  if (typeof window === 'undefined' || !isEmbeddedSessionChat()) {
-    return null;
-  }
-
-  const params = new URLSearchParams(window.location.search);
-  const sessionIdRaw = params.get('sessionId');
-  const sessionId = typeof sessionIdRaw === 'string' ? sessionIdRaw.trim() : '';
-  if (!sessionId) {
-    return null;
-  }
-
-  const directoryRaw = params.get('directory');
-  const directory = typeof directoryRaw === 'string' && directoryRaw.trim().length > 0
-    ? directoryRaw.trim()
-    : null;
-
-  return {
-    sessionId,
-    directory,
-    readOnly: params.get('readOnly') === '1' || params.get('readOnly') === 'true',
-  };
-};
-
 const isMcpOAuthCallbackPath = (): boolean => {
   if (typeof window === 'undefined') {
     return false;
   }
 
   return window.location.pathname === MCP_OAUTH_CALLBACK_PATH;
-};
-
-const EmbeddedSessionChatContent: React.FC<{
-  embeddedSessionChat: EmbeddedSessionChatConfig;
-  isVSCodeRuntime: boolean;
-  embeddedBackgroundWorkEnabled: boolean;
-}> = ({ embeddedSessionChat, isVSCodeRuntime, embeddedBackgroundWorkEnabled }) => {
-  const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
-  const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
-  const setCurrentSession = useSessionUIStore((state) => state.setCurrentSession);
-  const sync = useSync();
-  const bootstrapKeyRef = React.useRef<string | null>(null);
-
-  const expectedDirectory = normalizeEmbeddedDirectory(embeddedSessionChat.directory);
-  const activeDirectory = normalizeEmbeddedDirectory(currentDirectory);
-
-  React.useEffect(() => {
-    if (isVSCodeRuntime) return;
-    if (expectedDirectory && activeDirectory !== expectedDirectory) return;
-
-    const bootstrapKey = `${expectedDirectory}\n${embeddedSessionChat.sessionId}`;
-    // Skip if this session was already bootstrapped and a session is still
-    // active — allows in-place navigation (e.g. "Open subtask") to change
-    // currentSessionId without this effect forcing it back. Only re-bootstrap
-    // when currentSessionId was cleared (store init, draft, delete/archive,
-    // runtime-switch remount).
-    if (bootstrapKeyRef.current === bootstrapKey && currentSessionId) {
-      return;
-    }
-
-    bootstrapKeyRef.current = bootstrapKey;
-    setCurrentSession(embeddedSessionChat.sessionId, embeddedSessionChat.directory);
-    void sync.ensureSessionRenderable(embeddedSessionChat.sessionId, true);
-  }, [
-    activeDirectory,
-    currentSessionId,
-    embeddedSessionChat.directory,
-    embeddedSessionChat.sessionId,
-    expectedDirectory,
-    isVSCodeRuntime,
-    setCurrentSession,
-    sync,
-  ]);
-
-  if (expectedDirectory && activeDirectory !== expectedDirectory) {
-    return null;
-  }
-
-  return (
-    <>
-      <SyncAppEffects embeddedBackgroundWorkEnabled={embeddedBackgroundWorkEnabled} />
-      <OpenCodeUpdateToast />
-      <ChatView readOnly={embeddedSessionChat.readOnly} />
-      <Toaster />
-    </>
-  );
 };
 
 function App({ apis }: AppProps) {
@@ -874,19 +782,10 @@ function App({ apis }: AppProps) {
   if (embeddedSessionChat) {
     return (
       <ErrorBoundary>
-        <SyncProvider key={runtimeEndpointEpoch} sdk={opencodeClient.getSdkClient()} directory={currentDirectory || ''}>
-          <RuntimeAPIProvider apis={apis}>
-            <TooltipProvider delayDuration={300} skipDelayDuration={150}>
-              <div className="h-full text-foreground bg-background">
-                <EmbeddedSessionChatContent
-                  embeddedSessionChat={embeddedSessionChat}
-                  isVSCodeRuntime={isVSCodeRuntime}
-                  embeddedBackgroundWorkEnabled={embeddedBackgroundWorkEnabled}
-                />
-              </div>
-            </TooltipProvider>
-          </RuntimeAPIProvider>
-        </SyncProvider>
+        <EmbeddedSessionChatApp
+          apis={apis}
+          embeddedBackgroundWorkEnabled={embeddedBackgroundWorkEnabled}
+        />
       </ErrorBoundary>
     );
   }

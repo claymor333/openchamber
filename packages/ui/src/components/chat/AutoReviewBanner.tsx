@@ -8,6 +8,7 @@ import { getRuntimeKey } from '@/lib/runtime-switch';
 import { useAutoReviewStore } from '@/stores/useAutoReviewStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { canHostEmbeddedSessionChatPanel } from '@/components/layout/contextPanelEmbeddedChat';
 
 export const AutoReviewBanner = memo(() => {
   const { t } = useI18n();
@@ -19,6 +20,7 @@ export const AutoReviewBanner = memo(() => {
   }, [currentSessionId]));
   const stopRun = useAutoReviewStore((state) => state.stopRun);
   const openContextPanelTab = useUIStore((state) => state.openContextPanelTab);
+  const setCurrentSession = useSessionUIStore((state) => state.setCurrentSession);
 
   if (!currentSessionId || !run || run.status !== 'running') {
     return null;
@@ -29,6 +31,12 @@ export const AutoReviewBanner = memo(() => {
     : t('chat.autoReview.status.waitingForImplementer');
 
   const handleOpenReviewSession = () => {
+    // Surfaces without a context-panel chat iframe (the embedded session-chat
+    // iframe) open the review session in the main chat instead.
+    if (!canHostEmbeddedSessionChatPanel()) {
+      setCurrentSession(run.reviewSessionID, run.directory);
+      return;
+    }
     openContextPanelTab(run.directory, {
       mode: 'chat',
       dedupeKey: `session:${run.reviewSessionID}`,

@@ -18,6 +18,8 @@ import { startModelPrefsAutoSave } from '@/lib/modelPrefsAutoSave';
 import { startTypographyWatcher } from '@/lib/typographyWatcher';
 import { preloadMarkdownRenderer } from '@/components/chat/markdownRendererLoader';
 import { SessionAuthGate } from '@/components/auth/SessionAuthGate';
+import { isEmbeddedSessionChat } from '@/components/layout/contextPanelEmbeddedChat';
+import { EmbeddedSessionChatApp } from './EmbeddedSessionChatApp';
 import { MobileApp } from './MobileApp';
 
 const initializeSharedPreferences = () => {
@@ -43,7 +45,44 @@ const initializeSharedPreferences = () => {
   });
 };
 
+const renderEmbeddedSessionChatApp = (apis: RuntimeAPIs) => {
+  initializeLocale();
+  preloadMarkdownRenderer();
+  // Apply the device classes (driven by the `surface=desktop` URL param the
+  // parent embeds) before the first React paint.
+  getDeviceInfo();
+
+  const rootElement = document.getElementById('root');
+  if (!rootElement) {
+    throw new Error('Root element not found');
+  }
+
+  createRoot(rootElement).render(
+    <StrictMode>
+      <I18nProvider>
+        <ThemeSystemProvider>
+          <ThemeProvider>
+            <DiffWorkerProvider>
+              <EmbeddedSessionChatApp apis={apis} />
+            </DiffWorkerProvider>
+          </ThemeProvider>
+        </ThemeSystemProvider>
+      </I18nProvider>
+    </StrictMode>,
+  );
+};
+
 export function renderMobileApp(apis: RuntimeAPIs) {
+  // The embedded session-chat iframe (`?ocPanel=session-chat`) renders a
+  // focused read-only chat, not the full mobile shell — matching the desktop
+  // App's embedded branch so the native tablet's context panel can host
+  // subtask chats. Do NOT stamp the mobile surface here: the URL's
+  // `surface=desktop` override drives desktop device classes for the panel.
+  if (isEmbeddedSessionChat()) {
+    renderEmbeddedSessionChatApp(apis);
+    return;
+  }
+
   // Stamp the surface before anything else reads it: perf tuning, sync paging,
   // and device info all key off isMobileSurfaceRuntime(), and without the stamp
   // a wide native device (iPad landscape) would fall out of the mobile branch.

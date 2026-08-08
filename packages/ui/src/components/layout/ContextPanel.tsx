@@ -44,6 +44,7 @@ import { Icon } from "@/components/icon/Icon";
 import { OpenChamberLogo } from "@/components/ui/OpenChamberLogo";
 import { invokeDesktopCommand } from '@/lib/desktopNative';
 import {
+  canHostEmbeddedSessionChatPanel,
   EMBEDDED_RUNTIME_BOOTSTRAP_REQUEST,
   EMBEDDED_RUNTIME_BOOTSTRAP_RESPONSE,
   getOrCreateEmbeddedSessionChatURL,
@@ -2727,7 +2728,11 @@ export const ContextPanel: React.FC = () => {
                 );
 
   const chatTabs = React.useMemo(
-    () => tabs.filter((tab) => tab.mode === 'chat'),
+    // The embedded session-chat iframe only renders on surfaces whose
+    // entrypoint mounts the embedded branch. Inside the embedded iframe itself
+    // (which renders its own ChatView) no nested panel tabs exist, so this
+    // never renders anything — kept as a guard for consistency.
+    () => (canHostEmbeddedSessionChatPanel() ? tabs.filter((tab) => tab.mode === 'chat') : []),
     [tabs],
   );
   const browserTabs = React.useMemo(

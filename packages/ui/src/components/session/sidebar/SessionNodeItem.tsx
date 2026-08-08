@@ -49,6 +49,7 @@ import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
 import { startSessionTreeWorktreeMove, useIsSessionWorktreeMovePending } from '@/lib/worktrees/sessionWorktreeMove';
 import { streamPerfCount } from '@/stores/utils/streamDebug';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { canHostEmbeddedSessionChatPanel } from '@/components/layout/contextPanelEmbeddedChat';
 
 type Folder = { id: string; name: string; sessionIds: string[] };
 
@@ -989,6 +990,12 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
           disabled={!sessionDirectory}
           onClick={() => {
             if (!sessionDirectory) return;
+            // Surfaces without a context-panel chat iframe (the embedded
+            // session-chat iframe) open the session in the main chat instead.
+            if (!canHostEmbeddedSessionChatPanel()) {
+              useSessionUIStore.getState().setCurrentSession(session.id, sessionDirectory);
+              return;
+            }
             openContextPanelTab(sessionDirectory, {
               mode: 'chat',
               dedupeKey: `session:${session.id}`,

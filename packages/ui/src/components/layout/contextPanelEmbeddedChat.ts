@@ -198,6 +198,57 @@ export const resetEmbeddedSessionChatCache = (): void => {
 };
 
 /**
+ * True when THIS window can host an embedded session-chat iframe inside its
+ * context panel. Every surface whose entrypoint mounts the shared
+ * `EmbeddedSessionChatApp` for `?ocPanel=session-chat` qualifies — web,
+ * desktop shells, and the native tablet's desktop layout. Only the embedded
+ * session-chat iframe itself cannot (it already IS the panel chat; a nested
+ * panel tab would recurse). Callers that want to open a session from a
+ * context without a panel tab (the embedded iframe, mobile phones, VS Code)
+ * navigate in place instead.
+ */
+export const canHostEmbeddedSessionChatPanel = (): boolean => !isEmbeddedSessionChat();
+
+export type EmbeddedSessionChatConfig = {
+  sessionId: string;
+  directory: string | null;
+  readOnly: boolean;
+};
+
+export type EmbeddedVisibilityPayload = {
+  visible?: unknown;
+};
+
+/**
+ * The session identity recorded in the embedded iframe's URL
+ * (`?ocPanel=session-chat&sessionId=…&directory=…&readOnly=…`). Returns
+ * `null` outside the embedded iframe or when the URL is malformed.
+ */
+export const readEmbeddedSessionChatConfig = (): EmbeddedSessionChatConfig | null => {
+  if (typeof window === 'undefined' || !isEmbeddedSessionChat()) {
+    return null;
+  }
+
+  const params = new URLSearchParams(window.location.search);
+  const sessionIdRaw = params.get('sessionId');
+  const sessionId = typeof sessionIdRaw === 'string' ? sessionIdRaw.trim() : '';
+  if (!sessionId) {
+    return null;
+  }
+
+  const directoryRaw = params.get('directory');
+  const directory = typeof directoryRaw === 'string' && directoryRaw.trim().length > 0
+    ? directoryRaw.trim()
+    : null;
+
+  return {
+    sessionId,
+    directory,
+    readOnly: params.get('readOnly') === '1' || params.get('readOnly') === 'true',
+  };
+};
+
+/**
  * The session ID recorded in the embedded iframe's URL
  * (`?ocPanel=session-chat&sessionId=…`), i.e. the session the panel was
  * opened to show. Returns `null` outside the embedded iframe or when the
