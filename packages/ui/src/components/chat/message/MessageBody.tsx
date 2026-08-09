@@ -57,6 +57,8 @@ import { isEmbeddedSessionChat } from '@/components/layout/contextPanelEmbeddedC
 import { useProviderLogo } from '@/hooks/useProviderLogo';
 import { getAgentColor } from '@/lib/agentColors';
 import { isCapacitorMobileApp } from '@/apps/mobileNativeChrome';
+import { useHybridTabletLayout } from '@/hooks/useHybridTabletLayout';
+import { shouldNavigateSubtaskInPlace } from './subtaskNavigation';
 
 
 const CONTAIN_LAYOUT_STYLE = { contain: 'layout' as const, transform: 'translateZ(0)' };
@@ -195,6 +197,7 @@ const UserSubtaskPart: React.FC<{ part: SubtaskPartLike }> = ({ part }) => {
     const [expanded, setExpanded] = React.useState(false);
     const effectiveDirectory = useEffectiveDirectory();
     const { isMobile } = useDeviceInfo();
+    const { isHybridTablet } = useHybridTabletLayout();
     const setCurrentSession = useSessionUIStore((state) => state.setCurrentSession);
     const openContextPanelTab = useUIStore((state) => state.openContextPanelTab);
     const { t } = useI18n();
@@ -261,7 +264,7 @@ const UserSubtaskPart: React.FC<{ part: SubtaskPartLike }> = ({ part }) => {
                             // session-chat iframe) or single-surface layouts
                             // (mobile, VS Code), navigate in place. Otherwise
                             // open a new side-panel tab.
-                            if (isEmbeddedSessionChat() || isMobile || isVSCodeRuntime()) {
+                            if (shouldNavigateSubtaskInPlace(isEmbeddedSessionChat(), isMobile, isHybridTablet, isVSCodeRuntime())) {
                                 setCurrentSession(taskSessionID, effectiveDirectory);
                                 return;
                             }
