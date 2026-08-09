@@ -775,6 +775,7 @@ interface UIStore {
   maxLastMessageLength: number; // chars — truncate {last_message} when summarization is off
 
   showTerminalQuickKeysOnDesktop: boolean;
+  hybridTabletUIEnabled: boolean;
   persistChatDraft: boolean;
   showOpenCodeUpdateNotifications: boolean;
   agentControlToolEnabled: boolean;
@@ -956,6 +957,7 @@ interface UIStore {
   setNativeNotificationsEnabled: (value: boolean) => void;
   setNotificationMode: (mode: 'always' | 'hidden-only') => void;
   setShowTerminalQuickKeysOnDesktop: (value: boolean) => void;
+  setHybridTabletUIEnabled: (value: boolean) => void;
   setNotifyOnSubtasks: (value: boolean) => void;
   setDockBadgeEnabled: (value: boolean) => void;
   setNotifyOnCompletion: (value: boolean) => void;
@@ -1134,6 +1136,7 @@ export const useUIStore = create<UIStore>()(
         maxLastMessageLength: 250,
 
         showTerminalQuickKeysOnDesktop: false,
+        hybridTabletUIEnabled: false,
         persistChatDraft: true,
         showOpenCodeUpdateNotifications: !isWindowsArm64(),
         agentControlToolEnabled: true,
@@ -2339,6 +2342,10 @@ export const useUIStore = create<UIStore>()(
           set({ showTerminalQuickKeysOnDesktop: value });
         },
 
+        setHybridTabletUIEnabled: (value) => {
+          set({ hybridTabletUIEnabled: value });
+        },
+
         setNotifyOnSubtasks: (value) => {
           set({ notifyOnSubtasks: value });
         },
@@ -2768,6 +2775,7 @@ export const useUIStore = create<UIStore>()(
           nativeNotificationsEnabled: state.nativeNotificationsEnabled,
           notificationMode: state.notificationMode,
           showTerminalQuickKeysOnDesktop: state.showTerminalQuickKeysOnDesktop,
+          hybridTabletUIEnabled: state.hybridTabletUIEnabled,
           notifyOnSubtasks: state.notifyOnSubtasks,
           dockBadgeEnabled: state.dockBadgeEnabled,
           notifyOnCompletion: state.notifyOnCompletion,
