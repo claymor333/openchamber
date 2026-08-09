@@ -170,6 +170,14 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     isAvailable: (ctx) => !ctx.isMobile && !ctx.isVSCode,
   },
   {
+    id: 'appearance.hybrid-tablet-ui',
+    page: 'general',
+    titleKey: 'settings.openchamber.visual.field.hybridTabletUI',
+    descriptionKey: 'settings.openchamber.visual.field.hybridTabletUITooltip',
+    keywords: ['hybrid', 'tablet', 'layout', 'workspace', 'panel', 'rail'],
+    isAvailable: (ctx) => ctx.isMobile && !ctx.isVSCode,
+  },
+  {
     id: 'appearance.usage-reports',
     page: 'general',
     titleKey: 'settings.openchamber.visual.field.sendAnonymousUsageReports',
