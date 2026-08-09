@@ -40,6 +40,10 @@ const GUTTER_RIGHT_OFFSET_PX = 6;
 export const resolveRailGutterWidth = (isHybridTablet: boolean, isNarrowGutter: boolean): number => {
   return isHybridTablet ? TOUCH_GUTTER_WIDTH_PX : (isNarrowGutter ? GUTTER_NARROW_WIDTH_PX : GUTTER_WIDTH_PX);
 };
+// eslint-disable-next-line react-refresh/only-export-components -- pure helper for tests
+export const shouldConsumeGutterClick = (suppressFlag: boolean): boolean => {
+  return suppressFlag;
+};
 // The rail shows at most a window of ticks; hovering the gutter edges
 // carousels the window through the rest of the prompts.
 const MAX_VISIBLE_TICKS = 30;
@@ -116,6 +120,10 @@ export function PromptNavigatorRail({
     // outside the rail, so imprecise finger input can correct itself.
     const [pinMode, setPinMode] = React.useState<'off' | 'scrubbing' | 'pinned'>('off');
     const touchPointerIdRef = React.useRef<number | null>(null);
+    // Set when a touch scrub ends (pointerup or pointercancel): the browser
+    // synthesizes a click on the capture target afterwards, and that click
+    // must not select+close a panel that just became pinned.
+    const suppressNextClickRef = React.useRef(false);
 
     // Shrink the hit zone whenever the message column reaches under the
     // full-width gutter, so bubble clicks (expand/collapse) stay clickable.
@@ -372,8 +380,26 @@ export function PromptNavigatorRail({
         if (event.currentTarget.hasPointerCapture(event.pointerId)) {
             event.currentTarget.releasePointerCapture(event.pointerId);
         }
+        suppressNextClickRef.current = true;
         setPinMode('pinned');
     }, [isHybridTablet]);
+
+    // The OS can interrupt a scrub (gesture steal, scroll takeover, call) and
+    // fire pointercancel instead of pointerup: without this the rail would
+    // stay stuck in 'scrubbing' — the pin-release listeners never arm. Reset
+    // to 'off' so the scrub simply disappears; the synthesized click after
+    // pointercancel is also suppressed so it can't select anything.
+    const handleTouchPointerCancel = React.useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+        if (!isHybridTablet || touchPointerIdRef.current !== event.pointerId) return;
+        touchPointerIdRef.current = null;
+        if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+            event.currentTarget.releasePointerCapture(event.pointerId);
+        }
+        suppressNextClickRef.current = true;
+        setPinMode('off');
+        setHighlightedIndex(null);
+        stopCarousel();
+    }, [isHybridTablet, stopCarousel]);
 
     const closeKeyboardNav = React.useCallback(() => {
         setPromptNavigatorPanelOpen(false);
@@ -396,6 +422,10 @@ export function PromptNavigatorRail({
     }, [closeKeyboardNav, onSelectTurn, prompts, stopCarousel]);
 
     const handleGutterClick = React.useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+        if (shouldConsumeGutterClick(suppressNextClickRef.current)) {
+            suppressNextClickRef.current = false;
+            return;
+        }
         const relative = relativeIndexFromPointer(event.clientY);
         if (relative === null) {
             return;
@@ -511,6 +541,8 @@ export function PromptNavigatorRail({
         if (!isHybridTablet) {
             setPinMode('off');
             setHighlightedIndex(null);
+            touchPointerIdRef.current = null;
+            suppressNextClickRef.current = false;
         }
     }, [isHybridTablet]);
 
@@ -659,6 +691,7 @@ export function PromptNavigatorRail({
                     onPointerDown={isHybridTablet ? handleTouchPointerDown : undefined}
                     onPointerMove={isHybridTablet ? handleTouchPointerMove : undefined}
                     onPointerUp={isHybridTablet ? handleTouchPointerUp : undefined}
+                    onPointerCancel={isHybridTablet ? handleTouchPointerCancel : undefined}
                     onMouseMove={handlePointerMove}
                     onMouseLeave={handlePointerLeave}
                     onClick={handleGutterClick}
