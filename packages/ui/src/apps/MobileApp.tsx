@@ -176,6 +176,8 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
   // the mobile workspace drawer. Its open state lives in the shared UI store,
   // keyed by the effective directory.
   const openContextSurface = useUIStore((state) => state.openContextSurface);
+  const openContextPanelTab = useUIStore((state) => state.openContextPanelTab);
+  const openContextDiff = useUIStore((state) => state.openContextDiff);
   const effectiveDirectory = useEffectiveDirectory();
   const directoryKey = effectiveDirectory ? normalizeContextPanelDirectoryKey(effectiveDirectory) : '';
   const contextPanelState = useUIStore((state) => (directoryKey ? state.contextPanelByDirectory[directoryKey] : undefined));
@@ -184,23 +186,29 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
 
   const openFilesSurface = React.useCallback(() => {
     if (isHybridTablet) {
-      if (directoryKey) openContextSurface(directoryKey, 'file');
+      if (directoryKey) openContextPanelTab(directoryKey, { mode: 'file' });
       return;
     }
     setPendingChangesDiff(null);
     setWorkspaceTab('files');
     setWorkspaceOpen(true);
-  }, [directoryKey, isHybridTablet, openContextSurface]);
+  }, [directoryKey, isHybridTablet, openContextPanelTab]);
 
   const openChangesSurface = React.useCallback((diff: { path: string; staged: boolean } | null = null) => {
     if (isHybridTablet) {
-      if (directoryKey) openContextSurface(directoryKey, 'diff');
+      if (directoryKey) {
+        if (diff?.path) {
+          openContextDiff(directoryKey, diff.path, diff.staged);
+        } else {
+          openContextPanelTab(directoryKey, { mode: 'diff' });
+        }
+      }
       return;
     }
     setPendingChangesDiff(diff);
     setWorkspaceTab('changes');
     setWorkspaceOpen(true);
-  }, [directoryKey, isHybridTablet, openContextSurface]);
+  }, [directoryKey, isHybridTablet, openContextDiff, openContextPanelTab]);
 
   const leftResize = useIpadSidebarResize('left', 'openchamber.ipad.leftSidebarWidth', IPAD_LEFT_SIDEBAR_WIDTH);
   const rightResize = useIpadSidebarResize(

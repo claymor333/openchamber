@@ -382,7 +382,8 @@ export function PromptNavigatorRail({
         }
         suppressNextClickRef.current = true;
         setPinMode('pinned');
-    }, [isHybridTablet]);
+        stopCarousel();
+    }, [isHybridTablet, stopCarousel]);
 
     // The OS can interrupt a scrub (gesture steal, scroll takeover, call) and
     // fire pointercancel instead of pointerup: without this the rail would
