@@ -6,6 +6,8 @@ import { MobileAppUpdateToast } from '@/components/update/MobileAppUpdateToast';
 import { ConfigUpdateOverlay } from '@/components/ui/ConfigUpdateOverlay';
 import { Button } from '@/components/ui/button';
 import { OpenChamberLogo } from '@/components/ui/OpenChamberLogo';
+import { ContextPanel } from '@/components/layout/ContextPanel';
+import { ContextPanelRail } from '@/components/layout/ContextPanelRail';
 import { ChatView } from '@/components/views/ChatView';
 import { PlanView } from '@/components/views/PlanView';
 import { SettingsView } from '@/components/views/SettingsView';
@@ -19,6 +21,8 @@ import { usePushVisibilityBeacon } from '@/hooks/usePushVisibilityBeacon';
 import { useRouter } from '@/hooks/useRouter';
 import { useUpdatePolling } from '@/hooks/useUpdatePolling';
 import { useWindowTitle } from '@/hooks/useWindowTitle';
+import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
+import { useHybridTabletLayout } from '@/hooks/useHybridTabletLayout';
 import { opencodeClient } from '@/lib/opencode/client';
 import type { RuntimeAPIs } from '@/lib/api/types';
 import { readTabletLayout, useOrientation, useTabletLayout } from '@/lib/device';
@@ -41,11 +45,12 @@ import {
   partitionWorktreesByRegisteredProject,
   worktreeMapsEqual,
 } from '@/lib/worktrees/worktreeManager';
-import { useUIStore } from '@/stores/useUIStore';
+import { normalizeContextPanelDirectoryKey, useUIStore } from '@/stores/useUIStore';
 import { useUpdateStore } from '@/stores/useUpdateStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { SyncProvider } from '@/sync/sync-context';
 
+import { resolveHybridWorkspaceGeometry } from './hybridWorkspaceGeometry';
 import { SyncAppEffects } from './AppEffects';
 import { BusyDots } from '@/components/chat/message/parts/BusyDots';
 import { MobileConnectionWelcome, type MobileConnectionNotice } from './MobileConnectionWelcome';
@@ -151,6 +156,7 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
   // A SIZE class, not a device check: an unfolded book foldable is a tablet
   // until it is folded shut, and the shell keeps running across that change.
   const { enabled: isTabletLayout, roomyForPanels } = useTabletLayout();
+  const { isHybridTablet } = useHybridTabletLayout();
   const orientation = useOrientation();
   const isPortrait = orientation === 'portrait';
   const hasHardwareKeyboard = useHardwareKeyboard();
@@ -166,17 +172,35 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
     if (!isTabletLayout) setSidebarOpen(false);
   }, [isTabletLayout]);
 
+  // Hybrid tablet: the workspace is the desktop ContextPanel + rail instead of
+  // the mobile workspace drawer. Its open state lives in the shared UI store,
+  // keyed by the effective directory.
+  const openContextSurface = useUIStore((state) => state.openContextSurface);
+  const effectiveDirectory = useEffectiveDirectory();
+  const directoryKey = effectiveDirectory ? normalizeContextPanelDirectoryKey(effectiveDirectory) : '';
+  const contextPanelState = useUIStore((state) => (directoryKey ? state.contextPanelByDirectory[directoryKey] : undefined));
+  const activeContextTab = contextPanelState?.tabs.find((tab) => tab.id === contextPanelState.activeTabId) ?? null;
+  const panelIsOpen = isHybridTablet && Boolean(contextPanelState?.isOpen && activeContextTab);
+
   const openFilesSurface = React.useCallback(() => {
+    if (isHybridTablet) {
+      if (directoryKey) openContextSurface(directoryKey, 'file');
+      return;
+    }
     setPendingChangesDiff(null);
     setWorkspaceTab('files');
     setWorkspaceOpen(true);
-  }, []);
+  }, [directoryKey, isHybridTablet, openContextSurface]);
 
   const openChangesSurface = React.useCallback((diff: { path: string; staged: boolean } | null = null) => {
+    if (isHybridTablet) {
+      if (directoryKey) openContextSurface(directoryKey, 'diff');
+      return;
+    }
     setPendingChangesDiff(diff);
     setWorkspaceTab('changes');
     setWorkspaceOpen(true);
-  }, []);
+  }, [directoryKey, isHybridTablet, openContextSurface]);
 
   const leftResize = useIpadSidebarResize('left', 'openchamber.ipad.leftSidebarWidth', IPAD_LEFT_SIDEBAR_WIDTH);
   const rightResize = useIpadSidebarResize(
@@ -194,6 +218,13 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
   const workspacePanelWidth = workspaceAsPanel && workspaceOpen ? rightResize.width : 0;
   const sidebarWidth = isTabletLayout && sidebarOpen ? leftResize.width : 0;
 
+  const hybridGeometry = resolveHybridWorkspaceGeometry({
+    isHybridTablet,
+    panelIsOpen,
+    resizeWidth: rightResize.width,
+    legacyWorkspacePanelWidth: workspacePanelWidth,
+  });
+
   // Publish the chat column's insets so overlays portaled to <body> (model
   // picker, directory picker, every MobileOverlayPanel) can center on the CHAT
   // rather than on the window. Zero on phones, where the two are the same.
@@ -201,12 +232,12 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
     if (typeof document === 'undefined') return;
     const root = document.documentElement;
     root.style.setProperty('--oc-chat-inset-left', `${sidebarWidth}px`);
-    root.style.setProperty('--oc-chat-inset-right', `${workspacePanelWidth}px`);
+    root.style.setProperty('--oc-chat-inset-right', `${hybridGeometry.chatInsetRight}px`);
     return () => {
       root.style.removeProperty('--oc-chat-inset-left');
       root.style.removeProperty('--oc-chat-inset-right');
     };
-  }, [sidebarWidth, workspacePanelWidth]);
+  }, [sidebarWidth, hybridGeometry.chatInsetRight]);
 
   // Wide chat layout: the shared chat columns key off this root class, but only
   // the desktop App set it — so on a tablet, where the chat column is finally
@@ -439,7 +470,20 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
         <div className="flex h-full min-w-0 flex-1 flex-col" data-page-scroll-lock="true">
           <MobileHeader
             onOpenSessions={() => (isTabletLayout ? toggleSidebar() : setSessionsSheetOpen(true))}
-            onOpenWorkspace={() => setWorkspaceOpen(true)}
+            onOpenWorkspace={() => {
+              if (isHybridTablet) {
+                if (panelIsOpen) return; // already visible; never toggle-close
+                if (directoryKey) {
+                  const tabs = contextPanelState?.tabs ?? [];
+                  const lastMode = tabs.length > 0 ? (contextPanelState?.activeTabId
+                    ? tabs.find((t) => t.id === contextPanelState.activeTabId)?.mode
+                    : tabs[tabs.length - 1]?.mode) : undefined;
+                  openContextSurface(directoryKey, lastMode ?? 'git');
+                }
+                return;
+              }
+              setWorkspaceOpen(true);
+            }}
             compactTitle={isTabletLayout}
           />
           <main ref={chatMainRef} className="relative min-h-0 flex-1 overflow-hidden" data-page-scroll-lock="true">
@@ -466,58 +510,71 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
             gets a real sidebar. The drawer element keeps its position in the
             tree across rotation — only its `variant` changes — so the mounted
             panes (open diff, edited file, attached terminal) survive it. In
-            portrait the drawer portals itself out and this aside stays at 0. */}
+            portrait the drawer portals itself out and this aside stays at 0.
+            On a hybrid tablet the aside hosts the desktop ContextPanel instead
+            and the desktop rail docks beside it as an always-visible sibling. */}
         {isTabletLayout ? (
-          <aside
-            ref={rightResize.asideRef}
-            className={cn(
-              'relative flex h-full shrink-0 flex-col overflow-hidden border-l border-border/70 bg-background will-change-[width] motion-reduce:transition-none',
-              !workspacePanelWidth && 'border-l-0',
-            )}
-            style={{
-              width: workspacePanelWidth,
-              minWidth: workspacePanelWidth,
-              maxWidth: workspacePanelWidth,
-              ['--oc-ipad-sidebar-width' as string]: `${rightResize.width}px`,
-              overflowX: 'clip',
-              paddingTop: 'var(--oc-safe-area-top, 0px)',
-              transitionProperty: rightResize.isResizing ? 'none' : 'width, min-width, max-width',
-              transitionDuration: '200ms',
-              transitionTimingFunction: 'cubic-bezier(0.22, 1, 0.36, 1)',
-            }}
-            aria-hidden={!workspacePanelWidth}
-            data-page-scroll-lock="true"
-          >
-            <div
+          <>
+            <aside
+              ref={rightResize.asideRef}
               className={cn(
-                'flex h-full min-h-0 shrink-0 flex-col transition-opacity duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none',
-                rightResize.isResizing && 'pointer-events-none',
-                !workspacePanelWidth && 'pointer-events-none select-none opacity-0',
+                'relative flex h-full shrink-0 flex-col overflow-hidden border-l border-border/70 bg-background will-change-[width] motion-reduce:transition-none',
+                !hybridGeometry.workspacePanelWidth && 'border-l-0',
               )}
-              style={{ width: 'var(--oc-ipad-sidebar-width)', overflowX: 'hidden' }}
+              style={{
+                width: hybridGeometry.workspacePanelWidth,
+                minWidth: hybridGeometry.workspacePanelWidth,
+                maxWidth: hybridGeometry.workspacePanelWidth,
+                ['--oc-ipad-sidebar-width' as string]: `${rightResize.width}px`,
+                overflowX: 'clip',
+                paddingTop: 'var(--oc-safe-area-top, 0px)',
+                transitionProperty: rightResize.isResizing ? 'none' : 'width, min-width, max-width',
+                transitionDuration: '200ms',
+                transitionTimingFunction: 'cubic-bezier(0.22, 1, 0.36, 1)',
+              }}
+              aria-hidden={!hybridGeometry.workspacePanelWidth}
+              data-page-scroll-lock="true"
             >
-              <ErrorBoundary>
-                <MobileWorkspaceDrawer
-                  open={workspaceOpen}
-                  onClose={closeWorkspace}
-                  tab={workspaceTab}
-                  onTabChange={setWorkspaceTab}
-                  pendingChangesDiff={pendingChangesDiff}
-                  onOpenPlan={setOpenPlan}
-                  onOpenMcpSettings={openMcpCreateSettings}
-                  variant={workspaceAsPanel ? 'panel' : 'drawer'}
+              <div
+                className={cn(
+                  'flex h-full min-h-0 shrink-0 flex-col transition-opacity duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none',
+                  rightResize.isResizing && 'pointer-events-none',
+                  !hybridGeometry.workspacePanelWidth && 'pointer-events-none select-none opacity-0',
+                )}
+                style={{ width: 'var(--oc-ipad-sidebar-width)', overflowX: 'hidden' }}
+              >
+                <ErrorBoundary>
+                  {isHybridTablet ? (
+                    <ContextPanel embeddedWidth={rightResize.width} />
+                  ) : (
+                    <MobileWorkspaceDrawer
+                      open={workspaceOpen}
+                      onClose={closeWorkspace}
+                      tab={workspaceTab}
+                      onTabChange={setWorkspaceTab}
+                      pendingChangesDiff={pendingChangesDiff}
+                      onOpenPlan={setOpenPlan}
+                      onOpenMcpSettings={openMcpCreateSettings}
+                      variant={workspaceAsPanel ? 'panel' : 'drawer'}
+                    />
+                  )}
+                </ErrorBoundary>
+              </div>
+              {hybridGeometry.workspacePanelWidth ? (
+                <IpadSidebarResizeHandle
+                  side="right"
+                  isResizing={rightResize.isResizing}
+                  ariaLabel={t('sidebar.resize.rightPanelAria')}
+                  handleProps={rightResize.handleProps}
                 />
-              </ErrorBoundary>
-            </div>
-            {workspacePanelWidth ? (
-              <IpadSidebarResizeHandle
-                side="right"
-                isResizing={rightResize.isResizing}
-                ariaLabel={t('sidebar.resize.rightPanelAria')}
-                handleProps={rightResize.handleProps}
-              />
+              ) : null}
+            </aside>
+            {isHybridTablet ? (
+              <div className="flex h-full w-11 shrink-0 flex-col border-l border-border/70 bg-background" data-page-scroll-lock="true">
+                <ErrorBoundary><ContextPanelRail /></ErrorBoundary>
+              </div>
             ) : null}
-          </aside>
+          </>
         ) : (
           <MobileWorkspaceDrawer
             open={workspaceOpen}
