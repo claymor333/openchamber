@@ -10,6 +10,13 @@ export type HybridTabletLayout = {
   isHybridTablet: boolean;
 };
 
+export const computeIsHybridTablet = (
+  isMobileSurface: boolean,
+  hybridEnabled: boolean,
+  enabled: boolean,
+  roomyForPanels: boolean,
+): boolean => isMobileSurface && hybridEnabled && enabled && roomyForPanels;
+
 export function useHybridTabletLayout(): HybridTabletLayout {
   const { enabled, roomyForPanels } = useSyncExternalStore(
     subscribeTabletLayout,
@@ -18,6 +25,6 @@ export function useHybridTabletLayout(): HybridTabletLayout {
   );
   const hybridEnabled = useUIStore((state) => state.hybridTabletUIEnabled);
   const isMobileSurface = isMobileSurfaceRuntime();
-  const isHybridTablet = isMobileSurface && hybridEnabled && enabled && roomyForPanels;
+  const isHybridTablet = computeIsHybridTablet(isMobileSurface, hybridEnabled, enabled, roomyForPanels);
   return { isHybridTablet };
 }
