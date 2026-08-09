@@ -47,6 +47,17 @@ import {
 } from './contextPanelEmbeddedChat';
 import { getContextSurfaceWidthFraction } from '@/lib/surfaces/registry';
 import { isTerminalEventTarget } from '@/lib/terminalFocus';
+import { resolveContextPanelWidth } from '@/lib/contextPanelWidth';
+import {
+  type PreviewElementMetadata,
+  isPreviewElementMetadata,
+  formatPreviewAnnotationMarkdown,
+  renderPreviewScreenshot,
+  desktopAnnotationToFile,
+  getCachedProxyTarget,
+  getBrowserProxyTargetKey,
+  previewProxyTargetCache,
+} from '@/lib/preview/screenshot-capture';
 
 const CONTEXT_PANEL_MIN_WIDTH = 380;
 const CONTEXT_PANEL_MAX_WIDTH = 1400;
@@ -436,7 +447,7 @@ const truncateTabLabel = (value: string, maxChars: number): string => {
 };
 
 
-export const ContextPanel: React.FC = () => {
+export const ContextPanel: React.FC<{ embeddedWidth?: number }> = ({ embeddedWidth }) => {
   const { t } = useI18n();
   const effectiveDirectory = useEffectiveDirectory() ?? '';
   const directoryKey = React.useMemo(() => normalizeDirectoryKey(effectiveDirectory), [effectiveDirectory]);
@@ -476,7 +487,13 @@ export const ContextPanel: React.FC = () => {
   const widthFraction = activeModeForWidth ? getContextSurfaceWidthFraction(activeModeForWidth) : 0.5;
   const widthFallbackBase = availablePanelAreaWidth
     ?? (typeof window !== 'undefined' ? window.innerWidth : CONTEXT_PANEL_DEFAULT_WIDTH * 2);
-  const width = clampWidth(manualWidth ?? Math.round(widthFraction * widthFallbackBase));
+  const width = resolveContextPanelWidth({
+    embeddedWidth,
+    manualWidth,
+    widthFraction,
+    fallbackBase: widthFallbackBase,
+    clamp: clampWidth,
+  });
   const chatSessionIDs = React.useMemo(() => {
     const ids: string[] = [];
     for (const tab of tabs) {
@@ -562,6 +579,7 @@ export const ContextPanel: React.FC = () => {
   }, []);
 
   const handleResizeStart = React.useCallback((event: React.PointerEvent) => {
+    if (embeddedWidth !== undefined) return;
     if (!isOpen || isExpanded || !directoryKey) {
       return;
     }
@@ -575,7 +593,7 @@ export const ContextPanel: React.FC = () => {
     resizeAvailableWidthRef.current = getAvailablePanelWidth(panelRef.current);
     document.documentElement.style.cursor = 'col-resize';
     event.preventDefault();
-  }, [directoryKey, isExpanded, isOpen, width]);
+  }, [directoryKey, embeddedWidth, isExpanded, isOpen, width]);
 
   const finishResize = React.useCallback(() => {
     // Apply the final width once, letting the regular 200ms width transition
@@ -1119,7 +1137,7 @@ export const ContextPanel: React.FC = () => {
       {isOpen && (
         <div aria-hidden="true" className="absolute right-0 top-0 z-40 h-full w-px bg-border" />
       )}
-      {!isExpanded && (
+      {!isExpanded && embeddedWidth === undefined && (
         <div
           className={cn(
             'absolute left-0 top-0 z-50 h-full w-[3px] cursor-col-resize transition-colors hover:bg-[var(--interactive-border)]/80',
