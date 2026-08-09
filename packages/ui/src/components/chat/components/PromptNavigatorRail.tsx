@@ -35,6 +35,11 @@ const GUTTER_NARROW_WIDTH_PX = 12;
 // forgiving hit target without demanding tick-level precision.
 const TOUCH_GUTTER_WIDTH_PX = 44;
 const GUTTER_RIGHT_OFFSET_PX = 6;
+
+// eslint-disable-next-line react-refresh/only-export-components -- pure helper for tests
+export const resolveRailGutterWidth = (isHybridTablet: boolean, isNarrowGutter: boolean): number => {
+  return isHybridTablet ? TOUCH_GUTTER_WIDTH_PX : (isNarrowGutter ? GUTTER_NARROW_WIDTH_PX : GUTTER_WIDTH_PX);
+};
 // The rail shows at most a window of ticks; hovering the gutter edges
 // carousels the window through the rest of the prompts.
 const MAX_VISIBLE_TICKS = 30;
@@ -596,9 +601,7 @@ export function PromptNavigatorRail({
     const gutterMask = hasMoreAbove || hasMoreBelow
         ? `linear-gradient(to bottom, ${hasMoreAbove ? 'transparent, black 14%' : 'black'}, ${hasMoreBelow ? 'black 86%, transparent' : 'black'})`
         : undefined;
-    const gutterWidthPx = isHybridTablet
-        ? TOUCH_GUTTER_WIDTH_PX
-        : (isNarrowGutter ? GUTTER_NARROW_WIDTH_PX : GUTTER_WIDTH_PX);
+    const gutterWidthPx = resolveRailGutterWidth(isHybridTablet, isNarrowGutter);
 
     if (prompts.length === 0) {
         return null;
