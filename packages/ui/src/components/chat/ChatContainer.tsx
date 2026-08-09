@@ -49,6 +49,7 @@ import {
 } from '@/sync/sync-context';
 import { useSync } from '@/sync/use-sync';
 import { usePlanDetection } from '@/hooks/usePlanDetection';
+import { useHybridTabletLayout } from '@/hooks/useHybridTabletLayout';
 import { useI18n } from '@/lib/i18n';
 import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
 import { isVSCodeRuntime } from '@/lib/desktop';
@@ -186,6 +187,7 @@ type ChatViewportProps = {
     activeTurnId: string | null;
     onSelectTurn: (turnId: string) => void;
     showPromptNavigator: boolean;
+    isHybridTablet: boolean;
     canLoadEarlierPrompts: boolean;
     isLoadingOlderPrompts: boolean;
     onLoadEarlierPrompts: () => void;
@@ -223,6 +225,7 @@ const ChatViewport = React.memo(({
     activeTurnId,
     onSelectTurn,
     showPromptNavigator,
+    isHybridTablet,
     canLoadEarlierPrompts,
     isLoadingOlderPrompts,
     onLoadEarlierPrompts,
@@ -423,6 +426,7 @@ const ChatViewport = React.memo(({
                         canLoadEarlier={canLoadEarlierPrompts}
                         isLoadingOlder={isLoadingOlderPrompts}
                         onLoadEarlier={onLoadEarlierPrompts}
+                        isHybridTablet={isHybridTablet}
                     />
                 ) : null}
             </div>
@@ -454,6 +458,7 @@ const ChatViewport = React.memo(({
         && prev.activeTurnId === next.activeTurnId
         && prev.onSelectTurn === next.onSelectTurn
         && prev.showPromptNavigator === next.showPromptNavigator
+        && prev.isHybridTablet === next.isHybridTablet
         && prev.canLoadEarlierPrompts === next.canLoadEarlierPrompts
         && prev.isLoadingOlderPrompts === next.isLoadingOlderPrompts
         && prev.onLoadEarlierPrompts === next.onLoadEarlierPrompts;
@@ -1049,7 +1054,8 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
         void navigation.scrollToTurnId(turnId, { behavior: 'auto' });
     }, [navigation]);
     const canLoadEarlierPrompts = timelineController.historySignals.canLoadEarlier;
-    const showPromptNavigator = !isMobile
+    const { isHybridTablet } = useHybridTabletLayout();
+    const showPromptNavigator = (!isMobile || isHybridTablet)
         && !isVSCode
         && !isDesktopExpandedInput
         && promptNavigatorEnabled
@@ -1421,6 +1427,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
                 activeTurnId={timelineController.activeTurnId}
                 onSelectTurn={handlePromptNavigatorSelect}
                 showPromptNavigator={showPromptNavigator}
+                isHybridTablet={isHybridTablet}
                 canLoadEarlierPrompts={canLoadEarlierPrompts}
                 isLoadingOlderPrompts={timelineController.isLoadingOlder}
                 onLoadEarlierPrompts={handleLoadOlderClick}

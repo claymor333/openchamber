@@ -20,6 +20,7 @@ type PromptNavigatorRailProps = {
     canLoadEarlier: boolean;
     isLoadingOlder: boolean;
     onLoadEarlier: () => void;
+    isHybridTablet?: boolean;
 };
 
 const PREVIEW_MAX_CHARS = 160;
@@ -30,6 +31,9 @@ const PREVIEW_MAX_CHARS = 160;
 // of user bubbles (expand/collapse).
 const GUTTER_WIDTH_PX = 28;
 const GUTTER_NARROW_WIDTH_PX = 12;
+// Hybrid-tablet touch mode widens the gutter so finger scrubbing has a
+// forgiving hit target without demanding tick-level precision.
+const TOUCH_GUTTER_WIDTH_PX = 44;
 const GUTTER_RIGHT_OFFSET_PX = 6;
 // The rail shows at most a window of ticks; hovering the gutter edges
 // carousels the window through the rest of the prompts.
@@ -93,6 +97,7 @@ export function PromptNavigatorRail({
     canLoadEarlier,
     isLoadingOlder,
     onLoadEarlier,
+    isHybridTablet = false,
 }: PromptNavigatorRailProps) {
     const { t } = useI18n();
     const isKeyboardNavOpen = useUIStore((state) => state.isPromptNavigatorPanelOpen);
@@ -102,6 +107,10 @@ export function PromptNavigatorRail({
     const [highlightedIndex, setHighlightedIndex] = React.useState<number | null>(null);
     const [windowStart, setWindowStart] = React.useState(0);
     const [isNarrowGutter, setIsNarrowGutter] = React.useState(false);
+    // Hybrid-tablet touch: scrubbing pins the panel open until the user taps
+    // outside the rail, so imprecise finger input can correct itself.
+    const [pinMode, setPinMode] = React.useState<'off' | 'scrubbing' | 'pinned'>('off');
+    const touchPointerIdRef = React.useRef<number | null>(null);
 
     // Shrink the hit zone whenever the message column reaches under the
     // full-width gutter, so bubble clicks (expand/collapse) stay clickable.
@@ -323,6 +332,44 @@ export function PromptNavigatorRail({
         scheduleHide();
     }, [scheduleHide, stopCarousel]);
 
+    const handleTouchPointerDown = React.useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+        if (!isHybridTablet) return;
+        touchPointerIdRef.current = event.pointerId;
+        event.currentTarget.setPointerCapture(event.pointerId);
+        setPinMode('scrubbing');
+        cancelScheduledHide();
+        pointerYRef.current = event.clientY;
+        const relative = relativeIndexFromPointer(event.clientY);
+        if (relative !== null) {
+            setHighlightedIndex(
+                Math.min(promptsLengthRef.current - 1, windowStartRef.current + relative),
+            );
+        }
+        updateCarousel(event.clientY);
+    }, [cancelScheduledHide, isHybridTablet, relativeIndexFromPointer, updateCarousel]);
+
+    const handleTouchPointerMove = React.useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+        if (!isHybridTablet || touchPointerIdRef.current !== event.pointerId) return;
+        cancelScheduledHide();
+        pointerYRef.current = event.clientY;
+        const relative = relativeIndexFromPointer(event.clientY);
+        if (relative !== null) {
+            setHighlightedIndex(
+                Math.min(promptsLengthRef.current - 1, windowStartRef.current + relative),
+            );
+        }
+        updateCarousel(event.clientY);
+    }, [cancelScheduledHide, isHybridTablet, relativeIndexFromPointer, updateCarousel]);
+
+    const handleTouchPointerUp = React.useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+        if (!isHybridTablet || touchPointerIdRef.current !== event.pointerId) return;
+        touchPointerIdRef.current = null;
+        if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+            event.currentTarget.releasePointerCapture(event.pointerId);
+        }
+        setPinMode('pinned');
+    }, [isHybridTablet]);
+
     const closeKeyboardNav = React.useCallback(() => {
         setPromptNavigatorPanelOpen(false);
     }, [setPromptNavigatorPanelOpen]);
@@ -338,6 +385,7 @@ export function PromptNavigatorRail({
         onSelectTurn(prompt.turnId);
         stopCarousel();
         setHighlightedIndex(null);
+        setPinMode('off');
         closeKeyboardNav();
         gutterRef.current?.blur();
     }, [closeKeyboardNav, onSelectTurn, prompts, stopCarousel]);
@@ -420,6 +468,46 @@ export function PromptNavigatorRail({
         setHighlightedIndex(null);
         closeKeyboardNav();
     }, [closeKeyboardNav, stopCarousel]);
+
+    // While pinned (finger scrub), a tap anywhere outside the rail closes it —
+    // the panel is pinned open so a short tap far from the gutter can dismiss.
+    const pinnedMoveRef = React.useRef<{ x: number; y: number } | null>(null);
+
+    React.useEffect(() => {
+        if (!isHybridTablet || pinMode !== 'pinned') return;
+
+        const handlePointerDown = (event: PointerEvent) => {
+            const target = event.target as HTMLElement;
+            if (gutterRef.current?.contains(target) || navRef.current?.contains(target)) return;
+            pinnedMoveRef.current = { x: event.clientX, y: event.clientY };
+        };
+
+        const handlePointerUp = (event: PointerEvent) => {
+            const start = pinnedMoveRef.current;
+            pinnedMoveRef.current = null;
+            if (!start) return;
+            const moved = Math.hypot(event.clientX - start.x, event.clientY - start.y);
+            if (moved < 6) {
+                setPinMode('off');
+                setHighlightedIndex(null);
+                stopCarousel();
+            }
+        };
+
+        document.addEventListener('pointerdown', handlePointerDown);
+        document.addEventListener('pointerup', handlePointerUp);
+        return () => {
+            document.removeEventListener('pointerdown', handlePointerDown);
+            document.removeEventListener('pointerup', handlePointerUp);
+        };
+    }, [isHybridTablet, pinMode, stopCarousel]);
+
+    React.useEffect(() => {
+        if (!isHybridTablet) {
+            setPinMode('off');
+            setHighlightedIndex(null);
+        }
+    }, [isHybridTablet]);
 
     // Wheel over the panel steps the highlight instead of scrolling the chat
     // underneath; a native non-passive listener is required for preventDefault.
@@ -508,6 +596,9 @@ export function PromptNavigatorRail({
     const gutterMask = hasMoreAbove || hasMoreBelow
         ? `linear-gradient(to bottom, ${hasMoreAbove ? 'transparent, black 14%' : 'black'}, ${hasMoreBelow ? 'black 86%, transparent' : 'black'})`
         : undefined;
+    const gutterWidthPx = isHybridTablet
+        ? TOUCH_GUTTER_WIDTH_PX
+        : (isNarrowGutter ? GUTTER_NARROW_WIDTH_PX : GUTTER_WIDTH_PX);
 
     if (prompts.length === 0) {
         return null;
@@ -558,9 +649,13 @@ export function PromptNavigatorRail({
                     }
                     className="relative cursor-pointer outline-none"
                     style={{
-                        width: `${isNarrowGutter ? GUTTER_NARROW_WIDTH_PX : GUTTER_WIDTH_PX}px`,
+                        width: `${gutterWidthPx}px`,
                         height: `${visibleCount * TICK_PITCH_PX}px`,
+                        touchAction: isHybridTablet ? 'none' : undefined,
                     }}
+                    onPointerDown={isHybridTablet ? handleTouchPointerDown : undefined}
+                    onPointerMove={isHybridTablet ? handleTouchPointerMove : undefined}
+                    onPointerUp={isHybridTablet ? handleTouchPointerUp : undefined}
                     onMouseMove={handlePointerMove}
                     onMouseLeave={handlePointerLeave}
                     onClick={handleGutterClick}
