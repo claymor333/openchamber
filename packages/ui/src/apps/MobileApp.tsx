@@ -518,6 +518,7 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
             panes (open diff, edited file, attached terminal) survive it. In
             portrait the drawer portals itself out and this aside stays at 0. */}
         {isTabletLayout ? (
+          <>
           <aside
             ref={rightResize.asideRef}
             className={cn(
@@ -598,8 +599,23 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
                   }}
                 />
               ) : null}
-            </div>
-          </aside>
+            </aside>
+            {isHybridTablet ? (
+              <div
+                className={cn(
+                  'flex h-full w-11 shrink-0 flex-col border-l border-border/70 bg-background',
+                  // When the panel is expanded the aside goes absolute (out of
+                  // flex flow), which would pull this rail leftward to sit
+                  // behind it. Pin the rail to the far right edge instead.
+                  isExpandedHybridPanel && 'absolute inset-y-0 right-0',
+                )}
+                style={{ paddingTop: 'var(--oc-safe-area-top, 0px)' }}
+                data-page-scroll-lock="true"
+              >
+                <ErrorBoundary><ContextPanelRail /></ErrorBoundary>
+              </div>
+            ) : null}
+          </>
         ) : (
           <MobileWorkspaceDrawer
             open={workspaceOpen}
