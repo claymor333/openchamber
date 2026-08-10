@@ -2706,6 +2706,9 @@ export const ContextPanel: React.FC<{
           ['--oc-context-panel-width' as string]: availablePanelAreaWidth !== null ? `${availablePanelAreaWidth}px` : '100%',
           width: availablePanelAreaWidth !== null ? `${availablePanelAreaWidth}px` : '100%',
           maxWidth: '100%',
+          // Embedded (hybrid tablet): absolute positioning escapes the host
+          // aside's safe-area padding, so offset below the status bar here.
+          ...(embeddedWidth !== undefined ? { top: 'var(--oc-safe-area-top, 0px)' } : null),
         }
       : embeddedWidth !== undefined
         ? {
@@ -2740,6 +2743,9 @@ export const ContextPanel: React.FC<{
         // Right-anchored while expanded: `inset-0` would teleport the left
         // edge instantly (position does not transition), so only the width
         // animates and the panel grows leftwards from its docked position.
+        // In embedded (hybrid tablet) mode the host aside already applies
+        // safe-area top padding, but absolute positioning escapes it — offset
+        // the expanded panel below the status bar too.
         isExpanded
           ? 'absolute inset-y-0 right-0 z-20 min-w-0'
           : 'relative h-full flex-shrink-0',
