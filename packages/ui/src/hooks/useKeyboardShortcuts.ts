@@ -18,6 +18,7 @@ import {
   normalizeCombo,
 } from '@/lib/shortcuts';
 import { getVisibleContextRailSurfaces } from '@/lib/surfaces/registry';
+import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
 import { readEmbeddedThemeSearchParams } from '@/contexts/theme-embedded-bootstrap';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
@@ -505,6 +506,7 @@ export const useKeyboardShortcuts = () => {
           railOrder: state.contextRailOrder,
           planModeEnabled: useFeatureFlagsStore.getState().planModeEnabled,
           isVSCode: isVSCodeRuntime(),
+          isMobileSurface: isMobileSurfaceRuntime(),
           screenWidth: window.innerWidth,
           tabs: panelState?.tabs ?? [],
         });

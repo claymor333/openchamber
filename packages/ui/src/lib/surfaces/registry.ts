@@ -189,6 +189,11 @@ type VisibleRailSurfacesOptions = {
   railOrder: readonly string[];
   planModeEnabled: boolean;
   isVSCode: boolean;
+  /** On the mobile surface the app origin serves the bundled SPA for all
+      navigations and the server is only reachable over the WebSocket relay,
+      so iframe-based web surfaces (browser/preview) cannot render in-app.
+      They are hidden from the rail there. */
+  isMobileSurface: boolean;
   screenWidth: number;
   tabs: readonly { mode: ContextPanelMode }[];
 };
@@ -204,6 +209,12 @@ type VisibleRailSurfacesOptions = {
 export const getVisibleContextRailSurfaces = (options: VisibleRailSurfacesOptions): ContextSurfaceDescriptor[] => {
   return sortContextSurfaces(options.railOrder).filter((surface) => {
     if (surface.id === 'plan' && !options.planModeEnabled) {
+      return false;
+    }
+    // Web surfaces need an in-app iframe that reaches the server; on the
+    // mobile surface that is impossible (bundled SPA origin + relay-only
+    // transport), so they are removed rather than shown broken.
+    if (options.isMobileSurface && (surface.id === 'browser' || surface.id === 'preview')) {
       return false;
     }
     // The walkthrough needs room for a stop list beside real code, and its
