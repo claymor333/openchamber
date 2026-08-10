@@ -33,7 +33,6 @@ import { browserUrlLabel } from '@/lib/browser/url';
 import { registerBrowserOpener } from '@/lib/browser/controlClient';
 import { getRuntimeBearerTokenSync, getRuntimeExtraHeadersSync } from '@/lib/runtime-auth';
 import { getRuntimeApiBaseUrl, getRuntimeKey } from '@/lib/runtime-switch';
-import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
 import { getActiveRelayDescriptor } from '@/lib/relay/runtime-tunnel';
 import { Icon } from "@/components/icon/Icon";
 import {
@@ -1713,20 +1712,7 @@ const IframeBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dire
         <Button type="button" variant="ghost" size="sm" className="h-7 w-7 p-0" disabled={!currentUrl} onClick={handleReload}>
           <Icon name="refresh" className="h-3.5 w-3.5" />
         </Button>
-        <form className="min-w-0 flex-1" onSubmit={(event) => {
-            event.preventDefault();
-            // On the mobile surface the panel's `https://localhost` origin is
-            // the bundled app, not a server — an iframe navigation to a
-            // proxied URL would load the app shell instead of the target.
-            // Open the address in the system browser instead (the app cannot
-            // host external sites in an iframe on this architecture).
-            if (isMobileSurfaceRuntime()) {
-              const target = normalizeBrowserUrl(urlInput);
-              if (target !== 'about:blank') void openExternalUrl(target);
-              return;
-            }
-            applyUrl(urlInput);
-          }}>
+        <form className="min-w-0 flex-1" onSubmit={(event) => { event.preventDefault(); applyUrl(urlInput); }}>
           <input
             value={urlInput}
             onChange={(event) => setUrlInput(event.target.value)}
