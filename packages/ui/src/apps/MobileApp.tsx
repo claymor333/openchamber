@@ -227,11 +227,31 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
   const workspacePanelWidth = workspaceAsPanel && workspaceOpen ? rightResize.width : 0;
   const sidebarWidth = isTabletLayout && sidebarOpen ? leftResize.width : 0;
 
+  // Track the live viewport width so the expanded panel's full-chat-area width
+  // reflows on resize/orientation changes (the shared tablet store handles
+  // size-class changes, but not every pixel of a manual resize).
+  const viewportWidth = React.useSyncExternalStore(
+    React.useCallback((onStoreChange: () => void) => {
+      if (typeof window === 'undefined') return () => {};
+      window.addEventListener('resize', onStoreChange);
+      window.addEventListener('orientationchange', onStoreChange);
+      return () => {
+        window.removeEventListener('resize', onStoreChange);
+        window.removeEventListener('orientationchange', onStoreChange);
+      };
+    }, []),
+    () => (typeof window !== 'undefined' ? window.innerWidth : 0),
+    () => 0,
+  );
+
   const hybridGeometry = resolveHybridWorkspaceGeometry({
     isHybridTablet,
     panelIsOpen,
+    isExpanded: Boolean(contextPanelState?.expanded && activeContextTab),
     resizeWidth: rightResize.width,
     legacyWorkspacePanelWidth: workspacePanelWidth,
+    viewportWidth,
+    sidebarWidth,
   });
 
   // Publish the chat column's insets so overlays portaled to <body> (model
@@ -550,7 +570,10 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
                   rightResize.isResizing && 'pointer-events-none',
                   !hybridGeometry.workspacePanelWidth && 'pointer-events-none select-none opacity-0',
                 )}
-                style={{ width: 'var(--oc-ipad-sidebar-width)', overflowX: 'hidden' }}
+                // Follow the aside's live width (imperatively updated during a
+                // drag by applyLiveWidth) so the panel tracks the finger. When
+                // expanded, the aside's geometry width is the full chat area.
+                style={{ width: '100%', overflowX: 'hidden' }}
               >
                 <ErrorBoundary>
                   {isHybridTablet ? (
