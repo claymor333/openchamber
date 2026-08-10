@@ -219,6 +219,15 @@ export const isEmbeddedSessionChat = (): boolean => {
 };
 
 /**
+ * Positive-form of `isEmbeddedSessionChat`: whether the current JS realm can
+ * host an embedded session-chat panel tab. True on the desktop shell and on
+ * the hybrid tablet (which renders desktop chrome on the mobile surface);
+ * false only inside the panel's own session-chat iframe, where a subtask
+ * click must navigate in place rather than recurse a panel tab.
+ */
+export const canHostEmbeddedSessionChatPanel = (): boolean => !isEmbeddedSessionChat();
+
+/**
  * Reset the module-level cache. Intended for tests that simulate different
  * JS realms by swapping `window.location` in the same process.
  */

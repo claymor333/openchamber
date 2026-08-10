@@ -30,6 +30,7 @@ import { useHardwareKeyboard } from '@/lib/hardwareKeyboard';
 import { useI18n } from '@/lib/i18n';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { getRuntimeApiBaseUrl, getRuntimeKey, subscribeRuntimeEndpointChanged, switchRuntimeEndpoint } from '@/lib/runtime-switch';
+import { getEmbeddedSessionChatOriginSessionId, isEmbeddedSessionChat, requestEmbeddedSessionRuntimeBootstrap } from '@/components/layout/contextPanelEmbeddedChat';
 import { refreshGlobalSessions, resolveGlobalSessionDirectory } from '@/stores/useGlobalSessionsStore';
 import { clearLastActiveSession, readLastActiveSession } from '@/sync/last-session-cache';
 import { cn } from '@/lib/utils';
@@ -553,7 +554,7 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
               >
                 <ErrorBoundary>
                   {isHybridTablet ? (
-                    <ContextPanel embeddedWidth={rightResize.width} />
+                    <ContextPanel embeddedWidth={rightResize.width} embeddedResizing={rightResize.isResizing} />
                   ) : (
                     <MobileWorkspaceDrawer
                       open={workspaceOpen}
@@ -578,7 +579,11 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
               ) : null}
             </aside>
             {isHybridTablet ? (
-              <div className="flex h-full w-11 shrink-0 flex-col border-l border-border/70 bg-background" data-page-scroll-lock="true">
+              <div
+                className="flex h-full w-11 shrink-0 flex-col border-l border-border/70 bg-background"
+                style={{ paddingTop: 'var(--oc-safe-area-top, 0px)' }}
+                data-page-scroll-lock="true"
+              >
                 <ErrorBoundary><ContextPanelRail /></ErrorBoundary>
               </div>
             ) : null}
@@ -890,6 +895,36 @@ export function MobileApp({ apis }: MobileAppProps) {
     if (!isNativeMobileApp || isConnected || getRuntimeApiBaseUrl()) {
       setAutoConnectPhase('done');
       return;
+    }
+    // Inside the panel's embedded session-chat iframe, there is no saved
+    // instance to auto-connect to — the parent already holds the connection.
+    // Request its runtime bootstrap (apiBaseUrl + token + relay) and adopt it,
+    // so the iframe shows the session instead of the connect screen.
+    if (isEmbeddedSessionChat()) {
+      let cancelled = false;
+      setAutoConnectPhase('attempting');
+      void requestEmbeddedSessionRuntimeBootstrap().then((bootstrap) => {
+        if (cancelled || !bootstrap) {
+          setAutoConnectPhase('done');
+          return;
+        }
+        switchRuntimeEndpoint({
+          apiBaseUrl: bootstrap.apiBaseUrl,
+          clientToken: bootstrap.clientToken || null,
+          requestHeaders: bootstrap.runtimeHeaders ?? null,
+          relay: bootstrap.relay ?? null,
+        });
+        setAutoConnectPhase('done');
+        // The panel opened this iframe to show a specific subagent session —
+        // read it from the URL and make it current once connected.
+        const embeddedSessionId = getEmbeddedSessionChatOriginSessionId();
+        if (embeddedSessionId && !useSessionUIStore.getState().currentSessionId) {
+          void useSessionUIStore.getState().setCurrentSession(embeddedSessionId, null);
+        }
+      });
+      return () => {
+        cancelled = true;
+      };
     }
     let cancelled = false;
     setAutoConnectPhase('attempting');

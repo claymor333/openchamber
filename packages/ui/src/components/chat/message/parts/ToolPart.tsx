@@ -10,6 +10,7 @@ import type { ToolPart as ToolPartType, ToolState as ToolStateUnion, FilePart } 
 import { toolDisplayStyles } from '@/lib/typography';
 import { WorkerHighlightedCode } from '@/components/code/WorkerHighlightedCode';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
+import { useHybridTabletLayout } from '@/hooks/useHybridTabletLayout';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSessionMessageRecords, useEnsureSessionMessages } from '@/sync/sync-context';
 import { useUIStore } from '@/stores/useUIStore';
@@ -62,7 +63,8 @@ import {
     getPrimaryToolPath,
     type DiffPatchEntry,
 } from './toolDiffUtils';
-import { isEmbeddedSessionChat } from '@/components/layout/contextPanelEmbeddedChat';
+import { canHostEmbeddedSessionChatPanel } from '@/components/layout/contextPanelEmbeddedChat';
+import { shouldNavigateSubtaskInPlace } from '../subtaskNavigation';
 import { useStreamingTextThrottle } from '../../hooks/useStreamingTextThrottle';
 import { getStreamingOutputAppend, getToolOutput } from './toolOutput';
 import { toAbsoluteFilePath } from '@/lib/path-utils';
@@ -995,6 +997,7 @@ const TaskToolSummary: React.FC<{
 }> = ({ entries, isExpanded, isMobile, output, sessionId, onShowPopup, input, animateTailText = true, isActive = false }) => {
     const { t } = useI18n();
     const currentDirectory = useEffectiveDirectory();
+    const { isHybridTablet } = useHybridTabletLayout();
     const setCurrentSession = useSessionUIStore((state) => state.setCurrentSession);
     const openContextPanelTab = useUIStore((state) => state.openContextPanelTab);
     const showToolFileIcons = useUIStore((state) => state.showToolFileIcons);
@@ -1012,7 +1015,7 @@ const TaskToolSummary: React.FC<{
             // In contexts with no ContextPanel (embedded session-chat iframe)
             // or single-surface layouts (mobile, VS Code), navigate in place.
             // Otherwise open a new side-panel tab.
-            if (isEmbeddedSessionChat() || isMobile || runtime?.runtime.isVSCode) {
+            if (shouldNavigateSubtaskInPlace(canHostEmbeddedSessionChatPanel(), isMobile, isHybridTablet, Boolean(runtime?.runtime.isVSCode))) {
                 setCurrentSession(sessionId, currentDirectory);
                 return;
             }

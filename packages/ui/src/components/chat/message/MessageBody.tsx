@@ -53,7 +53,7 @@ import {
     sendImplementationResponseToReviewer,
     sendReviewFeedbackToOriginal,
 } from '@/lib/reviewFlow';
-import { isEmbeddedSessionChat } from '@/components/layout/contextPanelEmbeddedChat';
+import { canHostEmbeddedSessionChatPanel } from '@/components/layout/contextPanelEmbeddedChat';
 import { useProviderLogo } from '@/hooks/useProviderLogo';
 import { getAgentColor } from '@/lib/agentColors';
 import { isCapacitorMobileApp } from '@/apps/mobileNativeChrome';
@@ -260,11 +260,7 @@ const UserSubtaskPart: React.FC<{ part: SubtaskPartLike }> = ({ part }) => {
                         className="typography-meta text-muted-foreground hover:text-foreground transition-colors underline underline-offset-2"
                         onClick={() => {
                             if (!effectiveDirectory) return;
-                            // In contexts with no ContextPanel (embedded
-                            // session-chat iframe) or single-surface layouts
-                            // (mobile, VS Code), navigate in place. Otherwise
-                            // open a new side-panel tab.
-                            if (shouldNavigateSubtaskInPlace(isEmbeddedSessionChat(), isMobile, isHybridTablet, isVSCodeRuntime())) {
+                            if (shouldNavigateSubtaskInPlace(canHostEmbeddedSessionChatPanel(), isMobile, isHybridTablet, isVSCodeRuntime())) {
                                 setCurrentSession(taskSessionID, effectiveDirectory);
                                 return;
                             }
