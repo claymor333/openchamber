@@ -167,6 +167,20 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
     if (!isTabletLayout) setSidebarOpen(false);
   }, [isTabletLayout]);
 
+  // Hybrid tablet: the workspace is the desktop ContextPanel + rail instead of
+  // the mobile workspace drawer. Its open state lives in the shared UI store,
+  // keyed by the effective directory.
+  const openContextSurface = useUIStore((state) => state.openContextSurface);
+  const openContextPanelTab = useUIStore((state) => state.openContextPanelTab);
+  const openContextDiff = useUIStore((state) => state.openContextDiff);
+  const effectiveDirectory = useEffectiveDirectory();
+  const directoryKey = effectiveDirectory ? normalizeContextPanelDirectoryKey(effectiveDirectory) : '';
+  const contextPanelState = useUIStore((state) => (directoryKey ? state.contextPanelByDirectory[directoryKey] : undefined));
+  const activeContextTab = contextPanelState?.tabs.find((tab) => tab.id === contextPanelState.activeTabId) ?? null;
+  const panelIsOpen = isHybridTablet && Boolean(contextPanelState?.isOpen && activeContextTab);
+  const isExpandedHybridPanel = panelIsOpen && Boolean(contextPanelState?.expanded);
+  const toggleContextPanelExpanded = useUIStore((state) => state.toggleContextPanelExpanded);
+
   const openFilesSurface = React.useCallback(() => {
     setPendingChangesDiff(null);
     setWorkspaceTab('files');
@@ -215,7 +229,7 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
   const hybridGeometry = resolveHybridWorkspaceGeometry({
     isHybridTablet,
     panelIsOpen,
-    isExpanded: Boolean(contextPanelState?.expanded && activeContextTab),
+    isExpanded: isExpandedHybridPanel,
     resizeWidth: rightResize.width,
     legacyWorkspacePanelWidth: workspacePanelWidth,
     viewportWidth,
@@ -521,6 +535,11 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
                 'flex h-full min-h-0 shrink-0 flex-col transition-opacity duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none',
                 rightResize.isResizing && 'pointer-events-none',
                 !workspacePanelWidth && 'pointer-events-none select-none opacity-0',
+                // Expanded: overlay the chat column (covering its header)
+                // instead of squeezing it — left edge at the sessions sidebar,
+                // right edge at the icon rail.
+                isExpandedHybridPanel && 'absolute inset-y-0 right-11 z-20',
+                !hybridGeometry.workspacePanelWidth && 'border-l-0',
               )}
               style={{ width: 'var(--oc-ipad-sidebar-width)', overflowX: 'hidden' }}
             >
@@ -557,7 +576,18 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
                   side="right"
                   isResizing={rightResize.isResizing}
                   ariaLabel={t('sidebar.resize.rightPanelAria')}
-                  handleProps={rightResize.handleProps}
+                  handleProps={{
+                    ...rightResize.handleProps,
+                    // Dragging the border while the panel is expanded should
+                    // dock it at the dragged width (exit expanded), not fight
+                    // the full-width geometry. Collapse before the drag starts.
+                    onPointerDown: (event: React.PointerEvent<HTMLElement>) => {
+                      if (isExpandedHybridPanel) {
+                        toggleContextPanelExpanded(directoryKey);
+                      }
+                      rightResize.handleProps.onPointerDown?.(event);
+                    },
+                  }}
                 />
               ) : null}
             </div>
