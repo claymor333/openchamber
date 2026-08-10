@@ -557,7 +557,7 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
             <aside
               ref={rightResize.asideRef}
               className={cn(
-                'flex h-full shrink-0 flex-col overflow-hidden border-l border-border/70 bg-background will-change-[width] motion-reduce:transition-none',
+                'relative flex h-full shrink-0 flex-col overflow-hidden border-l border-border/70 bg-background will-change-[width] motion-reduce:transition-none',
                 // Expanded: overlay the chat column (covering its header)
                 // instead of squeezing it — left edge at the sessions sidebar,
                 // right edge at the icon rail.
@@ -565,10 +565,18 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
                 !hybridGeometry.workspacePanelWidth && 'border-l-0',
               )}
               style={{
-                width: hybridGeometry.workspacePanelWidth,
-                minWidth: hybridGeometry.workspacePanelWidth,
-                maxWidth: hybridGeometry.workspacePanelWidth,
-                ['--oc-ipad-sidebar-width' as string]: `${rightResize.width}px`,
+                // During a drag, applyLiveWidth owns width/min/max imperatively
+                // (live per pointermove). React re-applying these here would
+                // snap the panel back to the docked width on any re-render, so
+                // they are omitted while isResizing.
+                width: rightResize.isResizing ? undefined : hybridGeometry.workspacePanelWidth,
+                minWidth: rightResize.isResizing ? undefined : hybridGeometry.workspacePanelWidth,
+                maxWidth: rightResize.isResizing ? undefined : hybridGeometry.workspacePanelWidth,
+                ['--oc-ipad-sidebar-width' as string]: rightResize.isResizing
+                  ? undefined
+                  : (isExpandedHybridPanel
+                    ? `${hybridGeometry.workspacePanelWidth}px`
+                    : `${rightResize.width}px`),
                 overflowX: 'clip',
                 paddingTop: 'var(--oc-safe-area-top, 0px)',
                 transitionProperty: rightResize.isResizing ? 'none' : 'width, min-width, max-width',
@@ -584,10 +592,11 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
                   rightResize.isResizing && 'pointer-events-none',
                   !hybridGeometry.workspacePanelWidth && 'pointer-events-none select-none opacity-0',
                 )}
-                // Follow the aside's live width (imperatively updated during a
-                // drag by applyLiveWidth) so the panel tracks the finger. When
-                // expanded, the aside's geometry width is the full chat area.
-                style={{ width: '100%', overflowX: 'hidden' }}
+                // Track the live width via the CSS var, which applyLiveWidth
+                // updates imperatively during a drag AND which the expanded
+                // geometry sets to the full chat area. This preserves the
+                // original drag mechanism exactly.
+                style={{ width: 'var(--oc-ipad-sidebar-width)', overflowX: 'hidden' }}
               >
                 <ErrorBoundary>
                   {isHybridTablet ? (
