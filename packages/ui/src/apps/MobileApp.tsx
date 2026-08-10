@@ -195,6 +195,33 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
   const workspacePanelWidth = workspaceAsPanel && workspaceOpen ? rightResize.width : 0;
   const sidebarWidth = isTabletLayout && sidebarOpen ? leftResize.width : 0;
 
+  // Track the live viewport width so the expanded panel's full-chat-area width
+  // reflows on resize/orientation changes (the shared tablet store handles
+  // size-class changes, but not every pixel of a manual resize).
+  const viewportWidth = React.useSyncExternalStore(
+    React.useCallback((onStoreChange: () => void) => {
+      if (typeof window === 'undefined') return () => {};
+      window.addEventListener('resize', onStoreChange);
+      window.addEventListener('orientationchange', onStoreChange);
+      return () => {
+        window.removeEventListener('resize', onStoreChange);
+        window.removeEventListener('orientationchange', onStoreChange);
+      };
+    }, []),
+    () => (typeof window !== 'undefined' ? window.innerWidth : 0),
+    () => 0,
+  );
+
+  const hybridGeometry = resolveHybridWorkspaceGeometry({
+    isHybridTablet,
+    panelIsOpen,
+    isExpanded: Boolean(contextPanelState?.expanded && activeContextTab),
+    resizeWidth: rightResize.width,
+    legacyWorkspacePanelWidth: workspacePanelWidth,
+    viewportWidth,
+    sidebarWidth,
+  });
+
   // Publish the chat column's insets so overlays portaled to <body> (model
   // picker, directory picker, every MobileOverlayPanel) can center on the CHAT
   // rather than on the window. Zero on phones, where the two are the same.
@@ -497,27 +524,43 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
               )}
               style={{ width: 'var(--oc-ipad-sidebar-width)', overflowX: 'hidden' }}
             >
-              <ErrorBoundary>
-                <MobileWorkspaceDrawer
-                  open={workspaceOpen}
-                  onClose={closeWorkspace}
-                  tab={workspaceTab}
-                  onTabChange={setWorkspaceTab}
-                  pendingChangesDiff={pendingChangesDiff}
-                  onOpenPlan={setOpenPlan}
-                  onOpenMcpSettings={openMcpCreateSettings}
-                  variant={workspaceAsPanel ? 'panel' : 'drawer'}
+              <div
+                className={cn(
+                  'flex h-full min-h-0 shrink-0 flex-col transition-opacity duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none',
+                  rightResize.isResizing && 'pointer-events-none',
+                  !hybridGeometry.workspacePanelWidth && 'pointer-events-none select-none opacity-0',
+                )}
+                // Follow the aside's live width (imperatively updated during a
+                // drag by applyLiveWidth) so the panel tracks the finger. When
+                // expanded, the aside's geometry width is the full chat area.
+                style={{ width: '100%', overflowX: 'hidden' }}
+              >
+                <ErrorBoundary>
+                  {isHybridTablet ? (
+                    <ContextPanel embeddedWidth={rightResize.width} embeddedResizing={rightResize.isResizing} />
+                  ) : (
+                    <MobileWorkspaceDrawer
+                      open={workspaceOpen}
+                      onClose={closeWorkspace}
+                      tab={workspaceTab}
+                      onTabChange={setWorkspaceTab}
+                      pendingChangesDiff={pendingChangesDiff}
+                      onOpenPlan={setOpenPlan}
+                      onOpenMcpSettings={openMcpCreateSettings}
+                      variant={workspaceAsPanel ? 'panel' : 'drawer'}
+                    />
+                  )}
+                </ErrorBoundary>
+              </div>
+              {hybridGeometry.workspacePanelWidth ? (
+                <IpadSidebarResizeHandle
+                  side="right"
+                  isResizing={rightResize.isResizing}
+                  ariaLabel={t('sidebar.resize.rightPanelAria')}
+                  handleProps={rightResize.handleProps}
                 />
-              </ErrorBoundary>
+              ) : null}
             </div>
-            {workspacePanelWidth ? (
-              <IpadSidebarResizeHandle
-                side="right"
-                isResizing={rightResize.isResizing}
-                ariaLabel={t('sidebar.resize.rightPanelAria')}
-                handleProps={rightResize.handleProps}
-              />
-            ) : null}
           </aside>
         ) : (
           <MobileWorkspaceDrawer
