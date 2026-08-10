@@ -4,6 +4,7 @@ import '@/styles/fonts';
 import '@/index.css';
 import '@/lib/debug';
 import { DiffWorkerProvider } from '@/contexts/DiffWorkerProvider';
+import { FireworksProvider } from '@/contexts/FireworksContext';
 import { ThemeProvider } from '@/components/providers/ThemeProvider';
 import { ThemeSystemProvider } from '@/contexts/ThemeSystemContext';
 import type { RuntimeAPIs } from '@/lib/api/types';
@@ -89,7 +90,9 @@ export function renderMobileApp(apis: RuntimeAPIs) {
         <ThemeSystemProvider>
           <ThemeProvider>
             <DiffWorkerProvider>
-              {isNativeShell ? app : <SessionAuthGate>{app}</SessionAuthGate>}
+              <FireworksProvider>
+                {isNativeShell ? app : <SessionAuthGate>{app}</SessionAuthGate>}
+              </FireworksProvider>
             </DiffWorkerProvider>
           </ThemeProvider>
         </ThemeSystemProvider>
