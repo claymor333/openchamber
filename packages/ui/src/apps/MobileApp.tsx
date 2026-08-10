@@ -550,7 +550,27 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
                 isExpandedHybridPanel && 'absolute inset-y-0 right-11 z-20',
                 !hybridGeometry.workspacePanelWidth && 'border-l-0',
               )}
-              style={{ width: 'var(--oc-ipad-sidebar-width)', overflowX: 'hidden' }}
+              style={{
+                // During a drag, applyLiveWidth owns width/min/max imperatively
+                // (live per pointermove). React re-applying these here would
+                // snap the panel back to the docked width on any re-render, so
+                // they are omitted while isResizing.
+                width: rightResize.isResizing ? undefined : hybridGeometry.workspacePanelWidth,
+                minWidth: rightResize.isResizing ? undefined : hybridGeometry.workspacePanelWidth,
+                maxWidth: rightResize.isResizing ? undefined : hybridGeometry.workspacePanelWidth,
+                ['--oc-ipad-sidebar-width' as string]: rightResize.isResizing
+                  ? undefined
+                  : (isExpandedHybridPanel
+                    ? `${hybridGeometry.workspacePanelWidth}px`
+                    : `${rightResize.width}px`),
+                overflowX: 'clip',
+                paddingTop: 'var(--oc-safe-area-top, 0px)',
+                transitionProperty: rightResize.isResizing ? 'none' : 'width, min-width, max-width',
+                transitionDuration: '200ms',
+                transitionTimingFunction: 'cubic-bezier(0.22, 1, 0.36, 1)',
+              }}
+              aria-hidden={!hybridGeometry.workspacePanelWidth}
+              data-page-scroll-lock="true"
             >
               <div
                 className={cn(
@@ -558,10 +578,11 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
                   rightResize.isResizing && 'pointer-events-none',
                   !hybridGeometry.workspacePanelWidth && 'pointer-events-none select-none opacity-0',
                 )}
-                // Follow the aside's live width (imperatively updated during a
-                // drag by applyLiveWidth) so the panel tracks the finger. When
-                // expanded, the aside's geometry width is the full chat area.
-                style={{ width: '100%', overflowX: 'hidden' }}
+                // Track the live width via the CSS var, which applyLiveWidth
+                // updates imperatively during a drag AND which the expanded
+                // geometry sets to the full chat area. This preserves the
+                // original drag mechanism exactly.
+                style={{ width: 'var(--oc-ipad-sidebar-width)', overflowX: 'hidden' }}
               >
                 <ErrorBoundary>
                   {isHybridTablet ? (
