@@ -22,6 +22,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useDeviceInfo } from '@/lib/device';
 import { isVSCodeRuntime } from '@/lib/desktop';
+import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
 import { useI18n } from '@/lib/i18n';
 import {
   getVisibleContextRailSurfaces,
@@ -261,6 +262,7 @@ export const ContextPanelRail: React.FC = () => {
       hiddenSurfaces: contextRailHiddenSurfaces,
       planModeEnabled,
       isVSCode: isVSCodeRuntime(),
+      isMobileSurface: isMobileSurfaceRuntime(),
       screenWidth,
       tabs,
     });

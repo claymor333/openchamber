@@ -26,6 +26,7 @@ import {
 } from '@/lib/shortcuts';
 import { ShortcutRegistry } from '@/lib/shortcuts/registry';
 import { getVisibleContextRailSurfaces } from '@/lib/surfaces/registry';
+import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
 import { readEmbeddedThemeSearchParams } from '@/contexts/theme-embedded-bootstrap';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useFeatureFlagsStore } from '@/stores/useFeatureFlagsStore';
@@ -502,6 +503,7 @@ export const useKeyboardShortcuts = () => {
             hiddenSurfaces: state.contextRailHiddenSurfaces,
             planModeEnabled: useFeatureFlagsStore.getState().planModeEnabled,
             isVSCode: isVSCodeRuntime(),
+            isMobileSurface: isMobileSurfaceRuntime(),
             screenWidth: window.innerWidth,
             tabs: panel?.tabs ?? [],
           });
