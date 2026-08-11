@@ -745,6 +745,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
     }, [currentSessionId, sessionMessageLoadState.complete, sessionMessageLoadState.cursor, sessionMessageLoadState.status, sessionMessages.length]);
 
     const { isMobile } = useDeviceInfo();
+    const { isHybridTablet } = useHybridTabletLayout();
     const isVSCode = isVSCodeRuntime();
     const chatSurfaceMode = useChatSurfaceMode();
     const draftOpen = Boolean(newSessionDraft?.open);
@@ -770,10 +771,11 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
     const { rowRef: workStatusRowRef, visible: workStatusVisible, fits: workStatusFits } = useWorkStatusVisibility({
         isMobile,
         isVSCode,
+        isHybridTablet,
     });
     // Surfaces that never host the panel skip it entirely; the rest keep it
     // mounted so its visibility can animate rather than snap.
-    const workStatusPanelMountable = !isMobile
+    const workStatusPanelMountable = (!isMobile || isHybridTablet)
         && !isVSCode
         && chatSurfaceMode !== 'mini-chat'
         && !isDesktopExpandedInput;
@@ -966,7 +968,6 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
         void navigation.scrollToTurnId(turnId, { behavior: 'smooth' });
     }, [navigation]);
     const canLoadEarlierPrompts = timelineController.historySignals.canLoadEarlier;
-    const { isHybridTablet } = useHybridTabletLayout();
     const showPromptNavigator = (!isMobile || isHybridTablet)
         && !isVSCode
         && !isDesktopExpandedInput
