@@ -44,8 +44,9 @@ exactly as it already does when the context panel opens.
 `useWorkStatusVisibility` hides the panel when any of these hold:
 
 - the user switched it off;
-- the runtime is mobile or VS Code;
-- the context panel is open for the directory the app is effectively on —
+- the runtime is a phone (mobile without the hybrid tablet layout), VS Code, or
+  the hybrid tablet is inactive (`isHybridTablet` — see below);
+- the context panel is open for the directory the app is effectively on,
   looked up through `useEffectiveDirectory` and `normalizeContextPanelDirectoryKey`,
   the same key the rail and the panel use. It is deliberately **not** the
   directory this panel reports about: a managed Chat reports about none, and
@@ -77,11 +78,18 @@ widens the chat, which would re-satisfy a chat-width test and re-show the
 panel, which narrows the chat again — an infinite oscillation.
 
 It measures the **chat area** — the container holding the chat and the context
-panel together, marked `data-chat-area` in `MainLayout`. Measuring the chat row
+panel together, marked `data-chat-area` in `MainLayout` and, for the hybrid
+tablet layout, in `MobileApp` (chat column + workspace aside, excluding the
+sessions sidebar and the icon rail). Measuring the chat row
 instead reported a width still catching up while the context panel animated
 closed, so the panel reappeared only once that number crossed the threshold:
 the chat widened and then narrowed again. The chat area does not move when the
 context panel opens. `useWorkStatusVisibility.test.ts` pins both properties.
+
+On the hybrid tablet the panel is allowed even though the runtime is mobile:
+`isHybridTablet` (the mobile surface with the desktop chat column and ContextPanel
+workspace) counts as desktop for this panel, while a phone — `isMobile` with no
+hybrid layout — stays hidden.
 
 The context-panel check mirrors `ContextPanel`'s own derivation: `isOpen` alone
 is not enough, because a panel with no resolvable active tab renders nothing
