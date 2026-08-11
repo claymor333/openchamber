@@ -82,7 +82,8 @@ and therefore displaces nothing.
 ## Data sources
 
 Everything is read from already-warm caches. The panel adds no aggregated
-endpoint and no polling of its own.
+endpoint; quota data refreshes through the shared fixed three-minute quota timer,
+which requests only providers enabled for this panel.
 
 | Block | Source | Notes |
 |---|---|---|
@@ -203,6 +204,11 @@ section decides for itself that it has nothing to say, so they report through
 `presenceContext.ts` and the panel collapses when none rendered. Deriving that
 at the panel level would mean duplicating every data source the sections read.
 
+There is one deliberate exception: when the user hides every section, the card
+stays visible with a localized empty state and section controls. Collapsing that
+state would also hide the only recovery path. A panel with enabled sections but
+no data still follows the presence reports and collapses as before.
+
 The scroll offset resets on session change: restoring one session's offset into
 another's shorter panel lands somewhere arbitrary.
 
@@ -315,8 +321,8 @@ Two readouts had no loader of their own and appeared only after the user opened
 the matching header dropdown:
 
 - **MCP** — `McpDropdown` was the only mount-time caller of `refresh()`.
-- **Usage** — `useQuotaAutoRefresh` merely schedules an interval; the *first*
-  fetch was performed by the dropdown's open handler.
+- **Usage** — `useQuotaAutoRefresh` schedules the shared fixed three-minute
+  refresh; the *first* fetch was performed by the dropdown's open handler.
 - **Skills** — `loadSkills()` ran only when the composer's slash autocomplete
   opened, so the context-sources count was whatever happened to be cached. The
   section loads them itself, keyed on the directory, since skills are
@@ -325,7 +331,8 @@ the matching header dropdown:
 
 The panel now performs these itself, silently and through the
 background-network gate, so it cannot compete with chat bootstrap traffic for
-sockets. A panel that reports a subsystem's state cannot depend on an unrelated
+sockets. Usage additionally provides an explicit refresh action in its section
+header. A panel that reports a subsystem's state cannot depend on an unrelated
 component having been mounted or opened.
 
 The repository section follows the same ownership rule. It subscribes directly
