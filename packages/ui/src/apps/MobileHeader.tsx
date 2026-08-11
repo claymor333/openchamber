@@ -10,6 +10,8 @@ import { useSession } from '@/sync/sync-context';
 
 import { MobileSessionMetadataButton } from './MobileSessionMetadata';
 import { MobileSessionSwitcher } from './MobileSessionSwitcher';
+import { useUIStore } from '@/stores/useUIStore';
+import { useHybridTabletLayout } from '@/hooks/useHybridTabletLayout';
 
 export const MobileHeader: React.FC<{
   onOpenSessions: () => void;
@@ -31,6 +33,9 @@ export const MobileHeader: React.FC<{
   const effectiveDirectory = currentSessionDirectory || currentDirectory;
   const currentSession = useSession(currentSessionId, effectiveDirectory || undefined);
   const isNewSessionDraftOpen = useSessionUIStore((state) => Boolean(state.newSessionDraft?.open));
+  const { isHybridTablet } = useHybridTabletLayout();
+  const workStatusPanelEnabled = useUIStore((state) => state.workStatusPanelEnabled);
+  const setWorkStatusPanelEnabled = useUIStore((state) => state.setWorkStatusPanelEnabled);
 
   const sessionTitle = currentSession?.title?.trim();
   // Session title, or the "New session" placeholder on the draft screen.
@@ -141,6 +146,35 @@ export const MobileHeader: React.FC<{
             effectiveDirectory={effectiveDirectory}
             isNewSessionDraftOpen={isNewSessionDraftOpen}
           />
+
+          {/* Work-status panel toggle, next to the context donut. Only on the
+              hybrid tablet: the panel cannot mount on a phone, where the
+              button would toggle nothing visible. On the hybrid it mirrors the
+              desktop header's on state — the panel is on by default, so the
+              button dims when off rather than filling when on. */}
+          {isHybridTablet ? (
+            <button
+              type="button"
+              data-work-status-toggle="true"
+              className={cn(
+                'flex size-10 shrink-0 items-center justify-center rounded-full transition-colors hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
+                workStatusPanelEnabled
+                  ? 'text-foreground hover:text-foreground'
+                  : 'text-muted-foreground/50 hover:text-foreground',
+              )}
+              aria-pressed={workStatusPanelEnabled}
+              aria-label={t('header.workStatusPanel.toggleAria')}
+              title={workStatusPanelEnabled ? t('header.workStatusPanel.hide') : t('header.workStatusPanel.show')}
+              onClick={() => {
+                setMetadataOpen(false);
+                setSwitcherOpen(false);
+                setWorkStatusPanelEnabled(!workStatusPanelEnabled);
+              }}
+              style={{ touchAction: 'manipulation' }}
+            >
+              <Icon name="list-indefinite" className="size-5" />
+            </button>
+          ) : null}
 
           <button
             type="button"
