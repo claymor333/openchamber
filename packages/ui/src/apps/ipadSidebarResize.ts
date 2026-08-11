@@ -10,14 +10,19 @@ export const IPAD_WORKSPACE_SIDEBAR_MAX_WIDTH = 900;
 
 /** Drag-resize for the iPad sidebars: same live-width mechanics as the desktop
     Sidebar (imperative styles during the drag, committed to state at the end),
-    but with a finger-sized grab strip instead of a 3px hover handle. */
+    but with a finger-sized grab strip instead of a 3px hover handle. The
+    optional `onLiveWidth` callback fires per pointermove for the LEFT sidebar
+    only, so a consumer can pin the expanded context panel to the moving seam. */
 export function useIpadSidebarResize(
   side: 'left' | 'right',
   storageKey: string,
   defaultWidth: number,
   maxWidth: number = IPAD_SIDEBAR_MAX_WIDTH,
+  onLiveWidth?: (width: number) => void,
 ) {
   const asideRef = React.useRef<HTMLElement | null>(null);
+  const onLiveWidthRef = React.useRef(onLiveWidth);
+  onLiveWidthRef.current = onLiveWidth;
   const [width, setWidth] = React.useState(() => {
     if (typeof window === 'undefined') return defaultWidth;
     const stored = Number.parseInt(window.localStorage.getItem(storageKey) ?? '', 10);
@@ -41,7 +46,12 @@ export function useIpadSidebarResize(
     aside.style.minWidth = `${nextWidth}px`;
     aside.style.maxWidth = `${nextWidth}px`;
     aside.style.setProperty('--oc-ipad-sidebar-width', `${nextWidth}px`);
-  }, []);
+    // The sessions sidebar's boundary is the expanded context panel's left
+    // edge, so a live sessions drag must move the panel too.
+    if (side === 'left') {
+      onLiveWidthRef.current?.(nextWidth);
+    }
+  }, [side]);
 
   const handlePointerDown = React.useCallback((event: React.PointerEvent) => {
     try {
@@ -92,6 +102,6 @@ export function useIpadSidebarResize(
     onPointerCancel: handlePointerEnd,
   }), [handlePointerDown, handlePointerEnd, handlePointerMove]);
 
-  return { asideRef, width, isResizing, handleProps };
+  return { asideRef, width, isResizing, handleProps, liveWidthRef };
 }
 

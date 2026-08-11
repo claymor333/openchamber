@@ -2051,9 +2051,10 @@ const DesktopBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dir
 
 export const ContextPanel: React.FC<{
   embeddedWidth?: number;
-  /** Hybrid tablet: true while the host aside is mid-drag, so the panel's own
-      width transition is suppressed (the aside resizes live via imperative
-      style updates; a 200ms transition would lag each step). */
+  /** Hybrid tablet: true while the host aside is mid-drag. The panel follows
+      the aside's var with its own width transition OFF so it tracks the finger
+      without a 200ms lag; when not dragging, its own transition animates the
+      expand/collapse var change. */
   embeddedResizing?: boolean;
 }> = ({ embeddedWidth, embeddedResizing = false }) => {
   const { t } = useI18n();
@@ -2692,38 +2693,45 @@ export const ContextPanel: React.FC<{
 
   // width/min/max stay interpolable across open/close (no instant min/max
   // jumps) so the 200ms width transition matches the sidebars.
-  const panelStyle: React.CSSProperties = !isOpen
+  const panelStyle: React.CSSProperties = embeddedWidth !== undefined
     ? {
-        ['--oc-context-panel-width' as string]: `${width}px`,
-        width: 0,
+        // Hybrid tablet: the panel sits inside the host aside, which the iPad
+        // resize hook resizes live via imperative `--oc-ipad-sidebar-width`
+        // updates — docked to the dragged width, expanded to the full chat
+        // area. Reading that var (instead of the React-state `width`) makes
+        // the panel track the host in every state with zero React re-renders
+        // and without a ResizeObserver-measured width that would lag a frame
+        // behind the host's reveal.
+        //
+        // The width is the SAME when closed as when docked: the host aside is
+        // 0 wide and clipped then, so this panel's width never changes on
+        // open/close — the aside's clip is the only animation there. Only the
+        // expand/collapse var change moves it, and its own width transition
+        // (kept alive, suppressed only during a drag) animates that.
+        width: 'min(var(--oc-ipad-sidebar-width), 100%)',
         maxWidth: '100%',
         overflowX: 'clip',
+        // Keep the panel-width var in sync so inline-comment overlays
+        // inside the panel position against the live width too.
+        ['--oc-context-panel-width' as string]: 'min(var(--oc-ipad-sidebar-width), 100%)',
+        // Expanded: absolute positioning escapes the host aside's safe-area
+        // padding, so offset below the status bar here.
+        ...(isExpanded ? { top: 'var(--oc-safe-area-top, 0px)' } : null),
       }
-    : isExpanded
+    : !isOpen
       ? {
-          // px, not '100%': px↔% width changes do not interpolate, which
-          // would make the expand/collapse width snap instead of animating.
-          ['--oc-context-panel-width' as string]: availablePanelAreaWidth !== null ? `${availablePanelAreaWidth}px` : '100%',
-          width: availablePanelAreaWidth !== null ? `${availablePanelAreaWidth}px` : '100%',
+          ['--oc-context-panel-width' as string]: `${width}px`,
+          width: 0,
           maxWidth: '100%',
-          // Embedded (hybrid tablet): absolute positioning escapes the host
-          // aside's safe-area padding, so offset below the status bar here.
-          ...(embeddedWidth !== undefined ? { top: 'var(--oc-safe-area-top, 0px)' } : null),
+          overflowX: 'clip',
         }
-      : embeddedWidth !== undefined
+      : isExpanded
         ? {
-            // Hybrid tablet: the panel sits inside the host aside, which the
-            // iPad resize hook resizes live via imperative `--oc-ipad-sidebar-width`
-            // updates. Reading that var (instead of the React-state `width`)
-            // makes the panel content track the drag with zero React re-renders,
-            // the same imperative-width trick the desktop panel uses. The
-            // `embeddedWidth` prop still controls the open/closed zeroing.
-            width: 'min(var(--oc-ipad-sidebar-width), 100%)',
+            // px, not '100%': px↔% width changes do not interpolate, which
+            // would make the expand/collapse width snap instead of animating.
+            ['--oc-context-panel-width' as string]: availablePanelAreaWidth !== null ? `${availablePanelAreaWidth}px` : '100%',
+            width: availablePanelAreaWidth !== null ? `${availablePanelAreaWidth}px` : '100%',
             maxWidth: '100%',
-            overflowX: 'clip',
-            // Keep the panel-width var in sync so inline-comment overlays
-            // inside the panel position against the live width too.
-            ['--oc-context-panel-width' as string]: 'min(var(--oc-ipad-sidebar-width), 100%)',
           }
         : {
           width: 'min(var(--oc-context-panel-width), 100%)',
@@ -2751,7 +2759,12 @@ export const ContextPanel: React.FC<{
           : 'relative h-full flex-shrink-0',
         !isOpen && 'pointer-events-none',
         'will-change-[width] motion-reduce:transition-none',
-        'transition-[width] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)]'
+        'transition-[width] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)]',
+        // Hybrid tablet drag: the host aside resizes live per pointermove, so
+        // the panel must follow the var without its own 200ms smoothing. When
+        // not dragging, its own transition animates the expand/collapse (the
+        // var change); open/close does not move it at all (constant var).
+        embeddedResizing && 'transition-none'
       )}
       onKeyDownCapture={handlePanelKeyDownCapture}
       style={panelStyle}
@@ -2781,21 +2794,22 @@ export const ContextPanel: React.FC<{
       <div
         className={cn(
           'relative z-10 flex h-full min-h-0 shrink-0 flex-col duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none',
-          // Width animates in sync with the panel (surface switches, resize
-          // release); during the drag itself nothing resizes — only the ghost
-          // guide line moves.
+          // Width animates in sync with the panel (expand/collapse var change,
+          // surface switches); during a hybrid drag the panel follows the host
+          // aside's var live, so no own smoothing there either.
           'transition-[width,opacity]',
-          // Hybrid tablet: the host aside resizes live via imperative style
-          // updates, so the panel must follow without its own 200ms smoothing.
           embeddedResizing && 'transition-none',
           !isOpen && 'pointer-events-none select-none opacity-0'
         )}
         // px in the expanded state too: px↔% width changes cannot interpolate,
         // so the header controls would snap instead of riding the animation.
+        // Embedded mode reads the host var (already the full chat area when
+        // expanded) instead of the ResizeObserver-measured width, which could
+        // lag a frame behind the host aside's reveal.
         style={{
-          width: isExpanded
-            ? (availablePanelAreaWidth !== null ? `${availablePanelAreaWidth}px` : '100%')
-            : 'var(--oc-context-panel-width)',
+          width: embeddedWidth !== undefined || !isExpanded
+            ? 'var(--oc-context-panel-width)'
+            : (availablePanelAreaWidth !== null ? `${availablePanelAreaWidth}px` : '100%'),
         }}
         aria-hidden={!isOpen}
       >
