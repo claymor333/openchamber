@@ -640,21 +640,6 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
                   />
                 ) : null}
               </aside>
-              {isHybridTablet ? (
-                <div
-                  className={cn(
-                    'flex h-full w-11 shrink-0 flex-col border-l border-border/70 bg-background',
-                    // When the panel is expanded the aside goes absolute (out of
-                    // flex flow), which would pull this rail leftward to sit
-                    // behind it. Pin the rail to the far right edge instead.
-                    isExpandedHybridPanel && 'absolute inset-y-0 right-0',
-                  )}
-                  style={{ paddingTop: 'var(--oc-safe-area-top, 0px)' }}
-                  data-page-scroll-lock="true"
-                >
-                  <ErrorBoundary><ContextPanelRail /></ErrorBoundary>
-                </div>
-              ) : null}
             </>
           ) : (
             <MobileWorkspaceDrawer
@@ -668,6 +653,26 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
             />
           )}
         </div>
+
+        {/* Outside the chat-area wrapper: the rail's 44px are not chat space,
+            so counting them would let the work-status panel squeeze the
+            transcript below its 560px minimum. A shell sibling keeps the
+            measured width equal to chat + workspace, like the desktop. */}
+        {isHybridTablet ? (
+          <div
+            className={cn(
+              'flex h-full w-11 shrink-0 flex-col border-l border-border/70 bg-background',
+              // When the panel is expanded the aside goes absolute (out of
+              // flex flow), which would pull this rail leftward to sit
+              // behind it. Pin the rail to the far right edge instead.
+              isExpandedHybridPanel && 'absolute inset-y-0 right-0',
+            )}
+            style={{ paddingTop: 'var(--oc-safe-area-top, 0px)' }}
+            data-page-scroll-lock="true"
+          >
+            <ErrorBoundary><ContextPanelRail /></ErrorBoundary>
+          </div>
+        ) : null}
 
         {/* Layered above the workspace drawer's Notes tab, which opened it. */}
         {openPlan ? (
