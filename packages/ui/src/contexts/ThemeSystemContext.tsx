@@ -32,6 +32,7 @@ import {
 import { isValidTheme } from './theme-validation';
 import { getSyncedThemeFromPayload, getSyncedThemeVariant } from './theme-sync-payload';
 import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
+import { useMaterialYouThemes } from '@/lib/materialYou/useMaterialYou';
 
 type ThemePreferences = {
   themeMode: ThemeMode;
@@ -179,6 +180,9 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
     }
     return readEmbeddedThemeSearchParams() !== null;
   }, []);
+  // Android-only: dynamic themes derived from the system wallpaper palette.
+  // Null on every other runtime, so web/desktop/VSCode theming is unchanged.
+  const { themes: materialYouThemes } = useMaterialYouThemes();
 
   const availableThemes = useMemo(() => {
     const merged: Theme[] = [];
@@ -209,10 +213,14 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
     // Vite publishes valid built-in JSON edits through this development-only
     // runtime channel, avoiding a full page reload for theme work.
     developmentThemes.forEach(add);
+    if (materialYouThemes) {
+      add(materialYouThemes.light);
+      add(materialYouThemes.dark);
+    }
     themes.forEach(add);
 
     return merged;
-  }, [customThemes, developmentThemes, embeddedBootstrapTheme, embeddedSyncedTheme, isVSCode, vscodeTheme]);
+  }, [customThemes, developmentThemes, embeddedBootstrapTheme, embeddedSyncedTheme, isVSCode, materialYouThemes, vscodeTheme]);
 
   useEffect(() => {
     const handleThemeHmr = (event: Event) => {
