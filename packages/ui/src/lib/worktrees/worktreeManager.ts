@@ -382,7 +382,10 @@ const getWorktreeListGeneration = (projectDirectory: string): number => {
   return _worktreeListGeneration.get(projectDirectory) ?? 0;
 };
 
-const invalidateWorktreeList = (projectDirectory: string): void => {
+// Public so a client that learns about a worktree created elsewhere (e.g. an
+// agent dispatching through the OpenChamber server) can force a fresh listing
+// instead of serving the 30s cache that predates the new worktree.
+export const invalidateWorktreeList = (projectDirectory: string): void => {
   _worktreeListGeneration.set(projectDirectory, getWorktreeListGeneration(projectDirectory) + 1);
   _worktreeListCache.delete(projectDirectory);
 };
