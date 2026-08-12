@@ -165,6 +165,21 @@ export interface RelayTunnelClientOptions {
   reconnectBaseDelayMs?: number;
   reconnectMaxDelayMs?: number;
   hiddenOrOfflineMaxDelayMs?: number;
+  /** Pre-send liveness probe: when a runtime request arrives after the tunnel has
+   *  been quiet this long (ms), ping the wire first and wait for any frame before
+   *  dispatching. A silently-dead socket (mobile backgrounding, radio flip) still
+   *  reports connected; probing on demand fails it over instead of swallowing the
+   *  request until the idle keepalive catches up. Default 15_000. */
+  probeStaleAfterMs?: number;
+  /** Max wait (ms) for the pre-send probe to be answered. A healthy tunnel
+   *  answers in milliseconds; on timeout the attempt is failed over and the
+   *  request waits for a fresh channel. Default 3_000. */
+  probeTimeoutMs?: number;
+  /** Max wait (ms) for a tunneled request's response head (HttpResponse or
+   *  StreamEnd) after its HttpRequest was written. On timeout the request fails
+   *  as an ambiguous transport failure (dispatched, outcome unknown) instead of
+   *  hanging the caller forever. Default 30_000. */
+  headTimeoutMs?: number;
 }
 
 export interface RelayTunnelClient {
@@ -230,6 +245,9 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
   const reconnectBaseDelayMs = options.reconnectBaseDelayMs ?? 1_000;
   const reconnectMaxDelayMs = options.reconnectMaxDelayMs ?? 30_000;
   const hiddenOrOfflineMaxDelayMs = options.hiddenOrOfflineMaxDelayMs ?? 60_000;
+  const probeStaleAfterMs = options.probeStaleAfterMs ?? 15_000;
+  const probeTimeoutMs = options.probeTimeoutMs ?? 3_000;
+  const headTimeoutMs = options.headTimeoutMs ?? 30_000;
 
   const createWire = options.createWireSocket ?? ((url: string) => wrapNativeWebSocket(new WebSocket(url)));
 
@@ -245,6 +263,10 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   let channelWaiters: ChannelWaiter[] = [];
   let wakeListenersInstalled = false;
+  // Pre-send liveness probe, set by the current attempt's establish() and
+  // cleared on failover. runtime requests call it before dispatching so a stale,
+  // silently-dead wire is failed over rather than swallowing the request.
+  let probeActivityRef: (() => Promise<void>) | null = null;
 
   const setStatus = (next: RelayTunnelStatus): void => {
     if (status.state === next.state && status.lastError === next.lastError) return;
@@ -384,6 +406,16 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
     // Idle tracking: updated on any non-Ping/Pong frame in EITHER direction.
     // Ping/Pong are excluded so the keepalive can't sustain itself.
     let lastActivityAt = Date.now();
+    // Pre-send probe state: waiters settle when an inbound frame proves the wire
+    // alive, or when the attempt fails over — either way the request can proceed
+    // after the subsequent waitForChannel. Independent of the keepalive pong
+    // deadline, though a probe re-arms that deadline with its own shorter window.
+    let probeWaiters: Array<() => void> = [];
+    const settleProbeWaiters = (): void => {
+      const waiters = probeWaiters;
+      probeWaiters = [];
+      for (const waiter of waiters) waiter();
+    };
 
     const cleanupTimers = (): void => {
       if (helloInterval !== null) {
@@ -407,12 +439,19 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
         batcher = null;
       }
     };
-    currentAttemptCleanup = cleanupTimers;
+    currentAttemptCleanup = () => {
+      cleanupTimers();
+      // Settle any in-flight probe waiters so requests awaiting the probe are not
+      // stranded (close() path).
+      settleProbeWaiters();
+    };
 
     function failAttemptLocal(error: Error, asErrorState = false, terminal = false): void {
       if (settled || generation !== attemptGeneration) return;
       settled = true;
       cleanupTimers();
+      settleProbeWaiters();
+      probeActivityRef = null;
       if (channel) {
         activeChannel = null;
         failChannelStreams(channel, new Error(`relay tunnel reset: ${error.message}`));
@@ -498,6 +537,29 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
       lastActivityAt = Date.now();
       setStatus({ state: 'connected' });
       resolveWaiters(channelObj);
+      // Pre-send liveness probe for this attempt. Requests that arrive while the
+      // wire is stale ping it and wait for any frame; an unanswered probe fails
+      // the attempt over so the request dispatches on a fresh channel instead of
+      // into a dead socket that still reports connected.
+      probeActivityRef = () => {
+        if (channelObj.dead) return Promise.resolve();
+        // Fresh traffic proves the wire alive — dispatching is safe, no probe.
+        if (Date.now() - lastActivityAt < probeStaleAfterMs) return Promise.resolve();
+        // Only the first waiter sends the ping; concurrent requests piggyback on
+        // the same in-flight probe.
+        if (probeWaiters.length === 0) {
+          channelObj.send(encodeTunnelFrame(TunnelFrameType.Ping, 0, EMPTY_PAYLOAD));
+        }
+        // Re-arm on the short probe window (not the 15s keepalive pong wait), so
+        // a request that lands during an unanswered keepalive ping also fails
+        // over quickly instead of riding the full pong deadline.
+        if (pongDeadline !== null) clearTimeout(pongDeadline);
+        pongDeadline = setTimeout(() => {
+          pongDeadline = null;
+          failAttemptLocal(new Error('relay tunnel unresponsive'));
+        }, probeTimeoutMs);
+        return new Promise<void>((resolve) => probeWaiters.push(resolve));
+      };
       pingTimer = setInterval(() => {
         const now = Date.now();
         // Only ping when the tunnel has actually been idle; streaming traffic
@@ -527,6 +589,9 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
         clearTimeout(pongDeadline);
         pongDeadline = null;
       }
+      // ...and settles any pre-send probe waiters, so requests waiting on the
+      // probe dispatch on this now-confirmed-live channel.
+      settleProbeWaiters();
       if (frame.frameType === TunnelFrameType.Ping) {
         channelObj.send(encodeTunnelFrame(TunnelFrameType.Pong, frame.streamId, EMPTY_PAYLOAD));
         return;
@@ -686,6 +751,13 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
     const request = await normalizeTunnelRequest(input, init);
     const signal = request.signal;
     if (signal?.aborted) throw abortError();
+    // Pre-send liveness probe: a wire that silently died (mobile backgrounding,
+    // radio flip) still reports connected, and dispatching into it swallows the
+    // request until the idle keepalive catches up. Probe when stale; if the probe
+    // is unanswered the attempt fails over and waitForChannel blocks for the
+    // fresh channel before this request is written.
+    await probeActivityRef?.();
+    if (signal?.aborted) throw abortError();
     const channel = await waitForChannel(signal);
     const streamId = channel.nextStreamId();
 
@@ -694,6 +766,7 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
       let finished = false;
       let bodyController: ReadableStreamDefaultController<Uint8Array> | null = null;
       let onAbort: (() => void) | null = null;
+      let headTimeout: ReturnType<typeof setTimeout> | null = null;
 
       const cleanupStream = (): void => {
         channel.streams.delete(streamId);
@@ -701,8 +774,16 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
         if (onAbort && signal) signal.removeEventListener('abort', onAbort);
       };
 
+      const clearHeadTimeout = (): void => {
+        if (headTimeout !== null) {
+          clearTimeout(headTimeout);
+          headTimeout = null;
+        }
+      };
+
       const finishError = (error: Error): void => {
         if (finished) return;
+        clearHeadTimeout();
         finished = true;
         cleanupStream();
         if (!responseDelivered) {
@@ -762,6 +843,7 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
               });
             }
             responseDelivered = true;
+            clearHeadTimeout();
             resolve(new Response(body, { status: head.status, headers: head.headers }));
             if (nullBody) {
               finished = true;
@@ -821,6 +903,14 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
         headers: request.headers,
       };
       channel.send(encodeTunnelFrame(TunnelFrameType.HttpRequest, streamId, encodeJsonPayload(head)));
+      // Bound a silently-lost response: if the head never arrives, fail as an
+      // ambiguous transport failure (dispatched, outcome unknown) rather than
+      // hanging the caller forever. Cleared on head receipt or any failure. SSE
+      // streams are unaffected — the head arrives before the body streams.
+      headTimeout = setTimeout(() => {
+        headTimeout = null;
+        finishError(dispatchedFailure('relay response timeout'));
+      }, headTimeoutMs);
       void (async () => {
         try {
           if (request.body) {
@@ -1005,6 +1095,7 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
     removeWakeListeners();
     currentAttemptCleanup?.();
     currentAttemptCleanup = null;
+    probeActivityRef = null;
     const channel = activeChannel;
     activeChannel = null;
     const error = new Error('relay tunnel closed');

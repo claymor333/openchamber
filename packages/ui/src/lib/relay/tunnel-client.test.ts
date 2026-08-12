@@ -25,6 +25,7 @@ import {
 import {
   createRelayTunnelClient,
   type RelayTunnelClient,
+  type RelayTunnelState,
   type TunnelWireSocket,
 } from './tunnel-client';
 
@@ -83,7 +84,11 @@ class FakeEndpoint implements TunnelWireSocket {
 }
 
 type MiniHostOptions = {
-  silent?: boolean;
+  // True = the host answers the handshake but then ignores every tunnel frame
+  // (no pongs, no responses) — a wire that LOOKS connected but is dead. A
+  // function lets a test silence specific wires (e.g. the first) while later
+  // reconnects behave normally.
+  silent?: boolean | ((wireIndex: number) => boolean);
   onConnect?: () => void;
   // Delay handling of the first inbound text frame: with a delay longer than
   // the client's helloRetryMs this reproduces the first-connect race where the
@@ -91,8 +96,9 @@ type MiniHostOptions = {
   firstHelloDelayMs?: number;
   // Advertise batching from the host (default true = matches production).
   batch?: boolean;
-  // Records every tunnel frame the host received, in arrival order.
-  recordFrame?: (frame: TunnelFrame) => void;
+  // Records every tunnel frame the host received, in arrival order, tagged with
+  // the 1-based wire index that received it.
+  recordFrame?: (frame: TunnelFrame, wireIndex?: number) => void;
 };
 
 // A minimal host responder wired to one endpoint. Answers a few routes so the
@@ -184,6 +190,10 @@ const attachMiniHost = (endpoint: FakeEndpoint, hostPrivateKey: CryptoKey, optio
           setTimeout(pump, 10);
         };
         pump();
+      } else if (path === '/hang') {
+        // Request fully received but never answered — exercises the client's
+        // response-head timeout.
+        return;
       } else {
         respondJson(streamId, 404, { error: 'not found' });
       }
@@ -238,6 +248,15 @@ const attachMiniHost = (endpoint: FakeEndpoint, hostPrivateKey: CryptoKey, optio
 
 const wait = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
+const waitForStatus = async (client: RelayTunnelClient, state: RelayTunnelState): Promise<void> => {
+  const deadline = Date.now() + 2_000;
+  while (Date.now() < deadline) {
+    if (client.getStatus().state === state) return;
+    await wait(5);
+  }
+  throw new Error(`tunnel never reached ${state}`);
+};
+
 const setupClient = async (
   hostOptions: MiniHostOptions = {},
   clientOverrides: Partial<Parameters<typeof createRelayTunnelClient>[0]> = {},
@@ -265,13 +284,21 @@ const setupClient = async (
     ...clientOverrides,
     createWireSocket: () => {
       count += 1;
+      const wireIndex = count;
       const clientEndpoint = new FakeEndpoint();
       const hostEndpoint = new FakeEndpoint();
       clientEndpoint.peer = hostEndpoint;
       hostEndpoint.peer = clientEndpoint;
       lastClientEndpoint = clientEndpoint;
       lastHostEndpoint = hostEndpoint;
-      attachMiniHost(hostEndpoint, hostKeyPair.privateKey, hostOptions);
+      const silent = typeof hostOptions.silent === 'function' ? hostOptions.silent(wireIndex) : hostOptions.silent;
+      attachMiniHost(hostEndpoint, hostKeyPair.privateKey, {
+        ...hostOptions,
+        silent,
+        recordFrame: (frame) => {
+          if (hostOptions.recordFrame) hostOptions.recordFrame(frame, wireIndex);
+        },
+      });
       queueMicrotask(() => clientEndpoint.onopen?.());
       return clientEndpoint;
     },
@@ -591,5 +618,92 @@ describe('createRelayTunnelClient', () => {
     expect(await message).toBe('echo:legacy');
     const health = await client.fetch('/health');
     expect(health.status).toBe(200);
+  });
+
+  test('pre-send probe: a stale silently-dead tunnel fails over before dispatching the request', async () => {
+    const requestsOnWire: number[] = [];
+    const { client, connectionCount } = await setupClient(
+      {
+        // The first wire establishes then ignores every frame (incl. pings) —
+        // the mobile "sleeping connection": connected on paper, dead underneath.
+        silent: (wireIndex) => wireIndex === 1,
+        recordFrame: (frame, wireIndex) => {
+          if (frame.frameType === TunnelFrameType.HttpRequest) requestsOnWire.push(wireIndex ?? 0);
+        },
+      },
+      {
+        probeStaleAfterMs: 5,
+        probeTimeoutMs: 20,
+        pingIntervalMs: 1_000,
+        pingTimeoutMs: 30_000,
+        reconnectBaseDelayMs: 10,
+        reconnectMaxDelayMs: 20,
+      },
+    );
+    track(client);
+    await waitForStatus(client, 'connected');
+    await wait(20); // let the tunnel go stale
+    const response = await client.fetch('/health');
+    expect(response.status).toBe(200);
+    expect(connectionCount()).toBeGreaterThan(1);
+    // The dead first wire only saw the probe ping — the request itself ran on a
+    // fresh wire, so it was never swallowed by the sleeping tunnel.
+    expect(requestsOnWire).toEqual([2]);
+  });
+
+  test('pre-send probe: concurrent requests on a stale tunnel share a single probe ping', async () => {
+    const probePings: number[] = [];
+    const { client, connectionCount } = await setupClient(
+      {
+        silent: (wireIndex) => wireIndex === 1,
+        recordFrame: (frame, wireIndex) => {
+          if (frame.frameType === TunnelFrameType.Ping && wireIndex === 1) probePings.push(Date.now());
+        },
+      },
+      {
+        probeStaleAfterMs: 5,
+        probeTimeoutMs: 20,
+        pingIntervalMs: 1_000,
+        pingTimeoutMs: 30_000,
+        reconnectBaseDelayMs: 10,
+        reconnectMaxDelayMs: 20,
+      },
+    );
+    track(client);
+    await waitForStatus(client, 'connected');
+    await wait(20); // let the tunnel go stale
+    const responses = await Promise.all([client.fetch('/health'), client.fetch('/health'), client.fetch('/health')]);
+    for (const r of responses) expect(r.status).toBe(200);
+    expect(connectionCount()).toBeGreaterThan(1);
+    expect(probePings.length).toBe(1);
+  });
+
+  test('pre-send probe: no probe ping while the tunnel is freshly active', async () => {
+    const pings: number[] = [];
+    const { client } = await setupClient(
+      {
+        recordFrame: (frame, wireIndex) => {
+          if (frame.frameType === TunnelFrameType.Ping) pings.push(wireIndex ?? 0);
+        },
+      },
+      { probeStaleAfterMs: 5, pingIntervalMs: 1_000, pingTimeoutMs: 30_000, batchWindowMs: 20 },
+    );
+    track(client);
+    const response = await client.fetch('/health');
+    expect(response.status).toBe(200);
+    // Probe suppressed: the tunnel had fresh activity when the request arrived.
+    expect(pings).toEqual([]);
+  });
+
+  test('fails a request whose response head never arrives as an ambiguous transport failure', async () => {
+    const { client } = await setupClient({}, { headTimeoutMs: 30 });
+    track(client);
+    await waitForStatus(client, 'connected');
+    let caught: unknown = null;
+    await client.fetch('/hang').catch((error: unknown) => {
+      caught = error;
+    });
+    expect(caught).toBeInstanceOf(Error);
+    expect(isAmbiguousTransportFailure(caught)).toBe(true);
   });
 });
