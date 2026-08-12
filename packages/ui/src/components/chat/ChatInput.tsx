@@ -262,6 +262,11 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     const [mobileControlsPanel, setMobileControlsPanel] = React.useState<MobileControlsPanel>(null);
     const [mobileAttachMenuOpen, setMobileAttachMenuOpen] = React.useState(false);
     const [mobileDraftPicker, setMobileDraftPicker] = React.useState<'project' | 'branch' | null>(null);
+    // In-flight send guard: the ref is synchronous (blocks same-tick double
+    // submits before a re-render), the state drives the send button's spinner
+    // and disabled state. Set at dispatch, cleared when the send settles.
+    const sendingRef = React.useRef(false);
+    const [isSending, setIsSending] = React.useState(false);
     const [mobileDraftPickerQuery, setMobileDraftPickerQuery] = React.useState('');
     // Message history navigation state (up/down arrow to recall previous messages)
     const composerRef = React.useRef<ComposerEditorHandle>(null);
@@ -959,6 +964,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
 
     const handleSubmit = async (options?: SubmitOptions) => {
         const queuedOnly = options?.queuedOnly ?? false;
+        // Block a second direct send while one is still dispatching (the button
+        // is disabled too, but Enter and dictation routes bypass it).
+        if (!queuedOnly && sendingRef.current) return;
         const queuedMessageId = options?.queuedMessageId;
         const delivery = options?.delivery === 'steer' && sessionPhase !== 'idle' ? 'steer' : undefined;
         const capturedTarget = messageQueueTarget;
@@ -1088,10 +1096,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             clearQueue(capturedTarget);
         }
         if (!queuedOnly) {
-            setMessage('');
-            confirmedMentionsRef.current.clear();
-            // Clear per-session draft on submit
-            persistDraftImmediately(chatDraftIdentity, '');
+            // The composer text and per-session draft are NOT cleared here: they
+            // stay visible/persisted while the send is in flight (slow tunnel,
+            // reconnect) so a slow or lost send never looks like the message
+            // vanished. They are cleared once the send settles (see below).
             messageHistory.reset();
             if (attachedFiles.length > 0) {
                 clearAttachedFiles();
@@ -1201,6 +1209,11 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             ...additionalParts.flatMap(p => p.attachments ?? []),
         ];
 
+        // Mark the send in-flight: the send button shows a spinner and stays
+        // disabled until the send settles (sendingRef also guards Enter and
+        // dictation routes against double-submit).
+        sendingRef.current = true;
+        setIsSending(true);
         const sendPromise = sendMessage(
             primaryText,
             providerIdToSend,
@@ -1228,6 +1241,15 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         }
 
         void sendPromise.then(() => {
+            sendingRef.current = false;
+            setIsSending(false);
+            // The send settled — only now clear the composer and per-session
+            // draft, so the user's text survived the in-flight window.
+            if (!queuedOnly) {
+                setMessage('');
+                confirmedMentionsRef.current.clear();
+                persistDraftImmediately(chatDraftIdentity, '');
+            }
             // Record what this session was pointed at, so the work-status panel
             // can show it as a context source long after the message scrolled
             // away. A snapshot only — never re-fetched, never authoritative.
@@ -1275,6 +1297,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                 setLinkedPr(null);
             }
         }).catch((error: unknown) => {
+            sendingRef.current = false;
+            setIsSending(false);
             const rawMessage =
                 error instanceof Error
                     ? error.message
@@ -2755,6 +2779,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                         sendIconSizeClass={sendIconSizeClass}
                         stopIconSizeClass={stopIconSizeClass}
                         canSend={canSend}
+                        isSending={isSending}
                         canAbort={canAbort}
                         hasContent={Boolean(hasContent)}
                         isExpandedInput={isExpandedInput}

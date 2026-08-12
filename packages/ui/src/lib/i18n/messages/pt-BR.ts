@@ -2073,6 +2073,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.chatInput.actions.linkGithubPr": "Vincular PR de GitHub",
   "chat.chatInput.actions.modelAgentSettings": "Configurações de modelo e agente",
   "chat.chatInput.actions.sendMessageAria": "Enviar mensagem",
+  "chat.chatInput.actions.sendingAria": "Enviando mensagem",
   "chat.chatInput.actions.queueMessageAria": "Colocar mensagem na fila",
   "chat.chatInput.actions.stopGeneratingAria": "Parar geração",
   "chat.chatInput.focusMode.toggleAria": "Ativar ou desativar modo de foco",
