@@ -19,6 +19,7 @@ type ComposerActionButtonsProps = {
     sendIconSizeClass: string;
     stopIconSizeClass: string;
     canSend: boolean;
+    isSending: boolean;
     canAbort: boolean;
     hasContent: boolean;
     currentSessionId: string | null;
@@ -35,6 +36,7 @@ export const ComposerActionButtons = React.memo(function ComposerActionButtons(p
         sendIconSizeClass,
         stopIconSizeClass,
         canSend,
+        isSending,
         canAbort,
         hasContent,
         currentSessionId,
@@ -48,7 +50,7 @@ export const ComposerActionButtons = React.memo(function ComposerActionButtons(p
     const sendButton = (
         <button
             type={isMobile ? 'button' : 'submit'}
-            disabled={!canSend || (!currentSessionId && !newSessionDraftOpen)}
+            disabled={isSending || !canSend || (!currentSessionId && !newSessionDraftOpen)}
             onClick={(event) => {
                 if (!isMobile) {
                     return;
@@ -59,13 +61,23 @@ export const ComposerActionButtons = React.memo(function ComposerActionButtons(p
             }}
             className={cn(
                 footerIconButtonClass,
-                canSend && (currentSessionId || newSessionDraftOpen)
-                    ? 'text-primary hover:text-primary'
-                    : 'opacity-30'
+                isSending
+                    ? 'text-primary'
+                    : canSend && (currentSessionId || newSessionDraftOpen)
+                        ? 'text-primary hover:text-primary'
+                        : 'opacity-30'
             )}
-            aria-label={t('chat.chatInput.actions.sendMessageAria')}
+            aria-label={
+                isSending
+                    ? t('chat.chatInput.actions.sendingAria')
+                    : t('chat.chatInput.actions.sendMessageAria')
+            }
         >
-            <Icon name="send-plane-2" className={cn(sendIconSizeClass)} />
+            {isSending ? (
+                <Icon name="loader-4" className={cn(sendIconSizeClass, 'animate-spin')} />
+            ) : (
+                <Icon name="send-plane-2" className={cn(sendIconSizeClass)} />
+            )}
         </button>
     );
 
@@ -113,7 +125,8 @@ export const ComposerActionButtons = React.memo(function ComposerActionButtons(p
     && prev.footerIconButtonClass === next.footerIconButtonClass
     && prev.sendIconSizeClass === next.sendIconSizeClass
     && prev.stopIconSizeClass === next.stopIconSizeClass
-    && prev.canSend === next.canSend
+    &&     prev.canSend === next.canSend
+    && prev.isSending === next.isSending
     && prev.canAbort === next.canAbort
     && prev.hasContent === next.hasContent
     && prev.currentSessionId === next.currentSessionId
