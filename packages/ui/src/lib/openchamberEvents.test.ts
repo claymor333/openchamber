@@ -1,41 +1,58 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test';
 
-mock.module('./runtime-url', () => ({
-  getRuntimeUrlResolver: () => ({ sse: (path: string) => `http://runtime.test${path}` }),
+const requests: Array<{ url: string; init: RequestInit }> = [];
+let pendingControllers: Array<ReadableStreamDefaultController<Uint8Array>> = [];
+
+mock.module('./runtime-fetch', () => ({
+  runtimeFetch: (url: string, init: RequestInit = {}) => {
+    requests.push({ url, init });
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        pendingControllers.push(controller);
+      },
+    });
+    return Promise.resolve(new Response(stream, {
+      status: 200,
+      headers: { 'content-type': 'text/event-stream' },
+    }));
+  },
 }));
 
 mock.module('./runtime-switch', () => ({
   subscribeRuntimeEndpointChanged: () => () => undefined,
 }));
 
-class MockEventSource {
-  static CLOSED = 2;
-  static instances: MockEventSource[] = [];
+const writeFrame = (payload: unknown): void => {
+  const controller = pendingControllers[pendingControllers.length - 1];
+  controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(payload)}\n\n`));
+};
 
-  readyState = 1;
-  onopen: (() => void) | null = null;
-  onmessage: ((event: { data: string }) => void) | null = null;
-  onerror: (() => void) | null = null;
-
-  constructor(public readonly url: string) {
-    MockEventSource.instances.push(this);
-  }
-
-  close() {
-    this.readyState = MockEventSource.CLOSED;
-  }
-}
+const closeStream = (): void => {
+  pendingControllers[pendingControllers.length - 1]?.close();
+};
 
 describe('openchamber events', () => {
   beforeEach(() => {
-    MockEventSource.instances = [];
+    requests.length = 0;
+    pendingControllers = [];
     globalThis.window = {} as Window & typeof globalThis;
-    globalThis.EventSource = MockEventSource as unknown as typeof EventSource;
   });
 
   afterEach(() => {
     delete (globalThis as { window?: unknown }).window;
-    delete (globalThis as { EventSource?: unknown }).EventSource;
+  });
+
+  test('subscribes through runtimeFetch', async () => {
+    const { subscribeOpenchamberEvents } = await import('./openchamberEvents');
+    const events: unknown[] = [];
+    const unsubscribe = subscribeOpenchamberEvents((event) => events.push(event));
+
+    await Promise.resolve();
+    expect(requests.length).toBe(1);
+    expect(requests[0].url).toBe('/api/openchamber/events');
+    expect(requests[0].init.headers).toEqual({ Accept: 'text/event-stream' });
+    unsubscribe();
+    closeStream();
   });
 
   test('dispatches externally created session events', async () => {
@@ -43,21 +60,19 @@ describe('openchamber events', () => {
     const events: unknown[] = [];
     const listener = (event: unknown) => events.push(event);
     const unsubscribe = subscribeOpenchamberEvents(listener);
-    const source = MockEventSource.instances[0];
 
-    source.onmessage?.({
-      data: JSON.stringify({
-        type: 'openchamber:session-created',
-        properties: {
-          sessionId: 'ses_123',
-          directory: '/repo/worktrees/research',
-          projectId: 'project_1',
-          createdAt: 123,
-          promptDispatched: true,
-          dispatchedAsCommand: false,
-        },
-      }),
+    writeFrame({
+      type: 'openchamber:session-created',
+      properties: {
+        sessionId: 'ses_123',
+        directory: '/repo/worktrees/research',
+        projectId: 'project_1',
+        createdAt: 123,
+        promptDispatched: true,
+        dispatchedAsCommand: false,
+      },
     });
+    await new Promise((resolve) => setTimeout(resolve, 10));
 
     expect(events).toEqual([
       {
@@ -71,5 +86,6 @@ describe('openchamber events', () => {
       },
     ]);
     unsubscribe();
+    closeStream();
   });
 });

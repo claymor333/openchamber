@@ -1,4 +1,4 @@
-import { getRuntimeUrlResolver } from './runtime-url';
+import { runtimeFetch } from './runtime-fetch';
 import { subscribeRuntimeEndpointChanged } from './runtime-switch';
 
 type ScheduledTaskRanEvent = {
@@ -23,7 +23,7 @@ type SessionCreatedEvent = {
 type OpenChamberEvent = ScheduledTaskRanEvent | SessionCreatedEvent;
 type Listener = (event: OpenChamberEvent) => void;
 
-let eventSource: EventSource | null = null;
+let streamAbort: AbortController | null = null;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let heartbeatTimer: ReturnType<typeof setTimeout> | null = null;
 let reconnectAttempt = 0;
@@ -55,10 +55,10 @@ const scheduleReconnect = () => {
 
 const cleanupSource = () => {
   clearHeartbeatTimer();
-  if (eventSource) {
-    eventSource.close();
+  if (streamAbort) {
+    streamAbort.abort();
   }
-  eventSource = null;
+  streamAbort = null;
 };
 
 const resetHeartbeatTimer = () => {
@@ -165,35 +165,99 @@ const connect = () => {
   if (typeof window === 'undefined' || listeners.size === 0) {
     return;
   }
-  if (typeof EventSource !== 'function') {
-    return;
-  }
 
-  if (eventSource && eventSource.readyState !== EventSource.CLOSED) {
+  if (streamAbort) {
     return;
   }
 
   cleanupSource();
 
-  const source = new EventSource(getRuntimeUrlResolver().sse('/api/openchamber/events'));
-  source.onopen = () => {
-    resetHeartbeatTimer();
-  };
-  source.onmessage = (event) => {
-    resetHeartbeatTimer();
-    const envelope = parseEnvelope(event.data);
-    if (!envelope) {
+  const controller = new AbortController();
+  streamAbort = controller;
+
+  void readStream(controller.signal);
+};
+
+const readStream = async (signal: AbortSignal): Promise<void> => {
+  try {
+    const response = await runtimeFetch('/api/openchamber/events', {
+      headers: { Accept: 'text/event-stream' },
+      signal,
+    });
+
+    if (signal.aborted) {
       return;
     }
-    dispatchFromEnvelope(envelope);
-  };
 
-  source.onerror = () => {
-    cleanupSource();
+    if (!response.ok || !response.body) {
+      if (streamAbort?.signal === signal) {
+        streamAbort = null;
+      }
+      scheduleReconnect();
+      return;
+    }
+
+    resetHeartbeatTimer();
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (signal.aborted) {
+          return;
+        }
+        if (done) {
+          break;
+        }
+
+        resetHeartbeatTimer();
+        buffer += decoder.decode(value, { stream: true });
+
+        let frameEnd;
+        while ((frameEnd = buffer.indexOf('\n\n')) !== -1) {
+          const frame = buffer.slice(0, frameEnd);
+          buffer = buffer.slice(frameEnd + 2);
+          const envelope = parseSseFrame(frame);
+          if (envelope) {
+            dispatchFromEnvelope(envelope);
+          }
+        }
+      }
+
+      const envelope = parseSseFrame(buffer.trim());
+      if (envelope) {
+        dispatchFromEnvelope(envelope);
+      }
+    } catch {
+      if (signal.aborted) {
+        return;
+      }
+    }
+
+    if (streamAbort?.signal === signal) {
+      streamAbort = null;
+    }
     scheduleReconnect();
-  };
+  } catch {
+    if (signal.aborted) {
+      return;
+    }
+    if (streamAbort?.signal === signal) {
+      streamAbort = null;
+    }
+    scheduleReconnect();
+  }
+};
 
-  eventSource = source;
+const parseSseFrame = (frame: string): { type: string; properties: unknown } | null => {
+  const dataLine = frame.split('\n').find((line) => line.startsWith('data:'));
+  if (!dataLine) {
+    return null;
+  }
+  return parseEnvelope(dataLine.slice(5).trim());
 };
 
 const ensureRuntimeChangeSubscription = () => {
