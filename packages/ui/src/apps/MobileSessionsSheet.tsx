@@ -43,14 +43,16 @@ import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { getProjectLabel, normalizePath } from './mobilePaths';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useI18n } from '@/lib/i18n';
+import { subscribeOpenchamberEvents } from '@/lib/openchamberEvents';
 import { PROJECT_COLOR_MAP, PROJECT_ICON_MAP, ProjectIconImage } from '@/lib/projectMeta';
 import { cn } from '@/lib/utils';
 import {
+  invalidateWorktreeList,
   listProjectWorktrees,
   partitionWorktreesByRegisteredProject,
 } from '@/lib/worktrees/worktreeManager';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
-import { mergeLiveSessionWithGlobalSession, refreshGlobalSessions, useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
+import { mergeLiveSessionWithGlobalSession, refreshGlobalSessions, refreshGlobalSessionsForDirectories, useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useMobileSessionExpansionStore } from '@/stores/useMobileSessionExpansionStore';
 import { useMobileSessionTreeStore } from '@/stores/useMobileSessionTreeStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
@@ -983,6 +985,45 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
       cancelled = true;
     };
   }, [git, open, projects, worktreeRefreshKey]);
+
+  // Live sessions snapshot for the openchamber-event handlers below; the
+  // subscription must not churn on every live overlay update.
+  const liveSessionsRef = React.useRef(liveSessions);
+  React.useEffect(() => {
+    liveSessionsRef.current = liveSessions;
+  }, [liveSessions]);
+
+  // The OpenChamber server emits `openchamber:session-created` when a session
+  // is dispatched into a directory by another client (an agent via the
+  // openchamber tool, a scheduled task, …). Desktop refreshes on that same
+  // signal; without it here, a worktree + session created while the list is on
+  // screen never appears until the sheet is closed and reopened — the sheet's
+  // on-open refresh and the live overlay only cover already-initialized
+  // directories.
+  React.useEffect(() => {
+    if (!open && variant !== 'sidebar') {
+      return;
+    }
+    return subscribeOpenchamberEvents((event) => {
+      if (event.type === 'session-created') {
+        // The new worktree may not exist in the 30s worktree list cache yet, so
+        // invalidate before bumping the discovery key, then pull the session
+        // into the global store for the affected directory.
+        for (const project of useProjectsStore.getState().projects) {
+          const projectPath = normalizePath(project.path);
+          if (projectPath) {
+            invalidateWorktreeList(projectPath);
+          }
+        }
+        setWorktreeRefreshKey((key) => key + 1);
+        void refreshGlobalSessionsForDirectories([event.directory], liveSessionsRef.current);
+        return;
+      }
+      if (event.type === 'scheduled-task-ran') {
+        void refreshGlobalSessions(liveSessionsRef.current);
+      }
+    });
+  }, [open, variant]);
 
   const projectsMeta = React.useMemo<ProjectMeta[]>(
     () =>

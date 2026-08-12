@@ -89,6 +89,7 @@ mock.module('@/lib/gitApi', () => ({
 const {
   createWorktree,
   getLatestWorktreeMetadata,
+  invalidateWorktreeList,
   listProjectWorktrees,
   partitionWorktreesByRegisteredProject,
   worktreeMapsEqual,
@@ -138,6 +139,24 @@ describe('worktreeManager list invalidation', () => {
 
     expect(listCalls).toEqual(['/repo', '/repo']);
     expect(result.map((entry) => entry.path)).toEqual(['/repo-feature']);
+  });
+
+  test('invalidateWorktreeList forces a fresh listing past the cache', async () => {
+    const project = { id: 'project-2', path: '/repo-invalidate' };
+
+    const first = listProjectWorktrees(project);
+    await waitForListCallCount(1);
+    listResolvers[0]([createdWorktree]);
+    await first;
+    expect(listCalls).toEqual(['/repo-invalidate']);
+
+    invalidateWorktreeList('/repo-invalidate');
+
+    const second = listProjectWorktrees(project);
+    await waitForListCallCount(2);
+    listResolvers[1]([createdWorktree]);
+    await second;
+    expect(listCalls).toEqual(['/repo-invalidate', '/repo-invalidate']);
   });
 
   test('marks fast-created worktrees pending until bootstrap settles', async () => {
