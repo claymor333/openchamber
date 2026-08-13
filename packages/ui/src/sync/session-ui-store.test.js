@@ -617,3 +617,58 @@ describe('deleteSessions option forwarding', () => {
     expect(deleteSessionCalls).toEqual([]);
   });
 });
+
+describe('sessionAbortFlags lifecycle', () => {
+  beforeEach(() => {
+    useSessionUIStore.setState({
+      sessionAbortFlags: new Map(),
+      abortPromptSessionId: null,
+      abortPromptExpiresAt: null,
+    });
+  });
+
+  test('recordSessionAbort creates an unacknowledged flag with a timestamp', () => {
+    const before = Date.now();
+    useSessionUIStore.getState().recordSessionAbort('session-aborted');
+    const record = useSessionUIStore.getState().sessionAbortFlags.get('session-aborted');
+
+    expect(record).toBeDefined();
+    expect(record?.acknowledged).toBe(false);
+    expect(record?.timestamp).toBeGreaterThanOrEqual(before);
+    expect(record?.timestamp).toBeLessThanOrEqual(Date.now());
+  });
+
+  test('acknowledgeSessionAbort flips an existing flag only after recordSessionAbort', () => {
+    useSessionUIStore.getState().acknowledgeSessionAbort('session-missing');
+    expect(useSessionUIStore.getState().sessionAbortFlags.has('session-missing')).toBe(false);
+
+    useSessionUIStore.getState().recordSessionAbort('session-aborted');
+    useSessionUIStore.getState().acknowledgeSessionAbort('session-aborted');
+    const record = useSessionUIStore.getState().sessionAbortFlags.get('session-aborted');
+    expect(record?.acknowledged).toBe(true);
+  });
+
+  test('recordSessionAbort disarms an abort prompt armed for the same session', () => {
+    useSessionUIStore.setState({
+      abortPromptSessionId: 'session-aborted',
+      abortPromptExpiresAt: Date.now() + 5000,
+    });
+
+    useSessionUIStore.getState().recordSessionAbort('session-aborted');
+
+    expect(useSessionUIStore.getState().abortPromptSessionId).toBeNull();
+    expect(useSessionUIStore.getState().abortPromptExpiresAt).toBeNull();
+  });
+
+  test('recordSessionAbort leaves an abort prompt armed for another session untouched', () => {
+    useSessionUIStore.setState({
+      abortPromptSessionId: 'session-other',
+      abortPromptExpiresAt: Date.now() + 5000,
+    });
+
+    useSessionUIStore.getState().recordSessionAbort('session-aborted');
+
+    expect(useSessionUIStore.getState().abortPromptSessionId).toBe('session-other');
+    expect(useSessionUIStore.getState().abortPromptExpiresAt).not.toBeNull();
+  });
+});

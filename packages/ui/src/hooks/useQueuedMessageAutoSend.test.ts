@@ -6,6 +6,7 @@ import { setSyncRefs } from '@/sync/sync-refs';
 
 let visibleAgents: Agent[] = [];
 const sendMessageCalls: unknown[][] = [];
+const abortFlags = new Map<string, { timestamp: number; acknowledged: boolean }>();
 
 const getVisibleAgentsMock = mock(() => visibleAgents);
 
@@ -24,7 +25,10 @@ mock.module('@/sync/session-ui-store', () => ({
         sendMessageCalls.push(args);
         return Promise.resolve();
       },
-      sessionAbortFlags: new Map(),
+      sessionAbortFlags: abortFlags,
+      recordSessionAbort: (sessionId: string) => {
+        abortFlags.set(sessionId, { timestamp: Date.now(), acknowledged: false });
+      },
     }),
   },
 }));
@@ -32,12 +36,15 @@ mock.module('@/sync/session-ui-store', () => ({
 import {
   buildQueuedAutoSendPayload,
   createQueuedAutoSendRetryScheduler,
+  getAbortHoldUntil,
   getQueuedAutoSendRetryDelayMs,
   isQueuedAutoSendBackedOff,
+  RECENT_ABORT_WINDOW_MS,
   resolveQueuedSessionStatusType,
   sendQueuedAutoSendPayload,
   shouldDispatchQueuedAutoSend,
 } from './useQueuedMessageAutoSend';
+import { useSessionUIStore } from '@/sync/session-ui-store';
 
 describe('queued auto-send retry scheduler', () => {
   test('wakes the queue when backoff expires', () => {
@@ -302,5 +309,51 @@ describe('buildQueuedAutoSendPayload', () => {
         },
       },
     ]);
+  });
+});
+
+describe('getAbortHoldUntil', () => {
+  beforeEach(() => {
+    abortFlags.clear();
+  });
+
+  test('returns null for a session with no recorded abort', () => {
+    expect(getAbortHoldUntil('session-none')).toBeNull();
+  });
+
+  test('holds until the abort window expires and releases after it', () => {
+    const originalNow = Date.now;
+    let now = 10_000;
+    Date.now = () => now;
+    try {
+      abortFlags.set('session-aborted', { timestamp: 10_000, acknowledged: false });
+      const holdUntil = 10_000 + RECENT_ABORT_WINDOW_MS;
+
+      expect(getAbortHoldUntil('session-aborted')).toBe(holdUntil);
+
+      now = holdUntil - 1;
+      expect(getAbortHoldUntil('session-aborted')).toBe(holdUntil);
+
+      now = holdUntil;
+      expect(getAbortHoldUntil('session-aborted')).toBeNull();
+    } finally {
+      Date.now = originalNow;
+    }
+  });
+
+  test('engages through recordSessionAbort and releases after the window expires', () => {
+    const originalNow = Date.now;
+    let now = 20_000;
+    Date.now = () => now;
+    try {
+      useSessionUIStore.getState().recordSessionAbort('session-aborted');
+
+      expect(getAbortHoldUntil('session-aborted')).toBe(now + RECENT_ABORT_WINDOW_MS);
+
+      now = now + RECENT_ABORT_WINDOW_MS;
+      expect(getAbortHoldUntil('session-aborted')).toBeNull();
+    } finally {
+      Date.now = originalNow;
+    }
   });
 });
