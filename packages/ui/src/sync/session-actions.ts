@@ -1571,6 +1571,9 @@ export async function abortCurrentOperation(sessionId: string): Promise<void> {
   // sent to the wrong instance cancels nothing while still returning 200 true
   // (the "stop button does nothing" report — sessions in another project/
   // worktree than the UI's current directory could never be aborted).
+  // Record the abort before issuing it so the queued auto-send hold engages
+  // the moment the user stops, not after the server settles the turn.
+  useSessionUIStore.getState().recordSessionAbort(sessionId)
   const { directory } = dirStoreForSession(sessionId)
   try {
     await sdk().session.abort({ sessionID: sessionId, directory })

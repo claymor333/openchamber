@@ -335,6 +335,7 @@ export type SessionUIState = {
   setDraftPreserveDirectoryOverride: (value: boolean) => void
   setDraftPermissionAutoAcceptEnabled: (enabled: boolean) => void
   setDraftProjectContextPin: (kind: "note" | "plan", id: string, pinned: boolean) => void
+  recordSessionAbort: (sessionId: string) => void
   acknowledgeSessionAbort: (sessionId: string) => void
   clearAbortPrompt: () => void
   armAbortPrompt: (durationMs?: number) => number | null
@@ -1320,6 +1321,19 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
           ...s.newSessionDraft,
           projectContextPins: { ...pins, [key]: [...next] },
         },
+      }
+    }),
+
+  recordSessionAbort: (sessionId) =>
+    set((s) => {
+      const flags = new Map(s.sessionAbortFlags)
+      flags.set(sessionId, { timestamp: Date.now(), acknowledged: false })
+      // The abort is already issued, so disarm a priming prompt armed for the
+      // same session — the abort prompt no longer needs confirmation.
+      const disarmAbortPrompt = s.abortPromptSessionId === sessionId
+      return {
+        sessionAbortFlags: flags,
+        ...(disarmAbortPrompt ? { abortPromptSessionId: null, abortPromptExpiresAt: null } : {}),
       }
     }),
 
