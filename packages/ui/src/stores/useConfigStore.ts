@@ -608,7 +608,10 @@ const fetchModelsDevMetadata = async (): Promise<Map<string, ModelMetadata>> => 
         return new Map();
     }
 
-    const sources = [MODELS_DEV_PROXY_URL, MODELS_DEV_API_URL];
+    // Try the direct CDN first: on a relay-backed runtime the local mirror is a
+    // large uncompressed body over a bandwidth-bound tunnel, while models.dev
+    // answers directly in ~200ms. The server mirror stays as a fallback.
+    const sources = [MODELS_DEV_API_URL, MODELS_DEV_PROXY_URL];
 
     for (const source of sources) {
         const controller = typeof AbortController !== 'undefined' ? new AbortController() : undefined;

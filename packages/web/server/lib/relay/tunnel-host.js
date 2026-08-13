@@ -7,6 +7,8 @@
 // Spec: .opencode/plans/private-relay/01-protocol-spec.md (Layer 3).
 
 import { WebSocket } from 'ws';
+import { Readable } from 'node:stream';
+import { createGzip } from 'node:zlib';
 
 import {
   MAX_TUNNEL_PAYLOAD_BYTES,
@@ -89,6 +91,20 @@ const isWsOpenPayload = (parsed) =>
     && (parsed.protocols === undefined || Array.isArray(parsed.protocols)));
 
 const isWsClosePayload = (parsed) => Boolean(parsed && typeof parsed === 'object');
+
+// Tunneled HTTP bodies ride the relay uncompressed: undici already decoded
+// content-encoding, and re-compressing lets a slow relay carry JSON/text bodies
+// at a fraction of the bytes. Only applied when the client asked for gzip AND
+// the body is finite and compressible (never SSE or binary).
+const isCompressibleContentType = (value) => {
+  const v = String(value || '').toLowerCase();
+  if (!v || v.includes('event-stream')) return false;
+  return v.startsWith('application/json')
+    || v.startsWith('application/javascript')
+    || v.startsWith('application/xml')
+    || v.startsWith('application/vnd.')
+    || v.startsWith('text/');
+};
 
 /**
  * @param {{
@@ -203,17 +219,36 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
       if (STRIPPED_RESPONSE_HEADERS.has(name)) continue;
       responseHeaders[name] = value;
     }
+    const clientAcceptsGzip = String(request.headers?.['accept-encoding'] || '').toLowerCase().includes('gzip');
+    const shouldCompress = clientAcceptsGzip
+      && typeof Readable.fromWeb === 'function'
+      && typeof createGzip === 'function'
+      && isCompressibleContentType(response.headers.get('content-type'));
+    if (shouldCompress) responseHeaders['content-encoding'] = 'gzip';
     await sendJson(TunnelFrameType.HttpResponse, streamId, { status: response.status, headers: responseHeaders });
 
     try {
       if (response.body) {
-        for await (const chunk of response.body) {
-          if (closed || stream.abort.signal.aborted) return;
-          const bytes = chunk instanceof Uint8Array ? chunk : new Uint8Array(chunk);
-          for (const piece of chunkPayload(bytes, MAX_TUNNEL_PAYLOAD_BYTES)) {
-            await waitForBackpressure(stream.abort.signal);
+        if (shouldCompress) {
+          const gz = Readable.fromWeb(response.body).pipe(createGzip());
+          for await (const chunk of gz) {
             if (closed || stream.abort.signal.aborted) return;
-            await send(encodeTunnelFrame(TunnelFrameType.HttpBody, streamId, piece));
+            const bytes = chunk instanceof Uint8Array ? chunk : new Uint8Array(chunk);
+            for (const piece of chunkPayload(bytes, MAX_TUNNEL_PAYLOAD_BYTES)) {
+              await waitForBackpressure(stream.abort.signal);
+              if (closed || stream.abort.signal.aborted) return;
+              await send(encodeTunnelFrame(TunnelFrameType.HttpBody, streamId, piece));
+            }
+          }
+        } else {
+          for await (const chunk of response.body) {
+            if (closed || stream.abort.signal.aborted) return;
+            const bytes = chunk instanceof Uint8Array ? chunk : new Uint8Array(chunk);
+            for (const piece of chunkPayload(bytes, MAX_TUNNEL_PAYLOAD_BYTES)) {
+              await waitForBackpressure(stream.abort.signal);
+              if (closed || stream.abort.signal.aborted) return;
+              await send(encodeTunnelFrame(TunnelFrameType.HttpBody, streamId, piece));
+            }
           }
         }
       }

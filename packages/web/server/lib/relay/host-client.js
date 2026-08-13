@@ -26,7 +26,7 @@ const DATA_SOCKET_IDLE_SWEEP_INTERVAL_MS = 30_000;
 // every client tunnel then hangs in `connecting` forever. A missed pong window
 // terminates the socket, which drives the normal reconnect + re-registration.
 const CONTROL_PING_INTERVAL_MS = 30_000;
-const CONTROL_PONG_GRACE_MS = 10_000;
+const CONTROL_PONG_GRACE_MS = 20_000;
 const DEFAULT_BATCH_WINDOW_MS = 150;
 
 // Resolve the frame-batching flush window: explicit option wins, then env, then
