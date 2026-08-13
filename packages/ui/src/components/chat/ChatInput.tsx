@@ -61,6 +61,7 @@ import { useTabletLayout } from '@/lib/device';
 import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
 import { useHardwareKeyboard } from '@/lib/hardwareKeyboard';
 import { isIMECompositionEvent } from '@/lib/ime';
+import { updateDesktopSettings } from '@/lib/persistence';
 import { getCycledPrimaryAgentName, type MobileControlsPanel } from './mobileControlsUtils';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
@@ -408,6 +409,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const agents = getVisibleAgents();
     const isMobile = useUIStore((state) => state.isMobile);
     const hasHardwareKeyboard = useHardwareKeyboard();
+    const enterToSend = useUIStore((state) => state.enterToSend);
+    const setEnterToSend = useUIStore((state) => state.setEnterToSend);
     const { enabled: isTabletLayout } = useTabletLayout();
     // The tablet-desktop surface: the native app's wide layout (not a large
     // desktop window, where readTabletLayout also returns enabled).
@@ -1031,6 +1034,12 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const handleToggleExpandedInput = React.useCallback(() => {
         setExpandedInput(!isExpandedInput);
     }, [isExpandedInput, setExpandedInput]);
+
+    const handleToggleEnterToSend = React.useCallback(() => {
+        const next = !enterToSend;
+        setEnterToSend(next);
+        void updateDesktopSettings({ enterToSend: next });
+    }, [enterToSend, setEnterToSend]);
 
     const openIssuePicker = React.useCallback(() => {
         setIssuePickerOpen(true);
@@ -1744,15 +1753,26 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             return;
         }
 
-        // Handle Enter/Ctrl+Enter based on selected follow-up behavior. On
-        // mobile, and in desktop focus mode, plain Enter writes a newline and
-        // only Cmd/Ctrl+Enter sends: both are surfaces for composing long
-        // prompts, where an accidental send costs more than an extra keypress.
-        const requiresModifierToSend = isMobile || isDesktopExpanded;
-        if (e.key === 'Enter' && !e.shiftKey && (!requiresModifierToSend || e.ctrlKey || e.metaKey)) {
-            e.preventDefault();
+        // Enter-key policy, controlled by the composer's enterToSend toggle
+        // (and the `enterToSend` chat setting): when on, plain Enter submits
+        // and Shift+Enter inserts a newline; when off, Shift+Enter submits and
+        // plain Enter inserts a newline. Ctrl/Cmd+Enter always submits, the
+        // soft-keyboard fallback route, and never inserts a newline.
+        const enterSubmits = enterToSend;
 
+        // Handle Enter/Ctrl+Enter based on selected follow-up behavior.
+        if (e.key === 'Enter') {
+            const isShiftEnter = e.shiftKey;
             const isCtrlEnter = e.ctrlKey || e.metaKey;
+
+            // Plain Enter submits when enterToSend; Shift+Enter submits when
+            // not. Ctrl/Cmd+Enter always submits regardless of the toggle.
+            const thisEnterSubmits = enterSubmits ? !isShiftEnter : isShiftEnter;
+            if (!thisEnterSubmits && !isCtrlEnter) {
+                // Not a submit: let the editor insert a newline.
+                return;
+            }
+            e.preventDefault();
 
             // Queueing / steering only works when there's an existing busy
             // session (or an active auto-review run).
@@ -2984,6 +3004,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                         canAbort={canAbort}
                         hasContent={Boolean(hasContent)}
                         isExpandedInput={isExpandedInput}
+                        enterToSend={enterToSend}
                         permissionAutoAcceptEnabled={permissionAutoAcceptEnabled}
                         isPermissionAutoAcceptInteractive={isPermissionAutoAcceptInteractive}
                         dictationActive={mobileShell.dictationActive}
@@ -2994,6 +3015,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                         onOpenAttachSheet={openMobileAttachSheet}
                         onToggleExpandedInput={handleToggleExpandedInput}
                         onTogglePermissionAutoAccept={handlePermissionAutoAcceptToggle}
+                        onToggleEnterToSend={handleToggleEnterToSend}
                         onPrimaryAction={handlePrimaryAction}
                         onQueueMessage={handleQueueMessage}
                         onAbort={handleAbort}
