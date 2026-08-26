@@ -13,6 +13,9 @@ import {
 import { createHostHandshake } from './handshake';
 import { TunnelFrameType } from './protocol';
 import { isAmbiguousTransportFailure } from './transport-error';
+import { opencodeClient } from '../opencode/client';
+import { adoptRelayTunnel, deactivateRelayTunnel } from './runtime-tunnel';
+import { configureRuntimeUrlResolver, getRuntimeUrlResolver, setRuntimeUrlResolver } from '../runtime-url';
 import {
   chunkPayload,
   createFragmentAssembler,
@@ -204,6 +207,10 @@ const attachMiniHost = (endpoint: FakeEndpoint, hostPrivateKey: CryptoKey, optio
       } else if (path === '/hang') {
         // Request fully received but never answered — exercises the client's
         // response-head timeout.
+        return;
+      } else if (path === '/api/path' || path === '/api/opencode/health') {
+        // SDK GETs routed through runtimeFetch stay in flight until the relay
+        // head timeout or the outer client timeout handles them.
         return;
       } else if (path === '/delayed-post') {
         // POST response heads may be delayed by a server-side mutation.
@@ -1005,6 +1012,48 @@ describe('createRelayTunnelClient', () => {
       expect(connectionCount()).toBeGreaterThan(1);
     } finally {
       restore();
+    }
+  });
+
+  test('SDK GETs preserve relay timeout errors through the runtime client boundary', async () => {
+    const previousResolver = getRuntimeUrlResolver();
+    const previousWindow = globalThis.window;
+    Object.defineProperty(globalThis, 'window', {
+      configurable: true,
+      value: {
+        location: { origin: 'https://runtime.test', href: 'https://runtime.test/' },
+        addEventListener: () => undefined,
+        removeEventListener: () => undefined,
+      },
+    });
+    configureRuntimeUrlResolver({ apiBaseUrl: 'https://runtime.test' });
+    opencodeClient.reconnectToRuntimeBaseUrl();
+    const { client } = await setupClient({}, { headTimeoutMs: 30 });
+    track(client);
+    await waitForStatus(client, 'connected');
+    adoptRelayTunnel(
+      {
+        relayUrl: 'wss://relay.test',
+        serverId: 'server-1',
+        hostEncPubJwk: {},
+      },
+      client,
+    );
+
+    try {
+      const result = await opencodeClient.getApiClient().path.get({ directory: '/workspace/project' });
+      expect(result.response).toBeUndefined();
+      expect(result.error).toBeInstanceOf(Error);
+      expect(isAmbiguousTransportFailure(result.error)).toBe(true);
+
+      const startedAt = Date.now();
+      expect(await opencodeClient.checkHealth()).toBe(false);
+      expect(Date.now() - startedAt).toBeLessThan(500);
+    } finally {
+      deactivateRelayTunnel();
+      setRuntimeUrlResolver(previousResolver);
+      Object.defineProperty(globalThis, 'window', { configurable: true, value: previousWindow });
+      opencodeClient.reconnectToRuntimeBaseUrl();
     }
   });
 });
