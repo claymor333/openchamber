@@ -47,7 +47,6 @@ import {
 } from './contextPanelEmbeddedChat';
 import { getContextSurfaceWidthFraction } from '@/lib/surfaces/registry';
 import { isTerminalEventTarget } from '@/lib/terminalFocus';
-import { resolveContextPanelWidth } from '@/lib/contextPanelWidth';
 
 const CONTEXT_PANEL_MIN_WIDTH = 380;
 const CONTEXT_PANEL_MAX_WIDTH = 1400;
@@ -437,7 +436,7 @@ const truncateTabLabel = (value: string, maxChars: number): string => {
 };
 
 
-export const ContextPanel: React.FC<{ embeddedWidth?: number; embeddedResizing?: boolean }> = ({ embeddedWidth, embeddedResizing }) => {
+export const ContextPanel: React.FC = () => {
   const { t } = useI18n();
   const effectiveDirectory = useEffectiveDirectory() ?? '';
   const directoryKey = React.useMemo(() => normalizeDirectoryKey(effectiveDirectory), [effectiveDirectory]);
@@ -480,13 +479,7 @@ export const ContextPanel: React.FC<{ embeddedWidth?: number; embeddedResizing?:
   const widthFraction = activeModeForWidth ? getContextSurfaceWidthFraction(activeModeForWidth) : 0.5;
   const widthFallbackBase = availablePanelAreaWidth
     ?? (typeof window !== 'undefined' ? window.innerWidth : CONTEXT_PANEL_DEFAULT_WIDTH * 2);
-  const width = resolveContextPanelWidth({
-    embeddedWidth,
-    manualWidth,
-    widthFraction,
-    fallbackBase: widthFallbackBase,
-    clamp: clampWidth,
-  });
+  const width = clampWidth(manualWidth ?? Math.round(widthFraction * widthFallbackBase));
   const chatSessionIDs = React.useMemo(() => {
     const ids: string[] = [];
     for (const tab of tabs) {
@@ -1090,9 +1083,6 @@ export const ContextPanel: React.FC<{ embeddedWidth?: number; embeddedResizing?:
           ['--oc-context-panel-width' as string]: availablePanelAreaWidth !== null ? `${availablePanelAreaWidth}px` : '100%',
           width: availablePanelAreaWidth !== null ? `${availablePanelAreaWidth}px` : '100%',
           maxWidth: '100%',
-          // Embedded (hybrid tablet): absolute positioning escapes the host
-          // aside's safe-area padding, so offset below the status bar here.
-          ...(embeddedWidth !== undefined ? { top: 'var(--oc-safe-area-top, 0px)' } : null),
         }
       : {
           width: 'min(var(--oc-context-panel-width), 100%)',
@@ -1109,13 +1099,9 @@ export const ContextPanel: React.FC<{ embeddedWidth?: number; embeddedResizing?:
       inert={!isOpen || undefined}
       className={cn(
         'flex min-h-0 flex-col overflow-hidden bg-background',
-        embeddedResizing && 'transition-none',
         // Right-anchored while expanded: `inset-0` would teleport the left
         // edge instantly (position does not transition), so only the width
         // animates and the panel grows leftwards from its docked position.
-        // In embedded (hybrid tablet) mode the host aside already applies
-        // safe-area top padding, but absolute positioning escapes it — offset
-        // the expanded panel below the status bar too.
         isExpanded
           ? 'absolute inset-y-0 right-0 z-20 min-w-0'
           : 'relative h-full flex-shrink-0',

@@ -394,13 +394,30 @@ export const readTabletLayout = (): TabletLayout => {
   if (typeof window === 'undefined') return { enabled: false, roomyForPanels: false };
   const width = window.innerWidth;
   const height = window.innerHeight;
+  // On the native mobile surface the software keyboard resizes the WebView
+  // (adjustResize), so innerHeight collapses while the keyboard is up (e.g. a
+  // 1280x800 landscape tablet drops to ~1280x350). Basing the size class on
+  // that would flip the tablet to the phone layout, which dismisses the
+  // keyboard and re-flips when it restores — an infinite flicker loop (and the
+  // same window-dims comparison would misread a portrait tablet with the
+  // keyboard up as landscape, flipping hybrid mode on). The physical screen
+  // dims (screen.width / screen.height, in CSS px) are immune to both the
+  // keyboard and orientation, so use them as the stable anchor on the mobile
+  // surface. Desktop/web keep the real window dims (screen would be the whole
+  // monitor).
+  const stableShortSide = isMobileSurfaceRuntime()
+    ? Math.min(window.screen?.width ?? width, window.screen?.height ?? height)
+    : Math.min(width, height);
+  const stableIsLandscape = isMobileSurfaceRuntime()
+    ? (window.screen?.width ?? width) > (window.screen?.height ?? height)
+    : width > height;
   // iPads answer this on identity too: iPadOS reports odd viewports in Slide
   // Over / Split View, and a device we KNOW is a tablet should not flip to the
   // phone layout because it was given a narrow slice.
-  const enabled = isIPadApp() || Math.min(width, height) >= TABLET_LAYOUT_MIN_SHORT_SIDE_PX;
+  const enabled = isIPadApp() || stableShortSide >= TABLET_LAYOUT_MIN_SHORT_SIDE_PX;
   return {
     enabled,
-    roomyForPanels: enabled && width > height && width >= WORKSPACE_PANEL_MIN_WIDTH_PX,
+    roomyForPanels: enabled && stableIsLandscape && width >= WORKSPACE_PANEL_MIN_WIDTH_PX,
   };
 };
 

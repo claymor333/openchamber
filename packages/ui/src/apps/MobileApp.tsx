@@ -14,6 +14,7 @@ import { SettingsView } from '@/components/views/SettingsView';
 import { AppLinkConfirmDialog } from '@/components/chat/AppLinkConfirmDialog';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 import { RuntimeAPIProvider } from '@/contexts/RuntimeAPIProvider';
+import { useAuthSessionStore } from '@/lib/runtime-auth-expiry';
 import { registerRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { Toaster } from '@/components/ui/sonner';
@@ -51,7 +52,7 @@ import { useUpdateStore } from '@/stores/useUpdateStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { SyncProvider } from '@/sync/sync-context';
 
-import { resolveHybridWorkspaceGeometry } from './hybridWorkspaceGeometry';
+import { RAIL_WIDTH_PX, resolveHybridWorkspaceGeometry } from './hybridWorkspaceGeometry';
 import { SyncAppEffects } from './AppEffects';
 import { BusyDots } from '@/components/chat/message/parts/BusyDots';
 import { MobileConnectionWelcome, type MobileConnectionNotice } from './MobileConnectionWelcome';
@@ -185,7 +186,33 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
   const activeContextTab = contextPanelState?.tabs.find((tab) => tab.id === contextPanelState.activeTabId) ?? null;
   const panelIsOpen = isHybridTablet && Boolean(contextPanelState?.isOpen && activeContextTab);
   const isExpandedHybridPanel = panelIsOpen && Boolean(contextPanelState?.expanded);
-  const toggleContextPanelExpanded = useUIStore((state) => state.toggleContextPanelExpanded);
+
+  // Collapsing from expanded keeps the aside absolutely positioned (as it is
+  // when expanded) until its width transition reaches the docked width, so the
+  // chat column — and the composer — stay put while the panel slides back
+  // toward the rail. Flipping to in-flow mid-animation would squeeze the chat
+  // out from under the panel. The absolute docked geometry equals the in-flow
+  // one, so returning to flow when the animation ends does not move anything.
+  const [hybridPanelUnexpanding, setHybridPanelUnexpanding] = React.useState(false);
+
+  const wasExpandedHybridPanelRef = React.useRef(isExpandedHybridPanel);
+  React.useEffect(() => {
+    if (isExpandedHybridPanel) {
+      setHybridPanelUnexpanding(false);
+    } else if (wasExpandedHybridPanelRef.current) {
+      setHybridPanelUnexpanding(true);
+    }
+    wasExpandedHybridPanelRef.current = isExpandedHybridPanel;
+  }, [isExpandedHybridPanel]);
+
+  // Safety net for motion-reduce (the aside's width transition is disabled, so
+  // transitionend never fires): the absolute docked geometry is identical to
+  // the in-flow one, so returning to flow on the timer is invisible.
+  React.useEffect(() => {
+    if (!hybridPanelUnexpanding) return;
+    const timer = window.setTimeout(() => setHybridPanelUnexpanding(false), 350);
+    return () => window.clearTimeout(timer);
+  }, [hybridPanelUnexpanding]);
 
   const openFilesSurface = React.useCallback(() => {
     if (isHybridTablet) {
@@ -213,12 +240,31 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
     setWorkspaceOpen(true);
   }, [directoryKey, isHybridTablet, openContextDiff, openContextPanelTab]);
 
-  const leftResize = useIpadSidebarResize('left', 'openchamber.ipad.leftSidebarWidth', IPAD_LEFT_SIDEBAR_WIDTH);
   const rightResize = useIpadSidebarResize(
     'right',
     'openchamber.ipad.rightSidebarWidth',
     IPAD_RIGHT_SIDEBAR_WIDTH,
     IPAD_WORKSPACE_SIDEBAR_MAX_WIDTH,
+  );
+  const isExpandedHybridPanelRef = React.useRef(isExpandedHybridPanel);
+  isExpandedHybridPanelRef.current = isExpandedHybridPanel;
+  const leftResize = useIpadSidebarResize(
+    'left',
+    'openchamber.ipad.leftSidebarWidth',
+    IPAD_LEFT_SIDEBAR_WIDTH,
+    undefined,
+    // Expanded: the panel's left edge IS the sessions sidebar's right edge, so
+    // a live sessions drag must move the panel too. Pin the panel's width to
+    // the seam per pointermove (imperative, like the panel's own drag).
+    (liveWidth) => {
+      const aside = rightResize.asideRef.current;
+      if (!aside || !isExpandedHybridPanelRef.current) return;
+      const next = Math.max(0, (typeof window !== 'undefined' ? window.innerWidth : 0) - liveWidth - RAIL_WIDTH_PX);
+      aside.style.width = `${next}px`;
+      aside.style.minWidth = `${next}px`;
+      aside.style.maxWidth = `${next}px`;
+      aside.style.setProperty('--oc-ipad-sidebar-width', `${next}px`);
+    },
   );
   // The workspace becomes a real side panel only where the screen can host the
   // sidebar, the panel AND a readable chat at once. Everywhere else — a tablet
@@ -255,6 +301,14 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
     viewportWidth,
     sidebarWidth,
   });
+
+  // Expanded panel width that tracks a live sessions drag: the left resize
+  // callback pins the aside width imperatively per pointermove, and this mirror
+  // (from liveWidthRef) keeps a React re-render from snapping it back. Equals
+  // the full chat area when not dragging.
+  const expandedHybridPanelWidth = leftResize.isResizing
+    ? Math.max(0, viewportWidth - (leftResize.liveWidthRef.current ?? leftResize.width) - RAIL_WIDTH_PX)
+    : hybridGeometry.workspacePanelWidth;
 
   // Publish the chat column's insets so overlays portaled to <body> (model
   // picker, directory picker, every MobileOverlayPanel) can center on the CHAT
@@ -563,33 +617,67 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
                 ref={rightResize.asideRef}
                 className={cn(
                   'relative flex h-full shrink-0 flex-col overflow-hidden border-l border-border/70 bg-background will-change-[width] motion-reduce:transition-none',
-                  // Expanded: overlay the chat column (covering its header)
-                  // instead of squeezing it — left edge at the sessions sidebar,
-                  // right edge at the icon rail.
-                  isExpandedHybridPanel && 'absolute inset-y-0 right-11 z-20',
+                  // Expanded (or collapsing from expanded): overlay the chat
+                  // column (covering its header) instead of squeezing it —
+                  // left edge at the sessions sidebar, right edge at the icon
+                  // rail. Keeping the overlay through the collapse animation
+                  // leaves the chat and composer static underneath.
+                  (isExpandedHybridPanel || hybridPanelUnexpanding) && 'absolute inset-y-0 right-11 z-20',
+                  // While collapsing the panel is non-interactive; it returns
+                  // to flow (and interactivity) when the width animation ends.
+                  hybridPanelUnexpanding && 'pointer-events-none',
                   !hybridGeometry.workspacePanelWidth && 'border-l-0',
                 )}
                 style={{
-                  // During a drag, applyLiveWidth owns width/min/max imperatively
-                  // (live per pointermove). React re-applying these here would
-                  // snap the panel back to the docked width on any re-render, so
-                  // they are omitted while isResizing.
-                  width: rightResize.isResizing ? undefined : hybridGeometry.workspacePanelWidth,
-                  minWidth: rightResize.isResizing ? undefined : hybridGeometry.workspacePanelWidth,
-                  maxWidth: rightResize.isResizing ? undefined : hybridGeometry.workspacePanelWidth,
-                  ['--oc-ipad-sidebar-width' as string]: rightResize.isResizing
-                    ? undefined
-                    : (isExpandedHybridPanel
-                      ? `${hybridGeometry.workspacePanelWidth}px`
-                      : `${rightResize.width}px`),
+                  // Expanded: right-anchored at the rail, width = the full chat
+                  // area. During a sessions drag the width is pinned to the
+                  // moving seam (imperatively by the left resize callback,
+                  // mirrored here via liveWidthRef so a re-render cannot snap
+                  // it back); otherwise the 200ms width transition animates
+                  // the expand/collapse.
+                  ...(isExpandedHybridPanel && !hybridPanelUnexpanding ? {
+                    width: expandedHybridPanelWidth,
+                    minWidth: expandedHybridPanelWidth,
+                    maxWidth: expandedHybridPanelWidth,
+                    ['--oc-ipad-sidebar-width' as string]: `${expandedHybridPanelWidth}px`,
+                  } : {
+                    // During a drag, applyLiveWidth owns width/min/max
+                    // imperatively (live per pointermove). React re-applying
+                    // these here would snap the panel back to the docked width on
+                    // any re-render, so the rendered value follows the imperative
+                    // one: the hook's liveWidthRef is what applyLiveWidth just
+                    // wrote, so a React re-render re-applies the same value and
+                    // nothing flickers.
+                    width: rightResize.isResizing
+                      ? (rightResize.liveWidthRef.current ?? rightResize.width)
+                      : hybridGeometry.workspacePanelWidth,
+                    minWidth: rightResize.isResizing
+                      ? (rightResize.liveWidthRef.current ?? rightResize.width)
+                      : hybridGeometry.workspacePanelWidth,
+                    maxWidth: rightResize.isResizing
+                      ? (rightResize.liveWidthRef.current ?? rightResize.width)
+                      : hybridGeometry.workspacePanelWidth,
+                    ['--oc-ipad-sidebar-width' as string]: rightResize.isResizing
+                      ? `${rightResize.liveWidthRef.current ?? rightResize.width}px`
+                      : `${rightResize.width}px`,
+                  }),
                   overflowX: 'clip',
                   paddingTop: 'var(--oc-safe-area-top, 0px)',
-                  transitionProperty: rightResize.isResizing ? 'none' : 'width, min-width, max-width',
+                  transitionProperty: (rightResize.isResizing || leftResize.isResizing) ? 'none' : 'width, min-width, max-width',
                   transitionDuration: '200ms',
                   transitionTimingFunction: 'cubic-bezier(0.22, 1, 0.36, 1)',
                 }}
                 aria-hidden={!hybridGeometry.workspacePanelWidth}
                 data-page-scroll-lock="true"
+                onTransitionEnd={(event) => {
+                  if (
+                    event.target === event.currentTarget &&
+                    event.propertyName === 'width' &&
+                    hybridPanelUnexpanding
+                  ) {
+                    setHybridPanelUnexpanding(false);
+                  }
+                }}
               >
                 <div
                   className={cn(
@@ -597,15 +685,15 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
                     rightResize.isResizing && 'pointer-events-none',
                     !hybridGeometry.workspacePanelWidth && 'pointer-events-none select-none opacity-0',
                   )}
-                  // Track the live width via the CSS var, which applyLiveWidth
-                  // updates imperatively during a drag AND which the expanded
-                  // geometry sets to the full chat area. This preserves the
-                  // original drag mechanism exactly.
-                  style={{ width: 'var(--oc-ipad-sidebar-width)', overflowX: 'hidden' }}
+                  // Fill the aside (100%) so this wrapper rides the aside's
+                  // width transition — a var-driven width would snap instantly
+                  // on expand/collapse, and the panel below reads its width
+                  // from this wrapper via `100%`.
+                  style={{ width: '100%', overflowX: 'hidden' }}
                 >
                   <ErrorBoundary>
                     {isHybridTablet ? (
-                      <ContextPanel embeddedWidth={rightResize.width} embeddedResizing={rightResize.isResizing} />
+                      <ContextPanel />
                     ) : (
                       <MobileWorkspaceDrawer
                         open={workspaceOpen}
@@ -621,40 +709,28 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
                   </ErrorBoundary>
                 </div>
                 {hybridGeometry.workspacePanelWidth ? (
-                  <IpadSidebarResizeHandle
-                    side="right"
-                    isResizing={rightResize.isResizing}
-                    ariaLabel={t('sidebar.resize.rightPanelAria')}
-                    handleProps={{
-                      ...rightResize.handleProps,
-                      // Dragging the border while the panel is expanded should
-                      // dock it at the dragged width (exit expanded), not fight
-                      // the full-width geometry. Collapse before the drag starts.
-                      onPointerDown: (event: React.PointerEvent<HTMLElement>) => {
-                        if (isExpandedHybridPanel) {
-                          toggleContextPanelExpanded(directoryKey);
-                        }
-                        rightResize.handleProps.onPointerDown?.(event);
-                      },
-                    }}
-                  />
+                  isExpandedHybridPanel ? (
+                    // Expanded: the panel's left edge sits exactly on the
+                    // sessions sidebar's right edge, so this strip is the same
+                    // seam. Route it to the sessions resize (the panel follows
+                    // the boundary live) instead of collapsing the panel — a
+                    // grab on either side of the seam then behaves identically.
+                    <IpadSidebarResizeHandle
+                      side="right"
+                      isResizing={leftResize.isResizing}
+                      ariaLabel={t('sidebar.resize.leftPanelAria')}
+                      handleProps={leftResize.handleProps}
+                    />
+                  ) : (
+                    <IpadSidebarResizeHandle
+                      side="right"
+                      isResizing={rightResize.isResizing}
+                      ariaLabel={t('sidebar.resize.rightPanelAria')}
+                      handleProps={rightResize.handleProps}
+                    />
+                  )
                 ) : null}
               </aside>
-              {isHybridTablet ? (
-                <div
-                  className={cn(
-                    'flex h-full w-11 shrink-0 flex-col border-l border-border/70 bg-background',
-                    // When the panel is expanded the aside goes absolute (out of
-                    // flex flow), which would pull this rail leftward to sit
-                    // behind it. Pin the rail to the far right edge instead.
-                    isExpandedHybridPanel && 'absolute inset-y-0 right-0',
-                  )}
-                  style={{ paddingTop: 'var(--oc-safe-area-top, 0px)' }}
-                  data-page-scroll-lock="true"
-                >
-                  <ErrorBoundary><ContextPanelRail /></ErrorBoundary>
-                </div>
-              ) : null}
             </>
           ) : (
             <MobileWorkspaceDrawer
@@ -668,6 +744,26 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
             />
           )}
         </div>
+
+        {/* Outside the chat-area wrapper: the rail's 44px are not chat space,
+            so counting them would let the work-status panel squeeze the
+            transcript below its 560px minimum. A shell sibling keeps the
+            measured width equal to chat + workspace, like the desktop. */}
+        {isHybridTablet ? (
+          <div
+            className={cn(
+              'flex h-full w-11 shrink-0 flex-col border-l border-border/70 bg-background',
+              // When the panel is expanded the aside goes absolute (out of
+              // flex flow), which would pull this rail leftward to sit
+              // behind it. Pin the rail to the far right edge instead.
+              isExpandedHybridPanel && 'absolute inset-y-0 right-0',
+            )}
+            style={{ paddingTop: 'var(--oc-safe-area-top, 0px)' }}
+            data-page-scroll-lock="true"
+          >
+            <ErrorBoundary><ContextPanelRail /></ErrorBoundary>
+          </div>
+        ) : null}
 
         {/* Layered above the workspace drawer's Notes tab, which opened it. */}
         {openPlan ? (
@@ -911,6 +1007,23 @@ export function MobileApp({ apis }: MobileAppProps) {
     };
   }, [isNativeMobileApp, handleNativeResume]);
 
+  // A confirmed mid-session auth expiry (classified centrally from live 401
+  // traffic) runs the same seq-guarded re-probe the resume path uses: it ends
+  // in needs-login → the native welcome screen with the auth-expired notice.
+  // The shared web banner never renders on native (the session gate is not
+  // mounted here), so this is the only surface reacting to the signal.
+  React.useEffect(() => {
+    if (!isNativeMobileApp) return;
+    return useAuthSessionStore.subscribe((store, previous) => {
+      if (store.state === 'expired' && previous.state !== 'expired') {
+        handleNativeResume();
+        // The probe ladder owns the outcome from here; the shared store goes
+        // back to 'ok' so a later expiry can signal again.
+        useAuthSessionStore.getState().markAuthenticated();
+      }
+    });
+  }, [isNativeMobileApp, handleNativeResume]);
+
   React.useEffect(() => {
     registerRuntimeAPIs(apis);
     return () => registerRuntimeAPIs(null);
@@ -961,14 +1074,13 @@ export function MobileApp({ apis }: MobileAppProps) {
   // to the connect screen. A successful switchRuntimeEndpoint fires the endpoint-
   // changed subscription above, which bumps the epochs and bootstraps the app.
   React.useEffect(() => {
-    if (!isNativeMobileApp || isConnected || getRuntimeApiBaseUrl()) {
-      setAutoConnectPhase('done');
-      return;
-    }
     // Inside the panel's embedded session-chat iframe, there is no saved
-    // instance to auto-connect to — the parent already holds the connection.
-    // Request its runtime bootstrap (apiBaseUrl + token + relay) and adopt it,
-    // so the iframe shows the session instead of the connect screen.
+    // instance to auto-connect to — the parent already holds the connection
+    // (and the runtime endpoint is not persisted, so a fresh realm cannot
+    // recover it). Request its runtime bootstrap (apiBaseUrl + token + relay)
+    // and adopt it, so the iframe shows the subagent session instead of the
+    // connect screen. Checked before the native guard: the iframe has no
+    // Capacitor bridge of its own, so isNativeMobileApp is false in there.
     if (isEmbeddedSessionChat()) {
       let cancelled = false;
       setAutoConnectPhase('attempting');
@@ -994,6 +1106,10 @@ export function MobileApp({ apis }: MobileAppProps) {
       return () => {
         cancelled = true;
       };
+    }
+    if (!isNativeMobileApp || isConnected || getRuntimeApiBaseUrl()) {
+      setAutoConnectPhase('done');
+      return;
     }
     let cancelled = false;
     setAutoConnectPhase('attempting');
@@ -1313,6 +1429,30 @@ export function MobileApp({ apis }: MobileAppProps) {
       <main className="flex min-h-dvh items-center justify-center bg-background text-foreground">
         <OpenChamberLogo width={120} height={120} isAnimated />
       </main>
+    );
+  }
+
+  // The context panel embeds this realm as a session-chat iframe
+  // (?ocPanel=session-chat&surface=desktop) to show a subagent session. Render
+  // just that session's chat — not the full mobile shell — so the panel does
+  // not reopen the whole OpenChamber UI. The auto-connect effect above adopts
+  // the parent's runtime bootstrap and makes the embedded session current.
+  if (isEmbeddedSessionChat()) {
+    return (
+      <ErrorBoundary>
+        <SyncProvider key={runtimeEndpointEpoch} sdk={opencodeClient.getSdkClient()} directory={currentDirectory || ''}>
+          <RuntimeAPIProvider apis={apis}>
+            <TooltipProvider delayDuration={300} skipDelayDuration={150}>
+              <div className="h-full bg-background text-foreground">
+                <SyncAppEffects embeddedBackgroundWorkEnabled={isInitialized} />
+                <OpenCodeUpdateToast />
+                <ChatView readOnly={new URLSearchParams(window.location.search).get('readOnly') === '1'} />
+                <Toaster position="top-center" offset="calc(var(--oc-safe-area-top, 0px) + 16px)" />
+              </div>
+            </TooltipProvider>
+          </RuntimeAPIProvider>
+        </SyncProvider>
+      </ErrorBoundary>
     );
   }
 

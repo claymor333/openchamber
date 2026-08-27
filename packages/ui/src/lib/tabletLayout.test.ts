@@ -17,6 +17,20 @@ const setViewport = (width: number, height: number) => {
   };
 };
 
+// The native mobile surface (Capacitor) with the OSK up: the WebView viewport
+// collapses (adjustResize) while the physical screen keeps its real size. The
+// explicit surface override flips isMobileSurfaceRuntime() without needing a
+// real Capacitor shell, and screen.* supplies the keyboard-stable anchor.
+const setMobileSurfaceWithKeyboard = (viewportWidth: number, viewportHeight: number, screenWidth: number, screenHeight: number) => {
+  (globalThis as { window?: unknown }).window = {
+    innerWidth: viewportWidth,
+    innerHeight: viewportHeight,
+    screen: { width: screenWidth, height: screenHeight },
+    location: { protocol: 'capacitor:', search: '' },
+    __OPENCHAMBER_SURFACE__: 'mobile',
+  };
+};
+
 const withViewport = (width: number, height: number): TabletLayout => {
   setViewport(width, height);
   return readTabletLayout();
@@ -53,5 +67,23 @@ describe('readTabletLayout', () => {
 
   test('folding shut drops back to the phone layout', () => {
     expect(withViewport(370, 900).enabled).toBe(false);
+  });
+
+  test('a tablet keeps the tablet size class while the OSK shrinks the viewport', () => {
+    // Landscape tablet, keyboard up: the viewport collapses to ~350px tall,
+    // but the physical screen short side is 800px. The size class must not
+    // flip to phone, or the layout switch dismisses the keyboard and the
+    // height restore re-flips — the keyboard flicker loop.
+    setMobileSurfaceWithKeyboard(1280, 350, 1280, 800);
+    expect(readTabletLayout()).toEqual({ enabled: true, roomyForPanels: true });
+  });
+
+  test('a portrait tablet with the OSK up stays portrait, not landscape-hybrid', () => {
+    // Portrait tablet, keyboard up: the shrunken viewport is wider than tall
+    // (768 > 470), which a window-dims orientation check would misread as
+    // landscape and flip hybrid mode on while typing. The screen orientation
+    // keeps roomyForPanels off.
+    setMobileSurfaceWithKeyboard(768, 470, 768, 1024);
+    expect(readTabletLayout()).toEqual({ enabled: true, roomyForPanels: false });
   });
 });
