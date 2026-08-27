@@ -90,7 +90,7 @@ const installMinimalDom = () => {
   };
 };
 
-type Args = { isMobile: boolean; isVSCode: boolean };
+type Args = { directory?: string | null; isMobile: boolean; isVSCode: boolean; isHybridTablet?: boolean };
 
 /**
  * Renders the hook with a stand-in row node, attached through the returned
@@ -338,5 +338,39 @@ describe('useWorkStatusVisibility', () => {
     );
     expect(vscode.result.visible).toBe(false);
     vscode.teardown();
+  });
+
+  test('mounts on a hybrid tablet even though the runtime is mobile', () => {
+    // The mobile surface forces isMobile=true, but the hybrid tablet reuses the
+    // desktop chat column: the panel must be allowed there, not on phones.
+    const hybrid = renderVisibility(
+      { directory: '/repo', isMobile: true, isVSCode: false, isHybridTablet: true },
+      REQUIRED * 2,
+    );
+    expect(hybrid.result.visible).toBe(true);
+    hybrid.teardown();
+
+    // A phone (hybrid flag absent) with the same width stays hidden.
+    observed = [];
+    const phone = renderVisibility(
+      { directory: '/repo', isMobile: true, isVSCode: false },
+      REQUIRED * 2,
+    );
+    expect(phone.result.visible).toBe(false);
+    phone.teardown();
+  });
+
+  test('reports the fit on a hybrid tablet but still yields to an open context panel', () => {
+    // The hybrid's workspace panel is the desktop ContextPanel in the same
+    // store, so opening it must hide the work-status panel there too.
+    panelByDirectory = {
+      '/repo': { isOpen: true, tabs: [{ id: 'tab-1', mode: 'git' }], activeTabId: 'tab-1' },
+    };
+    const { result, teardown } = renderVisibility(
+      { directory: '/repo', isMobile: true, isVSCode: false, isHybridTablet: true },
+      REQUIRED * 2,
+    );
+    expect(result.visible).toBe(false);
+    teardown();
   });
 });

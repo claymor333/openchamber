@@ -497,12 +497,12 @@ export const useKeyboardShortcuts = () => {
         if (!state.isMobile && effectiveDirectory) {
           const directory = normalizeContextPanelDirectoryKey(effectiveDirectory);
           const panel = state.contextPanelByDirectory[directory];
-          const visibleSurfaces = getVisibleContextRailSurfaces({
-            railOrder: state.contextRailOrder,
-            hiddenSurfaces: state.contextRailHiddenSurfaces,
-            planModeEnabled: useFeatureFlagsStore.getState().planModeEnabled,
-            isVSCode: isVSCodeRuntime(),
-            screenWidth: window.innerWidth,
+            const visibleSurfaces = getVisibleContextRailSurfaces({
+              railOrder: state.contextRailOrder,
+              hiddenSurfaces: state.contextRailHiddenSurfaces,
+              planModeEnabled: useFeatureFlagsStore.getState().planModeEnabled,
+              isVSCode: isVSCodeRuntime(),
+              screenWidth: window.innerWidth,
             tabs: panel?.tabs ?? [],
           });
           const target = visibleSurfaces[switchSurfaceDigit - 1];

@@ -762,9 +762,9 @@ interface UIStore {
   maxLastMessageLength: number; // chars — truncate {last_message} when summarization is off
 
   showTerminalQuickKeysOnDesktop: boolean;
+  hybridTabletUIEnabled: boolean;
   /** Header session tabs (web/desktop), opt-in. Off keeps the plain session title. */
   sessionTabsEnabled: boolean;
-  hybridTabletUIEnabled: boolean;
   persistChatDraft: boolean;
   showOpenCodeUpdateNotifications: boolean;
   agentControlToolEnabled: boolean;
@@ -937,8 +937,8 @@ interface UIStore {
   setNativeNotificationsEnabled: (value: boolean) => void;
   setNotificationMode: (mode: 'always' | 'hidden-only') => void;
   setShowTerminalQuickKeysOnDesktop: (value: boolean) => void;
-  setSessionTabsEnabled: (value: boolean) => void;
   setHybridTabletUIEnabled: (value: boolean) => void;
+  setSessionTabsEnabled: (value: boolean) => void;
   setNotifyOnSubtasks: (value: boolean) => void;
   setDockBadgeEnabled: (value: boolean) => void;
   setNotifyOnCompletion: (value: boolean) => void;
@@ -1113,8 +1113,8 @@ export const useUIStore = create<UIStore>()(
         maxLastMessageLength: 250,
 
         showTerminalQuickKeysOnDesktop: false,
-        sessionTabsEnabled: false,
         hybridTabletUIEnabled: false,
+        sessionTabsEnabled: false,
         persistChatDraft: true,
         showOpenCodeUpdateNotifications: !isWindowsArm64(),
         agentControlToolEnabled: true,
@@ -2279,11 +2279,11 @@ export const useUIStore = create<UIStore>()(
           set({ showTerminalQuickKeysOnDesktop: value });
         },
 
-        setSessionTabsEnabled: (value) => {
-          set({ sessionTabsEnabled: value });
-        },
         setHybridTabletUIEnabled: (value) => {
           set({ hybridTabletUIEnabled: value });
+        },
+        setSessionTabsEnabled: (value) => {
+          set({ sessionTabsEnabled: value });
         },
 
         setNotifyOnSubtasks: (value) => {
@@ -2733,8 +2733,8 @@ export const useUIStore = create<UIStore>()(
           nativeNotificationsEnabled: state.nativeNotificationsEnabled,
           notificationMode: state.notificationMode,
           showTerminalQuickKeysOnDesktop: state.showTerminalQuickKeysOnDesktop,
-          sessionTabsEnabled: state.sessionTabsEnabled,
           hybridTabletUIEnabled: state.hybridTabletUIEnabled,
+          sessionTabsEnabled: state.sessionTabsEnabled,
           notifyOnSubtasks: state.notifyOnSubtasks,
           dockBadgeEnabled: state.dockBadgeEnabled,
           notifyOnCompletion: state.notifyOnCompletion,

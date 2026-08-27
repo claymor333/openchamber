@@ -212,7 +212,6 @@ const ChatSectionContent: React.FC = () => {
                 'followUpBehavior',
                 'persistDraft',
                 'inputSpellcheck',
-                'hardwareKeyboardEnterKey',
             ]}
         />
     );
