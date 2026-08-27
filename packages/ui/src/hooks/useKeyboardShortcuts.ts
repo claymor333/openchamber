@@ -12,7 +12,6 @@ import { useKeybinds } from '@/hooks/useKeybind';
 import { createWorktreeSession } from '@/lib/worktreeSessionCreator';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { canUseElectronDesktopIPC, invokeDesktop, isVSCodeRuntime } from '@/lib/desktop';
-import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
 import {
   eventMatchesShortcut,
   eventMatchesShortcutPrefix,
@@ -503,7 +502,6 @@ export const useKeyboardShortcuts = () => {
               hiddenSurfaces: state.contextRailHiddenSurfaces,
               planModeEnabled: useFeatureFlagsStore.getState().planModeEnabled,
               isVSCode: isVSCodeRuntime(),
-              isMobileSurface: isMobileSurfaceRuntime(),
               screenWidth: window.innerWidth,
             tabs: panel?.tabs ?? [],
           });
