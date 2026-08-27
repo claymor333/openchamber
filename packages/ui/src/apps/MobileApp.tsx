@@ -966,39 +966,6 @@ export function MobileApp({ apis }: MobileAppProps) {
   // to the connect screen. A successful switchRuntimeEndpoint fires the endpoint-
   // changed subscription above, which bumps the epochs and bootstraps the app.
   React.useEffect(() => {
-    // Inside the panel's embedded session-chat iframe, there is no saved
-    // instance to auto-connect to — the parent already holds the connection
-    // (and the runtime endpoint is not persisted, so a fresh realm cannot
-    // recover it). Request its runtime bootstrap (apiBaseUrl + token + relay)
-    // and adopt it, so the iframe shows the subagent session instead of the
-    // connect screen. Checked before the native guard: the iframe has no
-    // Capacitor bridge of its own, so isNativeMobileApp is false in there.
-    if (isEmbeddedSessionChat()) {
-      let cancelled = false;
-      setAutoConnectPhase('attempting');
-      void requestEmbeddedSessionRuntimeBootstrap().then((bootstrap) => {
-        if (cancelled || !bootstrap) {
-          setAutoConnectPhase('done');
-          return;
-        }
-        switchRuntimeEndpoint({
-          apiBaseUrl: bootstrap.apiBaseUrl,
-          clientToken: bootstrap.clientToken || null,
-          requestHeaders: bootstrap.runtimeHeaders ?? null,
-          relay: bootstrap.relay ?? null,
-        });
-        setAutoConnectPhase('done');
-        // The panel opened this iframe to show a specific subagent session —
-        // read it from the URL and make it current once connected.
-        const embeddedSessionId = getEmbeddedSessionChatOriginSessionId();
-        if (embeddedSessionId && !useSessionUIStore.getState().currentSessionId) {
-          void useSessionUIStore.getState().setCurrentSession(embeddedSessionId, null);
-        }
-      });
-      return () => {
-        cancelled = true;
-      };
-    }
     if (!isNativeMobileApp || isConnected || getRuntimeApiBaseUrl()) {
       setAutoConnectPhase('done');
       return;
@@ -1321,30 +1288,6 @@ export function MobileApp({ apis }: MobileAppProps) {
       <main className="flex min-h-dvh items-center justify-center bg-background text-foreground">
         <OpenChamberLogo width={120} height={120} isAnimated />
       </main>
-    );
-  }
-
-  // The context panel embeds this realm as a session-chat iframe
-  // (?ocPanel=session-chat&surface=desktop) to show a subagent session. Render
-  // just that session's chat — not the full mobile shell — so the panel does
-  // not reopen the whole OpenChamber UI. The auto-connect effect above adopts
-  // the parent's runtime bootstrap and makes the embedded session current.
-  if (isEmbeddedSessionChat()) {
-    return (
-      <ErrorBoundary>
-        <SyncProvider key={runtimeEndpointEpoch} sdk={opencodeClient.getSdkClient()} directory={currentDirectory || ''}>
-          <RuntimeAPIProvider apis={apis}>
-            <TooltipProvider delayDuration={300} skipDelayDuration={150}>
-              <div className="h-full bg-background text-foreground">
-                <SyncAppEffects embeddedBackgroundWorkEnabled={isInitialized} />
-                <OpenCodeUpdateToast />
-                <ChatView readOnly={new URLSearchParams(window.location.search).get('readOnly') === '1'} />
-                <Toaster position="top-center" offset="calc(var(--oc-safe-area-top, 0px) + 16px)" />
-              </div>
-            </TooltipProvider>
-          </RuntimeAPIProvider>
-        </SyncProvider>
-      </ErrorBoundary>
     );
   }
 
