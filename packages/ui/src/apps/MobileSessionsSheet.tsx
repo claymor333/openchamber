@@ -44,6 +44,7 @@ import { getProjectLabel, normalizePath } from './mobilePaths';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useI18n } from '@/lib/i18n';
 import { subscribeOpenchamberEvents } from '@/lib/openchamberEvents';
+import { matchesRankQuery, rankByQuery } from '@/lib/search/fuzzySearch';
 import { PROJECT_COLOR_MAP, PROJECT_ICON_MAP, ProjectIconImage } from '@/lib/projectMeta';
 import { cn } from '@/lib/utils';
 import {
@@ -190,11 +191,8 @@ const findExactProjectMatch = (projects: ProjectMeta[], directory: string): Proj
   return projects.find((project) => projectMatchesExactDirectory(project, normalizedDirectory)) ?? null;
 };
 
-const sessionMatchesQuery = (session: Session, projectLabel: string, query: string): boolean => {
-  if (!query) return true;
-  const haystack = `${session.title ?? ''} ${session.id} ${getSessionDirectory(session)} ${projectLabel}`.toLowerCase();
-  return haystack.includes(query);
-};
+const sessionMatchesQuery = (session: Session, projectLabel: string, query: string): boolean =>
+  matchesRankQuery([session.title, session.id, getSessionDirectory(session), projectLabel], query);
 
 const MobileProjectIcon: React.FC<{
   project: Pick<ProjectMeta, 'id' | 'icon' | 'color' | 'iconImage' | 'iconBackground'>;
@@ -1396,7 +1394,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
   const filteredNodes = React.useMemo(() => {
     if (!normalizedQuery) return projectNodes;
     return projectNodes.filter((node) => {
-      if (`${node.project.label} ${node.project.path}`.toLowerCase().includes(normalizedQuery)) return true;
+      if (matchesRankQuery([node.project.label, node.project.path], normalizedQuery)) return true;
       return node.buckets.some((bucket) =>
         bucket.sessions.some((session) => sessionMatchesQuery(session, node.project.label, normalizedQuery)),
       );
@@ -1426,8 +1424,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
 
   const searchProjectMatches = React.useMemo(() => {
     if (!normalizedQuery) return [] as Array<ProjectMeta & { sessionCount: number }>;
-    return projectsMeta
-      .filter((project) => `${project.label} ${project.path}`.toLowerCase().includes(normalizedQuery))
+    return rankByQuery(projectsMeta, normalizedQuery, (project) => [project.label, project.path])
       .map((project) => ({
         ...project,
         sessionCount: sessions.filter((session) => {
