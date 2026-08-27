@@ -58,8 +58,10 @@ import { toast } from '@/components/ui';
 // useMessageStore removed — messages now come from sync system
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { useTabletLayout } from '@/lib/device';
+import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
 import { useHardwareKeyboard } from '@/lib/hardwareKeyboard';
 import { isIMECompositionEvent } from '@/lib/ime';
+import { updateDesktopSettings } from '@/lib/persistence';
 import { getCycledPrimaryAgentName, type MobileControlsPanel } from './mobileControlsUtils';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
@@ -283,6 +285,23 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const [mobileDraftPickerQuery, setMobileDraftPickerQuery] = React.useState('');
     // Message history navigation state (up/down arrow to recall previous messages)
     const composerRef = React.useRef<ComposerEditorHandle>(null);
+    // Focus shield state (armed on launch / existing-session switch on the
+    // tablet surface): while armed, the composer is kept out of the browser's
+    // native focus hand-off so the soft keyboard cannot rise on session open.
+    // Declared before setComposerRef because that ref callback reads the flag
+    // when the editor (re)mounts.
+    const composerFocusShieldRef = React.useRef(false);
+    const composerUserTapRef = React.useRef(false);
+    const shieldTimerRef = React.useRef<number | null>(null);
+    const setComposerRef = React.useCallback((instance: ComposerEditorHandle | null) => {
+        composerRef.current = instance;
+        // The editor can mount after the shield has already been armed (session
+        // hydration finishing after the switch) — keep it out of the focus
+        // path in that case, or the browser will still target it.
+        if (instance && composerFocusShieldRef.current) {
+            instance.setFocusable(false);
+        }
+    }, []);
     // The mobile composer swaps between the collapsed pill and the full
     // composer, which unmounts the editor. Building a CodeMirror view is far
     // from free, and it would happen inside the tap that expands the pill —
@@ -397,7 +416,12 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const agents = getVisibleAgents();
     const isMobile = useUIStore((state) => state.isMobile);
     const hasHardwareKeyboard = useHardwareKeyboard();
+    const enterToSend = useUIStore((state) => state.enterToSend);
+    const setEnterToSend = useUIStore((state) => state.setEnterToSend);
     const { enabled: isTabletLayout } = useTabletLayout();
+    // The tablet-desktop surface: the native app's wide layout (not a large
+    // desktop window, where readTabletLayout also returns enabled).
+    const tabletSurface = isMobileSurfaceRuntime() && isTabletLayout;
     const setImagePreviewOpen = useUIStore((state) => state.setImagePreviewOpen);
     const inputBarOffset = useUIStore((state) => state.inputBarOffset);
     const persistChatDraft = useUIStore((state) => state.persistChatDraft);
@@ -807,6 +831,85 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         prevNewSessionDraftOpenRef.current = newSessionDraftOpen;
     }, [newSessionDraftOpen, isMobile]);
 
+    // Switching to an existing session must not pop the soft keyboard. The
+    // composer can receive focus during the switch even though nothing calls
+    // focus(): a session-row button focused by the tap is removed while the
+    // new composer is live, and the browser hands the orphaned focus to the
+    // editor. Blurring after the fact only hides a keyboard that has already
+    // started rising, so on the tablet surface we SHIELD the composer for a
+    // short window instead: it is taken out of the focusable path
+    // (tabIndex -1) and any focus that still lands is cancelled synchronously
+    // in a capture-phase focusin, before the WebView opens its input
+    // connection. A real tap on the composer drops the shield, so the user can
+    // always start typing. New-session drafts keep their focus ("start
+    // typing").
+    const endComposerFocusShield = React.useCallback(() => {
+        composerFocusShieldRef.current = false;
+        if (shieldTimerRef.current !== null) {
+            window.clearTimeout(shieldTimerRef.current);
+            shieldTimerRef.current = null;
+        }
+        composerRef.current?.setFocusable(true);
+    }, []);
+    const armComposerFocusShield = React.useCallback(() => {
+        composerFocusShieldRef.current = true;
+        composerRef.current?.setFocusable(false);
+        // Belt and suspenders: if the composer somehow held focus from the
+        // previous interaction, release it now rather than wait for a focusin.
+        composerRef.current?.blur();
+        if (document.activeElement instanceof HTMLElement) {
+            document.activeElement.blur();
+        }
+        if (shieldTimerRef.current !== null) window.clearTimeout(shieldTimerRef.current);
+        shieldTimerRef.current = window.setTimeout(endComposerFocusShield, 900);
+    }, [endComposerFocusShield]);
+    const prevSessionForShieldRef = React.useRef(currentSessionId);
+    const mountedForShieldRef = React.useRef(false);
+    React.useEffect(() => {
+        if (!tabletSurface) return;
+        const justMounted = !mountedForShieldRef.current;
+        mountedForShieldRef.current = true;
+        const previous = prevSessionForShieldRef.current;
+        prevSessionForShieldRef.current = currentSessionId;
+        if (currentSessionId && !newSessionDraftOpen && (justMounted || currentSessionId !== previous)) {
+            armComposerFocusShield();
+        }
+    }, [tabletSurface, currentSessionId, newSessionDraftOpen, armComposerFocusShield]);
+
+    React.useEffect(() => {
+        if (!tabletSurface) return;
+        const handlePointerDown = (event: PointerEvent) => {
+            const target = event.target;
+            if (!(target instanceof Element)) return;
+            if (target.closest('[data-chat-input]')) {
+                composerUserTapRef.current = true;
+                endComposerFocusShield();
+            }
+        };
+        const handleFocusIn = (event: FocusEvent) => {
+            const target = event.target;
+            if (!(target instanceof HTMLElement) || !target.closest?.('.cm-editor')) return;
+            if (composerUserTapRef.current) {
+                // The user tapped the composer to type — this focus is wanted.
+                composerUserTapRef.current = false;
+                return;
+            }
+            if (!composerFocusShieldRef.current) return;
+            // Cancelled before the WebView can open its input connection.
+            target.blur();
+            if (document.activeElement instanceof HTMLElement) {
+                document.activeElement.blur();
+            }
+        };
+        document.addEventListener('pointerdown', handlePointerDown, true);
+        document.addEventListener('focusin', handleFocusIn, true);
+        return () => {
+            document.removeEventListener('pointerdown', handlePointerDown, true);
+            document.removeEventListener('focusin', handleFocusIn, true);
+            if (shieldTimerRef.current !== null) window.clearTimeout(shieldTimerRef.current);
+        };
+    }, [tabletSurface, endComposerFocusShield]);
+
     // Session activity for queue availability and controls. In btw mode the
     // composer controls the temporary fork, so the stop button and send-button
     // state follow the FORK's activity; the queue affordance stays tied to the
@@ -942,6 +1045,12 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const handleToggleExpandedInput = React.useCallback(() => {
         setExpandedInput(!isExpandedInput);
     }, [isExpandedInput, setExpandedInput]);
+
+    const handleToggleEnterToSend = React.useCallback(() => {
+        const next = !enterToSend;
+        setEnterToSend(next);
+        void updateDesktopSettings({ enterToSend: next });
+    }, [enterToSend, setEnterToSend]);
 
     const openIssuePicker = React.useCallback(() => {
         setIssuePickerOpen(true);
@@ -1675,15 +1784,26 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             return;
         }
 
-        // Handle Enter/Ctrl+Enter based on selected follow-up behavior. On
-        // mobile, and in desktop focus mode, plain Enter writes a newline and
-        // only Cmd/Ctrl+Enter sends: both are surfaces for composing long
-        // prompts, where an accidental send costs more than an extra keypress.
-        const requiresModifierToSend = isMobile || isDesktopExpanded;
-        if (e.key === 'Enter' && !e.shiftKey && (!requiresModifierToSend || e.ctrlKey || e.metaKey)) {
-            e.preventDefault();
+        // Enter-key policy, controlled by the composer's enterToSend toggle
+        // (and the `enterToSend` chat setting): when on, plain Enter submits
+        // and Shift+Enter inserts a newline; when off, Shift+Enter submits and
+        // plain Enter inserts a newline. Ctrl/Cmd+Enter always submits, the
+        // soft-keyboard fallback route, and never inserts a newline.
+        const enterSubmits = enterToSend;
 
+        // Handle Enter/Ctrl+Enter based on selected follow-up behavior.
+        if (e.key === 'Enter') {
+            const isShiftEnter = e.shiftKey;
             const isCtrlEnter = e.ctrlKey || e.metaKey;
+
+            // Plain Enter submits when enterToSend; Shift+Enter submits when
+            // not. Ctrl/Cmd+Enter always submits regardless of the toggle.
+            const thisEnterSubmits = enterSubmits ? !isShiftEnter : isShiftEnter;
+            if (!thisEnterSubmits && !isCtrlEnter) {
+                // Not a submit: let the editor insert a newline.
+                return;
+            }
+            e.preventDefault();
 
             // Queueing / steering only works when there's an existing busy
             // session (or an active auto-review run).
@@ -2823,7 +2943,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                                 : undefined}
                         >
                             <ComposerEditor
-                                ref={composerRef}
+                                ref={setComposerRef}
                                 viewStore={composerViewStore}
                                 data-testid="chat-input"
                                 value={message}
@@ -2888,6 +3008,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                         canAbort={canAbort}
                         hasContent={Boolean(hasContent)}
                         isExpandedInput={isExpandedInput}
+                        enterToSend={enterToSend}
                         permissionAutoAcceptEnabled={permissionAutoAcceptEnabled}
                         isPermissionAutoAcceptInteractive={isPermissionAutoAcceptInteractive}
                         dictationActive={mobileShell.dictationActive}
@@ -2898,6 +3019,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                         onOpenAttachSheet={openMobileAttachSheet}
                         onToggleExpandedInput={handleToggleExpandedInput}
                         onTogglePermissionAutoAccept={handlePermissionAutoAcceptToggle}
+                        onToggleEnterToSend={handleToggleEnterToSend}
                         onPrimaryAction={handlePrimaryAction}
                         onQueueMessage={handleQueueMessage}
                         onAbort={handleAbort}

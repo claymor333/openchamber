@@ -25,6 +25,8 @@ export const WORK_STATUS_REQUIRED_ROW_WIDTH =
 type Options = {
   isMobile: boolean;
   isVSCode: boolean;
+  /** Hybrid tablet: the mobile surface reuses the desktop chat column. */
+  isHybridTablet?: boolean;
 };
 
 type Result = {
@@ -51,7 +53,7 @@ type Result = {
  * panel, oscillating forever. The row width is independent of the panel, so it
  * is the only stable input.
  */
-export const useWorkStatusVisibility = ({ isMobile, isVSCode }: Options): Result => {
+export const useWorkStatusVisibility = ({ isMobile, isVSCode, isHybridTablet = false }: Options): Result => {
   const [rowNode, setRowNode] = React.useState<HTMLDivElement | null>(null);
   const [rowWidth, setRowWidth] = React.useState<number | null>(null);
   const rowRef = React.useCallback((node: HTMLDivElement | null) => { setRowNode(node); }, []);
@@ -88,7 +90,7 @@ export const useWorkStatusVisibility = ({ isMobile, isVSCode }: Options): Result
 
   // Split from the switch: a narrow chat is a layout fact, and the header needs
   // it to offer the panel as an overlay instead of pretending it is off.
-  const layoutAllows = !isMobile && !isVSCode && !contextPanelOpen;
+  const layoutAllows = (!isMobile || isHybridTablet) && !isVSCode && !contextPanelOpen;
 
   // Measures the chat AREA — the container holding the chat and the context
   // panel together — not the chat row inside it.

@@ -1,4 +1,4 @@
-import React, { useSyncExternalStore } from 'react';
+import React from 'react';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 
 import { useThemeSystem } from '@/contexts/useThemeSystem';
@@ -32,13 +32,10 @@ import { CODE_FONT_OPTIONS, DEFAULT_MONO_FONT, DEFAULT_UI_FONT, UI_FONT_OPTIONS,
 import { useI18n, type Locale } from '@/lib/i18n';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { normalizeMobileKeyboardMode, supportsMobileKeyboardResizeContent, type MobileKeyboardMode } from '@/lib/mobileKeyboardMode';
-import { getStoredMobileLayoutPreference, setStoredMobileLayoutPreference, type MobileLayoutPreference } from '@/lib/mobileLayoutPreference';
-import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
 import {
     setDirectoryShowHidden,
     useDirectoryShowHidden,
 } from '@/lib/directoryShowHidden';
-import { getTabletLayoutSnapshot, subscribeTabletLayout } from '@/lib/tabletLayoutStore';
 import {
     SettingsSection,
     SettingsTwoColumn,
@@ -66,6 +63,7 @@ import type { TerminalShellOption } from '@/lib/api/types';
 import { isTerminalShell } from '@/lib/terminalShell';
 import { subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
 import { formatShortcutForDisplay } from '@/lib/shortcuts';
+import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
 
 interface Option<T extends string> {
     id: T;
@@ -270,7 +268,7 @@ const normalizeUserMessageRenderingMode = (mode: unknown): 'markdown' | 'plain' 
     return mode === 'markdown' ? 'markdown' : 'plain';
 };
 
-type VisibleSetting = 'sessionAssist' | 'sessionGoal' | 'theme' | 'windowControlsPosition' | 'pwaInstallName' | 'pwaOrientation' | 'mobileKeyboardMode' | 'timeFormat' | 'weekStart' | 'fontSize' | 'terminalFontSize' | 'terminalShell' | 'terminalLoginShell' | 'editorFontSize' | 'spacing' | 'inputBarOffset' | 'mermaidRendering' | 'userMessageRendering' | 'chatRenderMode' | 'messageTransport' | 'activityRenderMode' | 'collapsibleUserMessages' | 'stickyUserHeader' | 'promptNavigatorEnabled' | 'wideChatLayout' | 'codeBlockLineWrap' | 'splitAssistantMessageActions' | 'subagentReadOnlyBanner' | 'diffLayout' | 'mobileStatusBar' | 'dotfiles' | 'fileViewerPreview' | 'reasoning' | 'showToolFileIcons' | 'showTurnChangedFiles' | 'expandedTools' | 'followUpBehavior' | 'terminalQuickKeys' | 'fileEditorKeymap' | 'persistDraft' | 'inputSpellcheck' | 'reportUsage' | 'expandedEditorToolbar' | 'autoSaveEnabled' | 'sessionTabs' | 'hybridTabletUI';
+type VisibleSetting = 'sessionAssist' | 'sessionGoal' | 'theme' | 'windowControlsPosition' | 'pwaInstallName' | 'pwaOrientation' | 'mobileKeyboardMode' | 'timeFormat' | 'weekStart' | 'fontSize' | 'terminalFontSize' | 'terminalShell' | 'terminalLoginShell' | 'editorFontSize' | 'spacing' | 'inputBarOffset' | 'mermaidRendering' | 'userMessageRendering' | 'chatRenderMode' | 'messageTransport' | 'activityRenderMode' | 'collapsibleUserMessages' | 'stickyUserHeader' | 'promptNavigatorEnabled' | 'wideChatLayout' | 'codeBlockLineWrap' | 'splitAssistantMessageActions' | 'subagentReadOnlyBanner' | 'diffLayout' | 'mobileStatusBar' | 'dotfiles' | 'fileViewerPreview' | 'reasoning' | 'showToolFileIcons' | 'showTurnChangedFiles' | 'expandedTools' | 'followUpBehavior' | 'terminalQuickKeys' | 'fileEditorKeymap' | 'persistDraft' | 'inputSpellcheck' | 'reportUsage' | 'autoSaveEnabled' | 'hybridTabletUI' | 'sessionTabs' | 'hardwareKeyboardEnterKey';
 
 const WINDOW_CONTROLS_POSITION_OPTIONS: Array<{ id: DesktopWindowControlsPosition; labelKey: string }> = [
     { id: 'left', labelKey: 'settings.openchamber.desktopNetwork.option.windowControlsLeft' },
@@ -323,6 +321,8 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const setPromptNavigatorEnabled = useUIStore(state => state.setPromptNavigatorEnabled);
     const autoSaveEnabled = useUIStore(state => state.autoSaveEnabled);
     const setAutoSaveEnabled = useUIStore(state => state.setAutoSaveEnabled);
+    const hybridTabletUIEnabled = useUIStore(state => state.hybridTabletUIEnabled);
+    const setHybridTabletUIEnabled = useUIStore(state => state.setHybridTabletUIEnabled);
     const wideChatLayoutEnabled = useUIStore(state => state.wideChatLayoutEnabled);
     const setWideChatLayoutEnabled = useUIStore(state => state.setWideChatLayoutEnabled);
     const codeBlockLineWrap = useUIStore(state => state.codeBlockLineWrap);
@@ -357,9 +357,6 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const sessionTabsEnabled = useUIStore(state => state.sessionTabsEnabled);
     const setSessionTabsEnabled = useUIStore(state => state.setSessionTabsEnabled);
     const setShowTerminalQuickKeysOnDesktop = useUIStore(state => state.setShowTerminalQuickKeysOnDesktop);
-    const hybridTabletUIEnabled = useUIStore(state => state.hybridTabletUIEnabled);
-    const setHybridTabletUIEnabled = useUIStore(state => state.setHybridTabletUIEnabled);
-    const tabletEnabled = useSyncExternalStore(subscribeTabletLayout, getTabletLayoutSnapshot, getTabletLayoutSnapshot).enabled;
     const fileEditorKeymap = useUIStore(state => state.fileEditorKeymap);
     const setFileEditorKeymap = useUIStore(state => state.setFileEditorKeymap);
     const followUpBehavior = useMessageQueueStore(state => state.followUpBehavior);
@@ -625,7 +622,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         ? hasLocalizationSettings
         : (shouldShow('theme') || showWindowControlsPositionSetting || shouldShow('pwaInstallName') || shouldShow('pwaOrientation') || shouldShow('timeFormat') || shouldShow('weekStart'));
     const hasLayoutSettings = shouldShow('fontSize') || shouldShow('terminalFontSize') || shouldShow('editorFontSize') || shouldShow('spacing') || (shouldShow('inputBarOffset') && isMobile);
-    const hasNavigationSettings = (shouldShow('terminalQuickKeys') && !isMobile) || ((shouldShow('terminalShell') || shouldShow('terminalLoginShell')) && !isVSCode) || shouldShow('fileEditorKeymap') || shouldShow('autoSaveEnabled') || (shouldShow('expandedEditorToolbar') && !isVSCode) || (shouldShow('sessionTabs') && !isVSCode && !isMobile) || (shouldShow('hybridTabletUI') && isMobileSurfaceRuntime() && !isVSCode);
+    const hasNavigationSettings = (shouldShow('terminalQuickKeys') && !isMobile) || ((shouldShow('terminalShell') || shouldShow('terminalLoginShell')) && !isVSCode) || shouldShow('fileEditorKeymap') || shouldShow('autoSaveEnabled') || (shouldShow('hybridTabletUI') && isMobileSurfaceRuntime() && !isVSCode) || (shouldShow('sessionTabs') && !isVSCode && !isMobile);
     const hasBehaviorSettings = shouldShow('mermaidRendering')
         || (shouldShow('sessionGoal') && !isVSCode)
         || shouldShow('userMessageRendering')
@@ -1451,25 +1448,6 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                     settingsItem="appearance.auto-save-enabled"
                                 />
                             )}
-                            {shouldShow('expandedEditorToolbar') && !isVSCode && (
-                                <SettingsCheckboxRow
-                                    checked={expandedEditorToolbar}
-                                    onChange={handleExpandedEditorToolbarChange}
-                                    label={t('settings.openchamber.visual.field.expandedEditorToolbar')}
-                                    ariaLabel={t('settings.openchamber.visual.field.expandedEditorToolbarAria')}
-                                    settingsItem="appearance.expanded-editor-toolbar"
-                                />
-                            )}
-                            {shouldShow('terminalQuickKeys') && !isMobile && (
-                                <SettingsCheckboxRow
-                                    checked={showTerminalQuickKeysOnDesktop}
-                                    onChange={setShowTerminalQuickKeysOnDesktop}
-                                    label={t('settings.openchamber.visual.field.terminalQuickKeys')}
-                                    ariaLabel={t('settings.openchamber.visual.field.terminalQuickKeysAria')}
-                                    settingsItem="appearance.terminal-quick-keys"
-                                    info={t('settings.openchamber.visual.field.terminalQuickKeysTooltip')}
-                                />
-                            )}
                             {shouldShow('hybridTabletUI') && isMobileSurfaceRuntime() && !isVSCode && (
                                 <SettingsCheckboxRow
                                     checked={hybridTabletUIEnabled}
@@ -1478,7 +1456,6 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                     ariaLabel={t('settings.openchamber.visual.field.hybridTabletUIAria')}
                                     settingsItem="appearance.hybrid-tablet-ui"
                                     info={t('settings.openchamber.visual.field.hybridTabletUITooltip')}
-                                    disabled={!tabletEnabled}
                                 />
                             )}
                             {showTerminalShellSetting && (
