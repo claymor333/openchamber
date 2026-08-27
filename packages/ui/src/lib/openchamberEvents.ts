@@ -284,6 +284,7 @@ const readStream = async (signal: AbortSignal, canControlBrowser: boolean): Prom
         buffer += decoder.decode(value, { stream: true });
 
         let frameEnd;
+        buffer = buffer.replaceAll('\r\n', '\n').replaceAll('\r', '\n');
         while ((frameEnd = buffer.indexOf('\n\n')) !== -1) {
           const frame = buffer.slice(0, frameEnd);
           buffer = buffer.slice(frameEnd + 2);
@@ -320,7 +321,7 @@ const readStream = async (signal: AbortSignal, canControlBrowser: boolean): Prom
 };
 
 const parseSseFrame = (frame: string): { type: string; properties: unknown } | null => {
-  const dataLine = frame.split('\n').find((line) => line.startsWith('data:'));
+  const dataLine = frame.replaceAll('\r\n', '\n').replaceAll('\r', '\n').split('\n').find((line) => line.startsWith('data:'));
   if (!dataLine) {
     return null;
   }

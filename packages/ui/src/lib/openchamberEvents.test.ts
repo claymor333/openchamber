@@ -22,9 +22,9 @@ mock.module('./runtime-switch', () => ({
   subscribeRuntimeEndpointChanged: () => () => undefined,
 }));
 
-const writeFrame = (payload: unknown): void => {
+const writeFrame = (payload: unknown, lineEnding = '\n'): void => {
   const controller = pendingControllers[pendingControllers.length - 1];
-  controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(payload)}\n\n`));
+  controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(payload)}${lineEnding}${lineEnding}`));
 };
 
 const closeStream = (): void => {
@@ -85,6 +85,23 @@ describe('openchamber events', () => {
         dispatchedAsCommand: false,
       },
     ]);
+    unsubscribe();
+    closeStream();
+  });
+
+  test('dispatches events framed with CRLF line endings', async () => {
+    const { subscribeOpenchamberEvents } = await import('./openchamberEvents');
+    const events: unknown[] = [];
+    const unsubscribe = subscribeOpenchamberEvents((event) => events.push(event));
+
+    writeFrame({
+      type: 'openchamber:session-created',
+      properties: { sessionId: 'ses_crlf', directory: '/repo/worktrees/research' },
+    }, '\r\n');
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    expect(events).toHaveLength(1);
+    expect(JSON.stringify(events[0])).toContain('ses_crlf');
     unsubscribe();
     closeStream();
   });
