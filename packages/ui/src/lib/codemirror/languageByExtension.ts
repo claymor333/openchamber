@@ -94,7 +94,7 @@ export function languageByExtension(filePath: string): Extension | null {
     case 'makefile':
     case 'gnumakefile':
       // No dedicated mode; shell is a decent fallback for Make-ish files.
-      return shellLanguage;
+      return shellLanguage.extension;
   }
 
   const idx = normalized.lastIndexOf('.');
@@ -150,7 +150,7 @@ export function languageByExtension(filePath: string): Extension | null {
     case 'zsh':
     case 'fish':
     case 'env':
-      return shellLanguage;
+      return shellLanguage.extension;
 
     // Python (very common — keep static)
     case 'py':
