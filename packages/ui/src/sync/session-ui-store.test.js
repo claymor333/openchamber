@@ -1016,4 +1016,16 @@ describe('sessionAbortFlags lifecycle', () => {
     expect(useSessionUIStore.getState().abortPromptSessionId).toBe('session-other');
     expect(useSessionUIStore.getState().abortPromptExpiresAt).not.toBeNull();
   });
+
+  test('clears only the abort record captured by the cleanup timer', () => {
+    useSessionUIStore.setState({
+      sessionAbortFlags: new Map([['session-aborted', { timestamp: 100, acknowledged: false }]]),
+    });
+
+    useSessionUIStore.getState().clearSessionAbortFlag('session-aborted', 99);
+    expect(useSessionUIStore.getState().sessionAbortFlags.has('session-aborted')).toBe(true);
+
+    useSessionUIStore.getState().clearSessionAbortFlag('session-aborted', 100);
+    expect(useSessionUIStore.getState().sessionAbortFlags.has('session-aborted')).toBe(false);
+  });
 });
