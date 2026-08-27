@@ -2278,7 +2278,6 @@ export const useUIStore = create<UIStore>()(
 
         setSessionTabsEnabled: (value) => {
           set({ sessionTabsEnabled: value });
-        },
         setHybridTabletUIEnabled: (value) => {
           set({ hybridTabletUIEnabled: value });
         },

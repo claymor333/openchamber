@@ -628,7 +628,6 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
                   }}
                 />
               ) : null}
-            </div>
             </aside>
             {isHybridTablet ? (
               <div
