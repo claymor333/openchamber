@@ -7,6 +7,8 @@ import { ConfigUpdateOverlay } from '@/components/ui/ConfigUpdateOverlay';
 import { Button } from '@/components/ui/button';
 import { OpenChamberLogo } from '@/components/ui/OpenChamberLogo';
 import { ChatView } from '@/components/views/ChatView';
+import { ContextPanel } from '@/components/layout/ContextPanel';
+import { ContextPanelRail } from '@/components/layout/ContextPanelRail';
 import { PlanView } from '@/components/views/PlanView';
 import { SettingsView } from '@/components/views/SettingsView';
 import { AppLinkConfirmDialog } from '@/components/chat/AppLinkConfirmDialog';
@@ -20,6 +22,8 @@ import { usePushVisibilityBeacon } from '@/hooks/usePushVisibilityBeacon';
 import { useRouter } from '@/hooks/useRouter';
 import { useUpdatePolling } from '@/hooks/useUpdatePolling';
 import { useWindowTitle } from '@/hooks/useWindowTitle';
+import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
+import { useHybridTabletLayout } from '@/hooks/useHybridTabletLayout';
 import { opencodeClient } from '@/lib/opencode/client';
 import type { RuntimeAPIs } from '@/lib/api/types';
 import { readTabletLayout, useOrientation, useTabletLayout } from '@/lib/device';
@@ -46,8 +50,10 @@ import { useUIStore } from '@/stores/useUIStore';
 import { useUpdateStore } from '@/stores/useUpdateStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { SyncProvider } from '@/sync/sync-context';
+import { getEmbeddedSessionChatOriginSessionId, isEmbeddedSessionChat, requestEmbeddedSessionRuntimeBootstrap } from '@/components/layout/contextPanelEmbeddedChat';
 
 import { SyncAppEffects } from './AppEffects';
+ import { resolveHybridWorkspaceGeometry } from './hybridWorkspaceGeometry';
 import { BusyDots } from '@/components/chat/message/parts/BusyDots';
 import { MobileConnectionWelcome, type MobileConnectionNotice } from './MobileConnectionWelcome';
 import { MobileHeader } from './MobileHeader';
@@ -65,6 +71,7 @@ import { useDeepLinkHandlers, useDeepLinkSource } from './deepLinkNavigation';
 import { useEdgeSwipe } from './useEdgeSwipe';
 import { useNativePushRegistration } from './useNativePushRegistration';
 import { IpadSidebarResizeHandle } from './IpadSidebarResizeHandle';
+import { normalizeContextPanelDirectoryKey } from '@/stores/useUIStore';
 import {
   IPAD_LEFT_SIDEBAR_WIDTH,
   IPAD_RIGHT_SIDEBAR_WIDTH,
@@ -152,6 +159,7 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
   // A SIZE class, not a device check: an unfolded book foldable is a tablet
   // until it is folded shut, and the shell keeps running across that change.
   const { enabled: isTabletLayout, roomyForPanels } = useTabletLayout();
+  const { isHybridTablet } = useHybridTabletLayout();
   const orientation = useOrientation();
   const isPortrait = orientation === 'portrait';
   const hasHardwareKeyboard = useHardwareKeyboard();

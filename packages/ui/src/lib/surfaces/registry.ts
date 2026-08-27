@@ -220,7 +220,7 @@ export const getVisibleContextRailSurfaces = (options: VisibleRailSurfacesOption
     // Web surfaces need an in-app iframe that reaches the server; on the
     // mobile surface that is impossible (bundled SPA origin + relay-only
     // transport), so they are removed rather than shown broken.
-    if (options.isMobileSurface && (surface.id === 'browser' || surface.id === 'preview')) {
+    if (options.isMobileSurface && surface.id === 'browser') {
       return false;
     }
     // The walkthrough needs room for a stop list beside real code, and its

@@ -60,9 +60,8 @@ describe('getVisibleContextRailSurfaces', () => {
     expect(getVisibleContextRailSurfaces(baseOptions).some((s) => s.id === 'browser')).toBe(true);
   });
 
-  test('hides web surfaces (browser/preview) on the mobile surface', () => {
+  test('hides the browser surface on the mobile surface', () => {
     expect(getVisibleContextRailSurfaces({ ...baseOptions, isMobileSurface: true }).some((s) => s.id === 'browser')).toBe(false);
-    expect(getVisibleContextRailSurfaces({ ...baseOptions, isMobileSurface: true }).some((s) => s.id === 'preview')).toBe(false);
     // Non-web surfaces stay available on mobile.
     expect(getVisibleContextRailSurfaces({ ...baseOptions, isMobileSurface: true }).some((s) => s.id === 'git')).toBe(true);
     // Desktop keeps web surfaces.

@@ -47,6 +47,7 @@ import {
 } from './contextPanelEmbeddedChat';
 import { getContextSurfaceWidthFraction } from '@/lib/surfaces/registry';
 import { isTerminalEventTarget } from '@/lib/terminalFocus';
+import { resolveContextPanelWidth } from '@/lib/contextPanelWidth';
 
 const CONTEXT_PANEL_MIN_WIDTH = 380;
 const CONTEXT_PANEL_MAX_WIDTH = 1400;
@@ -436,7 +437,7 @@ const truncateTabLabel = (value: string, maxChars: number): string => {
 };
 
 
-export const ContextPanel: React.FC = () => {
+export const ContextPanel: React.FC<{ embeddedWidth?: number; embeddedResizing?: boolean }> = ({ embeddedWidth, embeddedResizing }) => {
   const { t } = useI18n();
   const effectiveDirectory = useEffectiveDirectory() ?? '';
   const directoryKey = React.useMemo(() => normalizeDirectoryKey(effectiveDirectory), [effectiveDirectory]);
@@ -479,7 +480,13 @@ export const ContextPanel: React.FC = () => {
   const widthFraction = activeModeForWidth ? getContextSurfaceWidthFraction(activeModeForWidth) : 0.5;
   const widthFallbackBase = availablePanelAreaWidth
     ?? (typeof window !== 'undefined' ? window.innerWidth : CONTEXT_PANEL_DEFAULT_WIDTH * 2);
-  const width = clampWidth(manualWidth ?? Math.round(widthFraction * widthFallbackBase));
+  const width = resolveContextPanelWidth({
+    embeddedWidth,
+    manualWidth,
+    widthFraction,
+    fallbackBase: widthFallbackBase,
+    clamp: clampWidth,
+  });
   const chatSessionIDs = React.useMemo(() => {
     const ids: string[] = [];
     for (const tab of tabs) {
@@ -1102,6 +1109,7 @@ export const ContextPanel: React.FC = () => {
       inert={!isOpen || undefined}
       className={cn(
         'flex min-h-0 flex-col overflow-hidden bg-background',
+        embeddedResizing && 'transition-none',
         // Right-anchored while expanded: `inset-0` would teleport the left
         // edge instantly (position does not transition), so only the width
         // animates and the panel grows leftwards from its docked position.
