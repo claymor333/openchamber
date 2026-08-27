@@ -12,6 +12,7 @@ import { useKeybinds } from '@/hooks/useKeybind';
 import { createWorktreeSession } from '@/lib/worktreeSessionCreator';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { canUseElectronDesktopIPC, invokeDesktop, isVSCodeRuntime } from '@/lib/desktop';
+import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
 import {
   eventMatchesShortcut,
   eventMatchesShortcutPrefix,
@@ -497,12 +498,13 @@ export const useKeyboardShortcuts = () => {
         if (!state.isMobile && effectiveDirectory) {
           const directory = normalizeContextPanelDirectoryKey(effectiveDirectory);
           const panel = state.contextPanelByDirectory[directory];
-          const visibleSurfaces = getVisibleContextRailSurfaces({
-            railOrder: state.contextRailOrder,
-            hiddenSurfaces: state.contextRailHiddenSurfaces,
-            planModeEnabled: useFeatureFlagsStore.getState().planModeEnabled,
-            isVSCode: isVSCodeRuntime(),
-            screenWidth: window.innerWidth,
+            const visibleSurfaces = getVisibleContextRailSurfaces({
+              railOrder: state.contextRailOrder,
+              hiddenSurfaces: state.contextRailHiddenSurfaces,
+              planModeEnabled: useFeatureFlagsStore.getState().planModeEnabled,
+              isVSCode: isVSCodeRuntime(),
+              isMobileSurface: isMobileSurfaceRuntime(),
+              screenWidth: window.innerWidth,
             tabs: panel?.tabs ?? [],
           });
           const target = visibleSurfaces[switchSurfaceDigit - 1];

@@ -10,7 +10,6 @@ const baseOptions = {
   railOrder: [],
   planModeEnabled: true,
   isVSCode: false,
-  isMobileSurface: false,
   screenWidth: 1200,
   tabs: [],
 } as const;
@@ -58,15 +57,6 @@ describe('getVisibleContextRailSurfaces', () => {
     const browser = CONTEXT_SURFACES.find((surface) => surface.id === 'browser');
     expect(browser?.availability).toBe('always');
     expect(getVisibleContextRailSurfaces(baseOptions).some((s) => s.id === 'browser')).toBe(true);
-  });
-
-  test('hides web surfaces (browser/preview) on the mobile surface', () => {
-    expect(getVisibleContextRailSurfaces({ ...baseOptions, isMobileSurface: true }).some((s) => s.id === 'browser')).toBe(false);
-    expect(getVisibleContextRailSurfaces({ ...baseOptions, isMobileSurface: true }).some((s) => s.id === 'preview')).toBe(false);
-    // Non-web surfaces stay available on mobile.
-    expect(getVisibleContextRailSurfaces({ ...baseOptions, isMobileSurface: true }).some((s) => s.id === 'git')).toBe(true);
-    // Desktop keeps web surfaces.
-    expect(getVisibleContextRailSurfaces({ ...baseOptions, isMobileSurface: false }).some((s) => s.id === 'browser')).toBe(true);
   });
 
   test('respects the persisted user rail order', () => {

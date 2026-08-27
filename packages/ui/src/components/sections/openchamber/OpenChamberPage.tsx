@@ -17,7 +17,6 @@ import { KeyboardShortcutsSettings } from './KeyboardShortcutsSettings';
 import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
 import { useDeviceInfo } from '@/lib/device';
 import { isDesktopLocalOriginActive, isDesktopShell, isVSCodeRuntime, isWebRuntime } from '@/lib/desktop';
-import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
 import { isCapacitorApp } from '@/lib/platform';
 import { useI18n } from '@/lib/i18n';
 import { subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
@@ -181,7 +180,6 @@ const VisualSectionContent: React.FC = () => {
         'editorFontSize',
         'spacing',
         'inputBarOffset',
-        ...(isMobileSurfaceRuntime() && !isVSCode ? ['hybridTabletUI' as const] : []),
     ]} />;
 };
 
@@ -214,7 +212,6 @@ const ChatSectionContent: React.FC = () => {
                 'followUpBehavior',
                 'persistDraft',
                 'inputSpellcheck',
-                'hardwareKeyboardEnterKey',
             ]}
         />
     );

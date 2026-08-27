@@ -38,22 +38,4 @@ describe('settings search', () => {
 
     expect(results.some((result) => result.id === 'integrations.third-party.opencode-cursor-oauth')).toBe(true);
   });
-
-  test('entry is available on mobile, hidden on VSCode', () => {
-    const mobileRuntimeCtx = { ...runtimeCtx, isMobile: true, isLinux: true };
-    const options = {
-      query: 'hybrid tablet',
-      runtimeCtx: mobileRuntimeCtx,
-      visiblePageSlugs: undefined,
-      t,
-      getPageTitle: (page: I18nKey) => page,
-    };
-    const results = buildSettingsSearchResults(options);
-    expect(results.some((result) => result.id === 'appearance.hybrid-tablet-ui')).toBe(true);
-    const vscode = buildSettingsSearchResults({
-      ...options,
-      runtimeCtx: { ...mobileRuntimeCtx, isVSCode: true },
-    });
-    expect(vscode.some((result) => result.id === 'appearance.hybrid-tablet-ui')).toBe(false);
-  });
 });

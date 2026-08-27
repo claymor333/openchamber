@@ -693,10 +693,7 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
                 >
                   <ErrorBoundary>
                     {isHybridTablet ? (
-                      <ContextPanel
-                        embeddedWidth={rightResize.width}
-                        embeddedResizing={rightResize.isResizing || leftResize.isResizing}
-                      />
+                      <ContextPanel />
                     ) : (
                       <MobileWorkspaceDrawer
                         open={workspaceOpen}
