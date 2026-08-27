@@ -154,6 +154,13 @@ refusing programmatic focus outside a gesture, WebKit leaving the layout
 viewport panned after the keyboard hides, overlay chains handing off through a
 frame where nothing is open.
 
+`ChatInput.tsx` adds one more such correction on the tablet surface (mobile
+surface + tablet size class): an OSK focus shield. Opening an existing session
+hands the orphaned focus of the tapped session row to the composer, which
+would raise the soft keyboard unprompted; the shield takes the editor out of
+the focusable path (`tabIndex -1`) for a short window after a session switch
+and cancels stray focus in a capture-phase `focusin`, dropping on a real tap.
+
 **Every timeout and `flushSync` in them has a reason recorded next to it, and
 none of them is verifiable outside a real device.** Change them only against
 hardware.

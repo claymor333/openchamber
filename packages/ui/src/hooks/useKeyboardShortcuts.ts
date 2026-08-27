@@ -26,7 +26,6 @@ import {
 } from '@/lib/shortcuts';
 import { ShortcutRegistry } from '@/lib/shortcuts/registry';
 import { getVisibleContextRailSurfaces } from '@/lib/surfaces/registry';
-import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
 import { readEmbeddedThemeSearchParams } from '@/contexts/theme-embedded-bootstrap';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useFeatureFlagsStore } from '@/stores/useFeatureFlagsStore';
@@ -498,13 +497,12 @@ export const useKeyboardShortcuts = () => {
         if (!state.isMobile && effectiveDirectory) {
           const directory = normalizeContextPanelDirectoryKey(effectiveDirectory);
           const panel = state.contextPanelByDirectory[directory];
-          const visibleSurfaces = getVisibleContextRailSurfaces({
-            railOrder: state.contextRailOrder,
-            hiddenSurfaces: state.contextRailHiddenSurfaces,
-            planModeEnabled: useFeatureFlagsStore.getState().planModeEnabled,
-            isVSCode: isVSCodeRuntime(),
-            isMobileSurface: isMobileSurfaceRuntime(),
-            screenWidth: window.innerWidth,
+            const visibleSurfaces = getVisibleContextRailSurfaces({
+              railOrder: state.contextRailOrder,
+              hiddenSurfaces: state.contextRailHiddenSurfaces,
+              planModeEnabled: useFeatureFlagsStore.getState().planModeEnabled,
+              isVSCode: isVSCodeRuntime(),
+              screenWidth: window.innerWidth,
             tabs: panel?.tabs ?? [],
           });
           const target = visibleSurfaces[switchSurfaceDigit - 1];
