@@ -1103,7 +1103,7 @@ export const ContextPanel: React.FC = () => {
         // edge instantly (position does not transition), so only the width
         // animates and the panel grows leftwards from its docked position.
         isExpanded
-          ? 'absolute inset-y-0 right-0 z-20 min-w-0'
+          ? 'absolute bottom-[var(--oc-safe-area-bottom,0px)] right-0 top-[var(--oc-safe-area-top,0px)] z-20 min-w-0'
           : 'relative h-full flex-shrink-0',
         !isOpen && 'pointer-events-none',
         'will-change-[width] motion-reduce:transition-none',
