@@ -427,6 +427,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const isMobile = useUIStore((state) => state.isMobile);
     const hasHardwareKeyboard = useHardwareKeyboard();
     const enterToSend = useUIStore((state) => state.enterToSend);
+    const enterToSendConfigured = useUIStore((state) => state.enterToSendConfigured);
     const { enabled: isTabletLayout } = useTabletLayout();
     const setImagePreviewOpen = useUIStore((state) => state.setImagePreviewOpen);
     const inputBarOffset = useUIStore((state) => state.inputBarOffset);
@@ -1721,12 +1722,15 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             return;
         }
 
-        // Mobile and desktop focus mode require a modifier by default. The
-        // setting opts into plain Enter submission without changing desktop's
-        // existing default.
-        const requiresModifierToSend = (isMobile || isDesktopExpanded) && !enterToSend;
+        // Preserve each surface's existing default until the user changes the
+        // setting. Once configured, the choice applies consistently everywhere.
+        const enterSendsByDefault = !isMobile && !isDesktopExpanded;
+        const enterSends = enterToSendConfigured ? enterToSend : enterSendsByDefault;
         const isCtrlEnter = e.ctrlKey || e.metaKey;
-        if (e.key === 'Enter' && !e.shiftKey && (!requiresModifierToSend || e.ctrlKey || e.metaKey)) {
+        const sendsWithEnter = enterSends
+            ? !e.shiftKey
+            : enterToSendConfigured && e.shiftKey;
+        if (e.key === 'Enter' && (isCtrlEnter || sendsWithEnter)) {
             e.preventDefault();
 
             // Queueing / steering only works when there's an existing busy

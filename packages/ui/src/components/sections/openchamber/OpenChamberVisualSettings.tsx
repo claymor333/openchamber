@@ -382,6 +382,8 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const setLargeTextPasteBehavior = useUIStore(state => state.setLargeTextPasteBehavior);
     const enterToSend = useUIStore(state => state.enterToSend);
     const setEnterToSend = useUIStore(state => state.setEnterToSend);
+    const enterToSendConfigured = useUIStore(state => state.enterToSendConfigured);
+    const setEnterToSendConfigured = useUIStore(state => state.setEnterToSendConfigured);
     const showToolFileIcons = useUIStore(state => state.showToolFileIcons);
     const setShowToolFileIcons = useUIStore(state => state.setShowToolFileIcons);
     const showTurnChangedFiles = useUIStore(state => state.showTurnChangedFiles);
@@ -543,8 +545,9 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
 
     const handleEnterToSendChange = React.useCallback((enabled: boolean) => {
         setEnterToSend(enabled);
-        void updateDesktopSettings({ enterToSend: enabled });
-    }, [setEnterToSend]);
+        setEnterToSendConfigured(true);
+        void updateDesktopSettings({ enterToSend: enabled, enterToSendConfigured: true });
+    }, [setEnterToSend, setEnterToSendConfigured]);
 
     const handleChatRenderModeChange = React.useCallback((mode: 'sorted' | 'live') => {
         setChatRenderMode(mode);
@@ -2057,7 +2060,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                 )}
                                 {shouldShow('enterToSend') && (
                                     <SettingsCheckboxRow
-                                        checked={enterToSend}
+                                        checked={enterToSendConfigured ? enterToSend : !isMobile}
                                         onChange={handleEnterToSendChange}
                                         label={t('chat.chatInput.actions.enterToSend')}
                                         info={t('chat.chatInput.actions.enterToSendHint')}

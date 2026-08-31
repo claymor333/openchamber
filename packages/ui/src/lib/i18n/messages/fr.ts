@@ -2021,7 +2021,7 @@ export const dict = {
   'chat.chatInput.actions.modelAgentSettings': 'Paramètres du modèle et de l\'agent',
   'chat.chatInput.actions.sendMessageAria': 'Envoyer un message',
   'chat.chatInput.actions.enterToSend': 'Entrée envoie',
-  'chat.chatInput.actions.enterToSendHint': 'S’applique au chat mobile et au mode focus sur ordinateur. Dans le chat de bureau, Entrée envoie déjà.',
+  'chat.chatInput.actions.enterToSendHint': 'Après modification, ce réglage contrôle Entrée et Maj+Entrée sur toutes les surfaces. En attendant, chaque surface conserve son comportement actuel.',
   'chat.chatInput.actions.queueMessageAria': 'Message de file d\'attente',
   'chat.chatInput.actions.stopGeneratingAria': 'Arrêter de générer',
   'chat.chatInput.focusMode.toggleAria': 'Basculer le mode de mise au point',

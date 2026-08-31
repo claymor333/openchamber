@@ -2302,7 +2302,7 @@ export const dict = {
   'chat.chatInput.actions.modelAgentSettings': 'Model and agent settings',
   'chat.chatInput.actions.sendMessageAria': 'Send message',
   'chat.chatInput.actions.enterToSend': 'Enter sends',
-  'chat.chatInput.actions.enterToSendHint': 'Applies to mobile chat and desktop focus mode. Desktop chat already sends with Enter.',
+  'chat.chatInput.actions.enterToSendHint': 'Once changed, this controls Enter and Shift+Enter on every surface. Until then, each surface keeps its existing behavior.',
   'chat.chatInput.actions.queueMessageAria': 'Queue message',
   'chat.chatInput.actions.stopGeneratingAria': 'Stop generating',
   'chat.chatInput.focusMode.toggleAria': 'Toggle focus mode',

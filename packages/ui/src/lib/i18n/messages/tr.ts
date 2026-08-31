@@ -2243,7 +2243,7 @@ export const dict = {
   'chat.chatInput.actions.modelAgentSettings': 'Model ve agent ayarları',
   'chat.chatInput.actions.sendMessageAria': 'Mesaj gönder',
   'chat.chatInput.actions.enterToSend': 'Enter gönderir',
-  'chat.chatInput.actions.enterToSendHint': 'Mobil sohbette ve masaüstü odak modunda geçerlidir. Masaüstü sohbetinde Enter zaten mesaj gönderir.',
+  'chat.chatInput.actions.enterToSendHint': 'Değiştirildikten sonra Enter ve Shift+Enter davranışını tüm yüzeylerde kontrol eder. O zamana kadar her yüzey mevcut davranışını korur.',
   'chat.chatInput.actions.queueMessageAria': 'Mesajı kuyruğa ekle',
   'chat.chatInput.actions.stopGeneratingAria': 'Üretmeyi durdur',
   'chat.chatInput.focusMode.toggleAria': 'Odak modunu aç/kapat',
