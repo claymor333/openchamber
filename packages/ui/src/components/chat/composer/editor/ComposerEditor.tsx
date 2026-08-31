@@ -176,13 +176,17 @@ export const ComposerEditor = React.forwardRef<ComposerEditorHandle, ComposerEdi
         const hostRef = React.useRef<HTMLDivElement | null>(null);
         const viewRef = React.useRef<EditorView | null>(null);
 
-        // The real keydown's modifier state for the LAST Enter that reached
-        // the editor. CodeMirror defers Enter on iOS (and Chrome Android) and
-        // re-dispatches it as a synthetic keydown built from the key name
-        // alone, dropping every modifier (see `trackRealEnterMods` and the
-        // `interceptKeys` handler below); this ref is what lets the deferred
-        // event still tell Shift+Enter from Enter, or Ctrl/Cmd+Enter from Enter.
+        // CodeMirror defers Enter on iOS and Chrome Android, then re-dispatches
+        // a synthetic keydown. Keep modifiers only for that short handoff.
         const lastRealEnterModsRef = React.useRef({ shiftKey: false, ctrlKey: false, metaKey: false });
+        const deferredEnterModsTimeoutRef = React.useRef<number | null>(null);
+        const clearDeferredEnterModifiers = () => {
+            lastRealEnterModsRef.current = { shiftKey: false, ctrlKey: false, metaKey: false };
+            if (deferredEnterModsTimeoutRef.current !== null) {
+                window.clearTimeout(deferredEnterModsTimeoutRef.current);
+                deferredEnterModsTimeoutRef.current = null;
+            }
+        };
 
         // Callbacks reach the CodeMirror extensions through a ref: the view is
         // built once and must not be torn down when a handler identity changes,
@@ -225,11 +229,11 @@ export const ComposerEditor = React.forwardRef<ComposerEditorHandle, ComposerEdi
 
             const interceptKeys: KeyBinding[] = [{
                 any: (_view, event) => {
-                    // A deferred Enter lost its modifiers in the re-dispatch;
-                    // give the caller's policy (Enter vs Shift/Ctrl+Enter) back
-                    // the modifier state it saw on the real keydown.
+                    // A deferred Enter loses its modifiers in the re-dispatch.
                     if (event.key === 'Enter' && isDeferredSyntheticEvent(event)) {
-                        restoreDeferredEnterModifiers(event, lastRealEnterModsRef.current);
+                        const preserveShift = handlersRef.current.autoCapitalize === 'none';
+                        restoreDeferredEnterModifiers(event, lastRealEnterModsRef.current, { preserveShift });
+                        clearDeferredEnterModifiers();
                     }
                     return handlersRef.current.onKeyDown?.(event) ?? false;
                 },
@@ -307,32 +311,26 @@ export const ComposerEditor = React.forwardRef<ComposerEditorHandle, ComposerEdi
             viewRef.current = view;
             if (store) store.view = view;
 
-            // CodeMirror defers Enter on iOS (and Chrome Android): the real
-            // keydown is captured without running the keymaps, the browser's
-            // native newline goes through, and the keymaps then run against a
-            // synthetic keydown `dispatchKey` builds from the key name alone —
-            // which has NO modifiers. Recording the real modifier state here (a
-            // plain listener, registered after CodeMirror's own, so it runs
-            // after the deferral decision but before the deferred dispatch)
-            // lets the deferred Enter be re-presented with Shift+Enter intact
-            // instead of arriving as a plain Enter that "sends" where Enter
-            // sends. Without it, Shift+Enter on iOS/Android submits the
-            // message instead of inserting a newline. Ctrl/Cmd+Enter gets the
-            // same treatment so the enter-key policy can tell it apart from a
-            // plain Enter. The listener lives on
+            // Record the real modifier state after CodeMirror decides to defer
+            // the event, before its synthetic dispatch. The state expires if
+            // CodeMirror never dispatches the replacement, so a later Android
+            // keyboard Enter cannot inherit an unrelated earlier keydown. The listener lives on
             // the kept-alive view's contentDOM, so it stays across mounts and
             // keeps feeding the same ref the `interceptKeys` closure reads.
             const trackRealEnterMods = (event: KeyboardEvent) => {
                 if (event.key !== 'Enter' || isDeferredSyntheticEvent(event)) return;
+                clearDeferredEnterModifiers();
                 lastRealEnterModsRef.current = {
                     shiftKey: event.shiftKey,
                     ctrlKey: event.ctrlKey,
                     metaKey: event.metaKey,
                 };
+                deferredEnterModsTimeoutRef.current = window.setTimeout(clearDeferredEnterModifiers, 500);
             };
             view.contentDOM.addEventListener('keydown', trackRealEnterMods);
 
             return () => {
+                clearDeferredEnterModifiers();
                 viewRef.current = null;
                 // A stored view is detached, not destroyed: the store owns its
                 // lifetime now, and whoever owns the store ends it.

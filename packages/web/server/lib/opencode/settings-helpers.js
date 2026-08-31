@@ -519,10 +519,10 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.inputSpellcheckEnabled === 'boolean') {
       result.inputSpellcheckEnabled = candidate.inputSpellcheckEnabled;
     }
-    if (typeof candidate.enterToSend === 'boolean') {
+    if (candidate.enterToSend === true || candidate.enterToSend === false) {
       result.enterToSend = candidate.enterToSend;
     }
-    if (typeof candidate.enterToSendConfigured === 'boolean') {
+    if (candidate.enterToSendConfigured === true || candidate.enterToSendConfigured === false) {
       result.enterToSendConfigured = candidate.enterToSendConfigured;
     }
     if (typeof candidate.showOpenCodeUpdateNotifications === 'boolean') {

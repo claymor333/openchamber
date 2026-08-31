@@ -742,8 +742,9 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
     if (settings.enterToSend !== store.enterToSend) {
       store.setEnterToSend(settings.enterToSend);
     }
-    if (typeof settings.enterToSendConfigured === 'boolean'
-      && settings.enterToSendConfigured !== store.enterToSendConfigured) {
+  }
+  if (settings.enterToSendConfigured === true || settings.enterToSendConfigured === false) {
+    if (settings.enterToSendConfigured !== store.enterToSendConfigured) {
       store.setEnterToSendConfigured(settings.enterToSendConfigured);
     }
   }

@@ -66,6 +66,14 @@ describe('settings helpers', () => {
     expect(helpers.sanitizeSettingsUpdate({ draftStartersVisible: 'false' })).toEqual({});
   });
 
+  it('sanitizes both Enter settings independently', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({ enterToSend: true })).toEqual({ enterToSend: true });
+    expect(helpers.sanitizeSettingsUpdate({ enterToSendConfigured: false })).toEqual({ enterToSendConfigured: false });
+    expect(helpers.sanitizeSettingsUpdate({ enterToSend: 'true', enterToSendConfigured: 1 })).toEqual({});
+  });
+
   it('sanitizes shared sidebar display preferences', () => {
     const helpers = createTestHelpers();
 

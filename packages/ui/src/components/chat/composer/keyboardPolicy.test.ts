@@ -55,4 +55,12 @@ describe('deferred Enter modifiers', () => {
         expect(event).toEqual(modifiers);
         });
     }
+
+    test('does not restore iOS auto-capitalization as Shift', () => {
+        const event = { shiftKey: false, ctrlKey: false, metaKey: false };
+
+        restoreDeferredEnterModifiers(event, { shiftKey: true, ctrlKey: false, metaKey: false }, { preserveShift: false });
+
+        expect(event).toEqual({ shiftKey: false, ctrlKey: false, metaKey: false });
+    });
 });
