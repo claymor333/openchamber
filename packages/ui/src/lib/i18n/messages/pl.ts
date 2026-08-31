@@ -1252,7 +1252,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.chatInput.actions.queueMessageAria': 'Queue message',
   'chat.chatInput.actions.sendMessageAria': 'Send message',
   'chat.chatInput.actions.enterToSend': 'Enter wysyła',
-  'chat.chatInput.actions.shiftEnterToSend': 'Shift+Enter wysyła',
+  'chat.chatInput.actions.enterToSendHint': 'Dotyczy czatu mobilnego i trybu skupienia na komputerze. W czacie na komputerze klawisz Enter już wysyła.',
   'chat.chatInput.actions.stopGeneratingAria': 'Stop generating',
   'chat.chatInput.branch': 'Gałąź',
   'chat.chatInput.draftPicker.projectTitle': 'Projekt',

@@ -2302,7 +2302,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.chatInput.actions.modelAgentSettings': '모델 및 에이전트 설정',
   'chat.chatInput.actions.sendMessageAria': '보내기 메시지',
   'chat.chatInput.actions.enterToSend': 'Enter로 전송',
-  'chat.chatInput.actions.shiftEnterToSend': 'Shift+Enter로 전송',
+  'chat.chatInput.actions.enterToSendHint': '모바일 채팅과 데스크톱 포커스 모드에 적용됩니다. 데스크톱 채팅에서는 Enter 키로 이미 전송됩니다.',
   'chat.chatInput.actions.queueMessageAria': '메시지 대기열에 추가',
   'chat.chatInput.actions.stopGeneratingAria': '생성 중지',
   'chat.chatInput.focusMode.toggleAria': '집중 모드 전환',

@@ -2085,7 +2085,7 @@ export const dict = {
   'chat.chatInput.actions.modelAgentSettings': 'Modell- und Agenteneinstellungen',
   'chat.chatInput.actions.sendMessageAria': 'Nachricht senden',
   'chat.chatInput.actions.enterToSend': 'Enter sendet',
-  'chat.chatInput.actions.shiftEnterToSend': 'Shift+Enter sendet',
+  'chat.chatInput.actions.enterToSendHint': 'Gilt für mobile Chats und den Fokusmodus auf dem Desktop. Im Desktop-Chat sendet Enter bereits.',
   'chat.chatInput.actions.queueMessageAria': 'Nachricht in die Warteschlange stellen',
   'chat.chatInput.actions.stopGeneratingAria': 'Generierung stoppen',
   'chat.chatInput.focusMode.toggleAria': 'Fokusmodus umschalten',

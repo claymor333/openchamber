@@ -1466,7 +1466,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                         />
                                     ))}
                                 </SettingsRadioGroup>
-                            </SettingsControlGroup>
+                                    </SettingsControlGroup>
                         )}
                         <div className={SETTINGS_OPTION_STACK_CLASS}>
                             {shouldShow('autoSaveEnabled') && (
@@ -2060,6 +2060,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                         checked={enterToSend}
                                         onChange={handleEnterToSendChange}
                                         label={t('chat.chatInput.actions.enterToSend')}
+                                        info={t('chat.chatInput.actions.enterToSendHint')}
                                         ariaLabel={t('chat.chatInput.actions.enterToSend')}
                                         settingsItem="chat.enter-to-send"
                                     />

@@ -2268,7 +2268,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.chatInput.actions.modelAgentSettings': '模型与智能体设置',
   'chat.chatInput.actions.sendMessageAria': '发送消息',
   'chat.chatInput.actions.enterToSend': 'Enter 发送',
-  'chat.chatInput.actions.shiftEnterToSend': 'Shift+Enter 发送',
+  'chat.chatInput.actions.enterToSendHint': '适用于移动端聊天和桌面专注模式。桌面聊天中按 Enter 已可发送。',
   'chat.chatInput.actions.queueMessageAria': '将消息加入队列',
   'chat.chatInput.actions.stopGeneratingAria': '停止生成',
   'chat.chatInput.focusMode.toggleAria': '切换专注模式',

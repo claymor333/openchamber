@@ -2280,7 +2280,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.chatInput.actions.modelAgentSettings": "Параметри моделі та агента",
   "chat.chatInput.actions.sendMessageAria": "Надіслати повідомлення",
   'chat.chatInput.actions.enterToSend': 'Enter надсилає',
-  'chat.chatInput.actions.shiftEnterToSend': 'Shift+Enter надсилає',
+  'chat.chatInput.actions.enterToSendHint': 'Стосується мобільного чату та режиму фокусування на комп’ютері. У чаті на комп’ютері Enter уже надсилає повідомлення.',
   "chat.chatInput.actions.queueMessageAria": "Поставити повідомлення в чергу",
   "chat.chatInput.actions.stopGeneratingAria": "Припинити генерацію",
   "chat.chatInput.focusMode.toggleAria": "Перемкнути режим фокусування",
