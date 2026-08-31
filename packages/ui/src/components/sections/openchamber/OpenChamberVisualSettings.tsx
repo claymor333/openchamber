@@ -384,6 +384,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const setEnterToSend = useUIStore(state => state.setEnterToSend);
     const enterToSendConfigured = useUIStore(state => state.enterToSendConfigured);
     const setEnterToSendConfigured = useUIStore(state => state.setEnterToSendConfigured);
+    const isExpandedInput = useUIStore(state => state.isExpandedInput);
     const showToolFileIcons = useUIStore(state => state.showToolFileIcons);
     const setShowToolFileIcons = useUIStore(state => state.setShowToolFileIcons);
     const showTurnChangedFiles = useUIStore(state => state.showTurnChangedFiles);
@@ -2060,7 +2061,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                 )}
                                 {shouldShow('enterToSend') && (
                                     <SettingsCheckboxRow
-                                        checked={enterToSendConfigured ? enterToSend : !isMobile}
+                                        checked={enterToSendConfigured ? enterToSend : !isMobile && !isExpandedInput}
                                         onChange={handleEnterToSendChange}
                                         label={t('chat.chatInput.actions.enterToSend')}
                                         info={t('chat.chatInput.actions.enterToSendHint')}
