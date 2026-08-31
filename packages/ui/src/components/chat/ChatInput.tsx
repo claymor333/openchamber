@@ -50,6 +50,7 @@ import { cn } from "@/lib/utils";
 import { ModelControls } from './ModelControls';
 import { parseAgentMentions } from '@/lib/messages/agentMentions';
 import { ComposerStatusBar } from './ComposerStatusBar';
+import { shouldSubmitEnter } from './composer/keyboardPolicy';
 import { PendingChangesBar } from './PendingChangesBar';
 import { useChatColumnSession } from './chatColumnSession';
 import { useChatSurfaceMode } from './useChatSurfaceMode';
@@ -1724,13 +1725,16 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
 
         // Preserve each surface's existing default until the user changes the
         // setting. Once configured, the choice applies consistently everywhere.
-        const enterSendsByDefault = !isMobile && !isDesktopExpanded;
-        const enterSends = enterToSendConfigured ? enterToSend : enterSendsByDefault;
         const isCtrlEnter = e.ctrlKey || e.metaKey;
-        const sendsWithEnter = enterSends
-            ? !e.shiftKey
-            : enterToSendConfigured && e.shiftKey;
-        if (e.key === 'Enter' && (isCtrlEnter || sendsWithEnter)) {
+        if (e.key === 'Enter' && shouldSubmitEnter({
+            isMobile,
+            isDesktopExpanded,
+            enterToSend,
+            enterToSendConfigured,
+            shiftKey: e.shiftKey,
+            ctrlKey: e.ctrlKey,
+            metaKey: e.metaKey,
+        })) {
             e.preventDefault();
 
             // Queueing / steering only works when there's an existing busy

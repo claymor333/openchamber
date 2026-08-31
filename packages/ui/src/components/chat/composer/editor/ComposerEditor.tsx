@@ -40,6 +40,7 @@ import { replaceWithCaret } from './documentEdits';
 import type { ComposerEditorViewStore } from './viewStore';
 import { composerEditorTheme, composerSelectionExtension } from './theme';
 import { handleComposerHostMouseDown } from './hostMouseDown';
+import { restoreDeferredEnterModifiers } from '../keyboardPolicy';
 
 export interface ComposerSelection {
     start: number;
@@ -228,10 +229,7 @@ export const ComposerEditor = React.forwardRef<ComposerEditorHandle, ComposerEdi
                     // give the caller's policy (Enter vs Shift/Ctrl+Enter) back
                     // the modifier state it saw on the real keydown.
                     if (event.key === 'Enter' && isDeferredSyntheticEvent(event)) {
-                        const mods = lastRealEnterModsRef.current;
-                        if (mods.shiftKey) Object.defineProperty(event, 'shiftKey', { value: true });
-                        if (mods.ctrlKey) Object.defineProperty(event, 'ctrlKey', { value: true });
-                        if (mods.metaKey) Object.defineProperty(event, 'metaKey', { value: true });
+                        restoreDeferredEnterModifiers(event, lastRealEnterModsRef.current);
                     }
                     return handlersRef.current.onKeyDown?.(event) ?? false;
                 },
