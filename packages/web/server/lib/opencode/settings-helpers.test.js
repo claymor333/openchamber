@@ -316,6 +316,15 @@ describe('settings helpers', () => {
     });
   });
 
+  it('accepts and rejects invalid Enter-to-send preference values', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({ enterToSend: true })).toEqual({ enterToSend: true });
+    expect(helpers.sanitizeSettingsUpdate({ enterToSend: false })).toEqual({ enterToSend: false });
+    expect(helpers.sanitizeSettingsUpdate({ enterToSend: 'true' })).toEqual({});
+    expect(helpers.sanitizeSettingsUpdate({ enterToSend: 1 })).toEqual({});
+  });
+
   it('accepts dismissed OpenCode update toast version as a persisted shared setting', () => {
     const helpers = createTestHelpers();
 
