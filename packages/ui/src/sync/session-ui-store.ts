@@ -95,6 +95,7 @@ import { contextTokensFromBreakdown } from "@/stores/utils/tokenUtils"
 export type { AttachedFile }
 
 type GoalCommand = { name: string; template?: string }
+const SESSION_ABORT_HOLD_MS = 2000
 
 export function expandSlashCommandGoalObjective(content: string, commands: GoalCommand[]): string {
   if (!content.startsWith("/")) return content
@@ -342,7 +343,9 @@ export type SessionUIState = {
   setDraftPreserveDirectoryOverride: (value: boolean) => void
   setDraftPermissionAutoAcceptEnabled: (enabled: boolean) => void
   setDraftProjectContextPin: (kind: "note" | "plan", id: string, pinned: boolean) => void
+  recordSessionAbort: (sessionId: string) => void
   acknowledgeSessionAbort: (sessionId: string) => void
+  clearSessionAbortFlag: (sessionId: string, timestamp: number) => void
   clearAbortPrompt: () => void
   armAbortPrompt: (durationMs?: number) => number | null
   clearError: () => void
@@ -1415,11 +1418,43 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       }
     }),
 
+  recordSessionAbort: (sessionId) => {
+    const timestamp = Date.now()
+    set((s) => {
+      const flags = new Map(s.sessionAbortFlags)
+      flags.set(sessionId, { timestamp, acknowledged: false })
+      // The abort is already issued, so disarm a priming prompt armed for the
+      // same session — the abort prompt no longer needs confirmation.
+      const disarmAbortPrompt = s.abortPromptSessionId === sessionId
+      return {
+        sessionAbortFlags: flags,
+        ...(disarmAbortPrompt ? { abortPromptSessionId: null, abortPromptExpiresAt: null } : {}),
+      }
+    })
+    setTimeout(() => {
+      useSessionUIStore.getState().clearSessionAbortFlag(sessionId, timestamp)
+    }, SESSION_ABORT_HOLD_MS)
+  },
+
   acknowledgeSessionAbort: (sessionId) =>
     set((s) => {
       const flags = new Map(s.sessionAbortFlags)
       const existing = flags.get(sessionId)
-      if (existing) flags.set(sessionId, { ...existing, acknowledged: true })
+      if (!existing) return s
+      if (Date.now() >= existing.timestamp + SESSION_ABORT_HOLD_MS) {
+        flags.delete(sessionId)
+      } else {
+        flags.set(sessionId, { ...existing, acknowledged: true })
+      }
+      return { sessionAbortFlags: flags }
+    }),
+
+  clearSessionAbortFlag: (sessionId, timestamp) =>
+    set((s) => {
+      const existing = s.sessionAbortFlags.get(sessionId)
+      if (!existing || existing.timestamp !== timestamp) return s
+      const flags = new Map(s.sessionAbortFlags)
+      flags.delete(sessionId)
       return { sessionAbortFlags: flags }
     }),
 

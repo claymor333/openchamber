@@ -13,7 +13,7 @@ import { useDirectoryStore } from '@/stores/useDirectoryStore';
 
 type SessionStatusType = 'idle' | 'busy' | 'retry';
 
-const RECENT_ABORT_WINDOW_MS = 2000;
+export const RECENT_ABORT_WINDOW_MS = 2000;
 
 const AUTO_SEND_RETRY_BASE_DELAY_MS = 2000;
 const AUTO_SEND_RETRY_MAX_DELAY_MS = 60000;
@@ -67,7 +67,7 @@ export const createQueuedAutoSendRetryScheduler = (
  * again — a queued item must not wait for an unrelated state change to be
  * retried after the window closes.
  */
-const getAbortHoldUntil = (sessionId: string): number | null => {
+export const getAbortHoldUntil = (sessionId: string): number | null => {
   const abortRecord = useSessionUIStore.getState().sessionAbortFlags.get(sessionId);
   if (!abortRecord) {
     return null;
