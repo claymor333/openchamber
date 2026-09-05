@@ -1,9 +1,11 @@
+import { OPENCODE_CONFIG_DIR } from './opencodeConfigPaths';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { fetchOpenCodeGoUsage } from './opencodeGoQuota';
 import { deleteLegacyOpenCodeGoCredential, readCredential } from './quotaCredentials';
 import { getProviderAuth, updateProviderAuth } from './opencodeAuth';
+import { fetchExeDevUsage } from './exeDevQuota';
 
 type AuthEntry = Record<string, unknown> | string;
 type AuthFile = Record<string, AuthEntry>;
@@ -190,7 +192,6 @@ export type ProviderResult = {
   planLabel?: string | null;
 };
 
-const OPENCODE_CONFIG_DIR = path.join(os.homedir(), '.config', 'opencode');
 const OPENCODE_DATA_DIR = path.join(os.homedir(), '.local', 'share', 'opencode');
 const AUTH_FILE = path.join(OPENCODE_DATA_DIR, 'auth.json');
 
@@ -774,6 +775,7 @@ export const listConfiguredQuotaProviders = () => {
   if (openCodeGoAuth && (typeof openCodeGoAuth.key === 'string' || typeof openCodeGoAuth.token === 'string')) configured.add('opencode-go');
   if (readCredential('ollama-cloud')) configured.add('ollama-cloud');
   if (readCredential('cursor')) configured.add('cursor');
+  if (readCredential('exe-dev')) configured.add('exe-dev');
 
   const anthropicAuth = normalizeAuthEntry(getAuthEntry(auth, ['anthropic', 'claude']));
   if (anthropicAuth && ((anthropicAuth as Record<string, unknown>).access || (anthropicAuth as Record<string, unknown>).token)) {
@@ -1465,14 +1467,35 @@ const buildCopilotWindows = (payload: Record<string, unknown>) => {
   const resetAt = toTimestamp(payload.quota_reset_date);
   const windows: Record<string, UsageWindow> = {};
 
+  // Mirrors the quota semantics of microsoft/vscode-copilot-chat
+  // (CopilotUserQuotaInfo): each snapshot carries entitlement, remaining,
+  // unlimited, and percent_remaining. Unlimited plans report no usable
+  // entitlement; percent_remaining is a server-computed fallback.
   const addWindow = (label: string, snapshot?: Record<string, unknown>) => {
     if (!snapshot) return;
+
+    if (snapshot.unlimited === true) {
+      windows[label] = toUsageWindow({
+        usedPercent: null,
+        windowSeconds: null,
+        resetAt,
+        valueLabel: 'Unlimited',
+      });
+      return;
+    }
+
     const entitlement = toNumber(snapshot.entitlement);
     const remaining = toNumber(snapshot.remaining);
-    const usedPercent = entitlement && remaining !== null
-      ? Math.max(0, Math.min(100, 100 - (remaining / entitlement) * 100))
+    let usedPercent = entitlement !== null && entitlement > 0 && remaining !== null
+      ? Math.min(100, Math.max(0, 100 - (remaining / entitlement) * 100))
       : null;
-    const valueLabel = entitlement !== null && remaining !== null
+    if (usedPercent === null) {
+      const percentRemaining = toNumber(snapshot.percent_remaining);
+      if (percentRemaining !== null) {
+        usedPercent = Math.min(100, Math.max(0, 100 - percentRemaining));
+      }
+    }
+    const valueLabel = entitlement !== null && entitlement > 0 && remaining !== null
       ? `${remaining.toFixed(0)} / ${entitlement.toFixed(0)} left`
       : null;
     windows[label] = toUsageWindow({
@@ -1483,9 +1506,7 @@ const buildCopilotWindows = (payload: Record<string, unknown>) => {
     });
   };
 
-  addWindow('chat', quota.chat as Record<string, unknown> | undefined);
-  addWindow('completions', quota.completions as Record<string, unknown> | undefined);
-  addWindow('premium', quota.premium_interactions as Record<string, unknown> | undefined);
+  addWindow('premium_interactions', quota.premium_interactions as Record<string, unknown> | undefined);
 
   return windows;
 };
@@ -1582,15 +1603,12 @@ const fetchCopilotAddonQuota = async (): Promise<ProviderResult> => {
     }
 
     const payload = await response.json() as Record<string, unknown>;
-    const windows = buildCopilotWindows(payload);
-    const premium = windows.premium ? { premium: windows.premium } : windows;
-
     return buildResult({
       providerId: 'github-copilot-addon',
       providerName: 'GitHub Copilot Add-on',
       ok: true,
       configured: true,
-      usage: { windows: premium },
+      usage: { windows: buildCopilotWindows(payload) },
     });
   } catch (error) {
     return buildResult({
@@ -1927,6 +1945,16 @@ const fetchOllamaCloudQuota = async (): Promise<ProviderResult> => {
       configured: true,
       error: error instanceof Error ? error.message : 'Request failed',
     });
+  }
+};
+
+const fetchExeDevQuota = async (): Promise<ProviderResult> => {
+  const usageToken = readCredential('exe-dev')?.usageToken;
+  if (!usageToken) return buildResult({ providerId: 'exe-dev', providerName: 'exe.dev', ok: false, configured: false, error: 'Not configured' });
+  try {
+    return buildResult({ providerId: 'exe-dev', providerName: 'exe.dev', ok: true, configured: true, usage: { windows: await fetchExeDevUsage(usageToken) } });
+  } catch (error) {
+    return buildResult({ providerId: 'exe-dev', providerName: 'exe.dev', ok: false, configured: true, error: error instanceof Error ? error.message : 'Request failed' });
   }
 };
 
@@ -2852,6 +2880,8 @@ const fetchQuotaForProviderUncoalesced = async (providerId: string): Promise<Pro
       return fetchMiniMaxCnCodingPlanQuota();
     case 'ollama-cloud':
       return fetchOllamaCloudQuota();
+    case 'exe-dev':
+      return fetchExeDevQuota();
     case 'openrouter':
       return fetchOpenRouterQuota();
     case 'zai-coding-plan':

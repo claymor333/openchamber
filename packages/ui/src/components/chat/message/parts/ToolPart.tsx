@@ -4,6 +4,7 @@ import { useMobileAppActions } from '@/apps/mobileAppContext';
 import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
 import { cn } from '@/lib/utils';
 import { SimpleMarkdownRenderer } from '../../MarkdownRenderer';
+import { QuestionMarkdown } from '../../QuestionMarkdown';
 import { MessageFilesDisplay } from '../../FileAttachment';
 import { getToolMetadata } from '@/lib/toolHelpers';
 import type { ToolPart as ToolPartType, ToolState as ToolStateUnion, FilePart } from '@opencode-ai/sdk/v2';
@@ -14,7 +15,6 @@ import { useHybridTabletLayout } from '@/hooks/useHybridTabletLayout';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSessionMessageRecords, useEnsureSessionMessages } from '@/sync/sync-context';
 import { useUIStore } from '@/stores/useUIStore';
-import { sessionEvents } from '@/lib/sessionEvents';
 import { ScrollShadow } from '@/components/ui/ScrollShadow';
 import { Button } from '@/components/ui/button';
 import { toast } from '@/components/ui';
@@ -23,6 +23,7 @@ import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import type { ToolPopupContent } from '../types';
 import { PlainDiffFallback } from './PlainDiffFallback';
+import { isToolDiffPreviewOversized } from './toolDiffPreview';
 import { lazyWithChunkRecovery } from '@/lib/chunkLoadRecovery';
 
 import {
@@ -32,6 +33,7 @@ import {
     renderTodoOutput,
     tryParseJsonOutput,
     coerceToText,
+    capToolOutputText,
 } from '../toolRenderers';
 import { JsonTreeViewer } from '@/components/ui/JsonTreeViewer';
 import { JsonSummaryView } from './JsonSummaryView';
@@ -45,9 +47,9 @@ import {
     buildTaskSummaryEntriesFromSession,
     normalizeTaskSummaryEntries,
     parseTaskMetadataBlock,
+    prepareTaskToolOutput,
     readTaskSessionIdFromOutput,
     readTaskSessionIdFromRecord,
-    stripTaskMetadataFromOutput,
     type TaskToolSummaryEntry,
 } from './taskToolModel';
 import { areRenderRelevantPartsEqual } from '../renderCompare';
@@ -56,10 +58,11 @@ import {
     extractFirstChangedLineFromDiff,
     getDiffPatchEntries,
     getFirstChangedLineFromMetadata,
-    getMutatedToolPaths,
     getPatchText,
     getPrimaryDiffFromMetadata,
     getPrimaryToolPath,
+    getToolFallbackDiff,
+    resolveToolQuickOpenTarget,
     type DiffPatchEntry,
 } from './toolDiffUtils';
 import { canHostEmbeddedSessionChatPanel } from '@/components/layout/contextPanelEmbeddedChat';
@@ -105,14 +108,6 @@ const normalizeToolName = (toolName: string | undefined | null): string => {
 
     return trimmed;
 };
-
-const GIT_REFRESH_MUTATING_TOOLS = new Set([
-    'bash',
-    'edit',
-    'write',
-    'apply_patch',
-    'patch',
-]);
 
 const formatDuration = (start: number, end?: number, now: number = Date.now()) => {
     const duration = Math.max(0, (end ?? now) - start);
@@ -607,11 +602,15 @@ const getToolOutputText = (
     part: ToolPartType,
     metadata: Record<string, unknown> | undefined,
 ): string => {
+    // Cap oversized payloads before JSON.parse / syntax highlighting / DOM work
+    // so a single huge tool output can't trigger a V8 Zone-allocation OOM that
+    // hard-crashes the renderer (issue #2265).
+    const capped = capToolOutputText(output);
     if (part.tool === 'bash') {
-        return output;
+        return capped;
     }
 
-    return formatEditOutput(output, part.tool, metadata);
+    return formatEditOutput(capped, part.tool, metadata);
 };
 
 const StreamingPlainTextOutput: React.FC<{ output: string }> = ({ output }) => {
@@ -1001,9 +1000,7 @@ const TaskToolSummary: React.FC<{
     const showToolFileIcons = useUIStore((state) => state.showToolFileIcons);
     const runtime = React.useContext(RuntimeAPIContext);
 
-    const trimmedOutput = typeof output === 'string'
-        ? stripTaskMetadataFromOutput(output)
-        : '';
+    const trimmedOutput = prepareTaskToolOutput(output);
     const hasOutput = trimmedOutput.length > 0;
     const [isOutputExpanded, setIsOutputExpanded] = React.useState(false);
 
@@ -1207,11 +1204,15 @@ const renderAnimatedPathWithIcon = (path: string, animate = true, grow = true, s
 // Suspense fallback, mirroring the preview's own error fallback.
 const LazyToolPartDiffPreview = lazyWithChunkRecovery(() => import('./ToolPartDiffPreview'));
 
-const DiffPreview: React.FC<{ diff: string; diffViewMode: DiffViewMode }> = ({ diff, diffViewMode }) => (
-    <React.Suspense fallback={<PlainDiffFallback diff={diff} />}>
-        <LazyToolPartDiffPreview diff={diff} diffViewMode={diffViewMode} />
-    </React.Suspense>
-);
+const DiffPreview: React.FC<{ diff: string; diffViewMode: DiffViewMode }> = ({ diff, diffViewMode }) => {
+    if (isToolDiffPreviewOversized(diff)) return <PlainDiffFallback diff={diff} />;
+
+    return (
+        <React.Suspense fallback={<PlainDiffFallback diff={diff} />}>
+            <LazyToolPartDiffPreview diff={diff} diffViewMode={diffViewMode} />
+        </React.Suspense>
+    );
+};
 
 interface ToolExpandedContentProps {
     part: ToolPartType;
@@ -1247,12 +1248,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
     });
     const outputString = isStreamingBash ? throttledOutputString : rawOutputString;
     const attachments = stateWithData.attachments;
-    const fileDiff = isRecord(metadata?.filediff) ? metadata.filediff : undefined;
-    const diffContent = getPatchText((metadata as { patch?: unknown } | undefined)?.patch)
-        ?? getPatchText(metadata?.diff)
-        ?? getPatchText(fileDiff?.patch)
-        ?? getPatchText(fileDiff?.diff)
-        ?? null;
+    const diffContent = getToolFallbackDiff(metadata) ?? null;
     const diffEntries = React.useMemo(
         () => getDiffPatchEntries(metadata, diffContent ?? undefined, (path) => getRelativePath(path, currentDirectory)),
         [currentDirectory, diffContent, metadata]
@@ -1410,7 +1406,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                         <div className="space-y-2">
                             {parsedQA.map((qa, index) => (
                                 <div key={index} className="space-y-0.5">
-                                    <div className="typography-micro text-muted-foreground">{qa.question}</div>
+                                    <QuestionMarkdown content={qa.question} size="micro" className="text-muted-foreground" />
                                     <div className="typography-meta text-foreground whitespace-pre-wrap">{qa.answer}</div>
                                 </div>
                             ))}
@@ -1447,7 +1443,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                                 {q.header ? (
                                     <div className="typography-micro text-muted-foreground">{coerceToText(q.header)}</div>
                                 ) : null}
-                                <div className="typography-meta text-foreground">{coerceToText(q.question)}</div>
+                                <QuestionMarkdown content={coerceToText(q.question)} size="meta" className="text-foreground" />
                                 {Array.isArray(q.options) && q.options.length > 0 ? (
                                     <div className="flex flex-wrap gap-1 mt-0.5">
                                         {q.options.map((opt) => (
@@ -1701,19 +1697,16 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
 
     const status = state?.status as string | undefined;
     const isFinalized = status === 'completed' || status === 'error' || status === 'aborted' || status === 'failed' || status === 'timeout' || status === 'cancelled';
-    const isSuccessfullyFinalized = status === 'completed';
     const isError = status === 'error' || status === 'failed';
 
     const [activeLatched, setActiveLatched] = React.useState<boolean>(!isFinalized);
     const previousPartIdRef = React.useRef<string | undefined>(part.id);
-    const observedActiveGitToolRef = React.useRef(!isFinalized);
 
     React.useEffect(() => {
         if (previousPartIdRef.current === part.id) {
             return;
         }
         previousPartIdRef.current = part.id;
-        observedActiveGitToolRef.current = !isFinalized;
         // Reset latch only when tool identity changes.
         setActiveLatched(!isFinalized);
     }, [isFinalized, part.id]);
@@ -1723,36 +1716,6 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
             setActiveLatched(true);
         }
     }, [isFinalized]);
-
-    React.useEffect(() => {
-        if (!isFinalized) {
-            observedActiveGitToolRef.current = true;
-            return;
-        }
-
-        // Historical completed tools can remount when the timeline changes.
-        // Refresh only for a tool whose active state this instance observed.
-        const finalizedAfterObservedActive = observedActiveGitToolRef.current;
-        if (!finalizedAfterObservedActive) {
-            return;
-        }
-
-        if (!isSuccessfullyFinalized || !GIT_REFRESH_MUTATING_TOOLS.has(normalizedPartTool)) {
-            observedActiveGitToolRef.current = false;
-            return;
-        }
-        if (!currentDirectory) {
-            return;
-        }
-
-        observedActiveGitToolRef.current = false;
-        const paths = getMutatedToolPaths(normalizedPartTool, input, metadata)
-            .map((path) => getRelativePath(path, currentDirectory));
-        sessionEvents.requestGitRefresh({
-            directory: currentDirectory,
-            ...(paths.length > 0 ? { paths } : {}),
-        });
-    }, [currentDirectory, input, isFinalized, isSuccessfullyFinalized, metadata, normalizedPartTool]);
 
     const expandedContentRef = React.useRef<HTMLDivElement>(null);
 
@@ -1968,6 +1931,7 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
         return null;
     }, [descriptionPath, normalizedPartTool, stateWithData, input]);
     const runtime = React.useContext(RuntimeAPIContext);
+    const mobileActions = useMobileAppActions();
 
     const openApplyPatchFile = (file: Record<string, unknown>, event: React.MouseEvent<HTMLButtonElement>) => {
         if (!runtime?.editor) {
@@ -2033,11 +1997,60 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
     };
 
     const handleMainKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+        // Nested buttons (quick-open, copy) handle their own Enter/Space; the row
+        // must not swallow the key and toggle instead.
+        if (event.target !== event.currentTarget) return;
         if (event.key !== 'Enter' && event.key !== ' ') {
             return;
         }
         event.preventDefault();
         handleMainClick(event);
+    };
+
+    // Quick-open target for the file-link icon in the tool header. Resolves the
+    // primary file path (and, for diff tools, the first changed line + diff) so
+    // the user can open the file in the side panel (web/desktop) or editor
+    // (VS Code) without expanding the tool card. Reuses the same path helpers as
+    // handleMainClick above; the difference is the web fallback — handleMainClick
+    // only opens when runtime.editor is available, this icon also falls back to
+    // useUIStore.openContextFile{AtLine} so the file opens in the right pane.
+    const quickOpenTarget = React.useMemo<{ absolutePath: string; line?: number; toolDiff?: string; toolName: string } | null>(() => {
+        if (isTaskTool) return null;
+        const toolName = normalizedPartTool || part.tool;
+        const target = resolveToolQuickOpenTarget(toolName, input, metadata);
+        if (!target) return null;
+        return {
+            absolutePath: toAbsoluteFilePath(currentDirectory, target.filePath),
+            line: target.line,
+            toolDiff: target.patch,
+            toolName,
+        };
+    }, [isTaskTool, normalizedPartTool, part.tool, input, metadata, currentDirectory]);
+
+    const openQuickTarget = () => {
+        if (!quickOpenTarget) return;
+        const { absolutePath, line, toolDiff, toolName } = quickOpenTarget;
+        if (runtime?.editor) {
+            if (runtime.runtime.isVSCode && toolDiff && (toolName === 'edit' || toolName === 'multiedit' || toolName === 'apply_patch')) {
+                const label = `${getRelativePath(absolutePath, currentDirectory)} (changes)`;
+                void runtime.editor.openDiff('', absolutePath, label, { line, patch: toolDiff });
+                return;
+            }
+            runtime.editor.openFile(absolutePath, line);
+            return;
+        }
+        const uiStore = useUIStore.getState();
+        if (typeof line === 'number' && Number.isFinite(line)) {
+            uiStore.openContextFileAtLine(currentDirectory, absolutePath, Math.max(1, Math.trunc(line)), 1);
+        } else {
+            uiStore.openContextFile(currentDirectory, absolutePath);
+        }
+        mobileActions?.openFiles();
+    };
+
+    const handleQuickOpen = (event: React.MouseEvent<HTMLButtonElement>) => {
+        event.stopPropagation();
+        openQuickTarget();
     };
 
     const iconStyle = !isTaskTool && isError ? TOOL_ERROR_ICON_STYLE : TOOL_NORMAL_ICON_STYLE;
@@ -2133,7 +2146,7 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
                                     {isExpanded ? <Icon name="arrow-down-s" className="h-3.5 w-3.5" /> : <Icon name="arrow-right-s" className="h-3.5 w-3.5" />}
                                 </div>
                             </div>
-                            <div className="flex items-center gap-2 min-w-0 flex-1">
+                            <div className={cn('flex items-center min-w-0 flex-1', quickOpenTarget ? 'gap-1' : 'gap-2')}>
                                 <MinDurationShineText
                                     active={Boolean(isActive && !isError)}
                                     minDurationMs={300}
@@ -2143,6 +2156,21 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
                                 >
                                     {displayName}
                                 </MinDurationShineText>
+                                {quickOpenTarget ? (
+                                    <button
+                                        type="button"
+                                        onClick={handleQuickOpen}
+                                        className={cn(
+                                            'flex-shrink-0 inline-flex h-4 w-4 items-center justify-center rounded transition-opacity hover:bg-[var(--surface-hover)]',
+                                            'opacity-60 hover:opacity-100 focus-visible:opacity-100',
+                                        )}
+                                        style={{ color: 'var(--tools-icon)' }}
+                                        title={t('chat.toolPart.openFile')}
+                                        aria-label={t('chat.toolPart.openFile')}
+                                    >
+                                        <Icon name="external-link" className="h-3 w-3" />
+                                    </button>
+                                ) : null}
                             </div>
                             {normalizedPartTool === 'bash' && typeof effectiveTimeStart === 'number' ? (
                                 <span className={cn('flex-shrink-0 tabular-nums text-muted-foreground/80', TOOL_ROW_DESCRIPTION_CLASS)}>
