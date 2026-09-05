@@ -2081,15 +2081,6 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                         settingsItem="chat.enter-to-send"
                                     />
                                 )}
-                                {shouldShow('enterToSend') && (
-                                    <SettingsCheckboxRow
-                                        checked={enterToSend}
-                                        onChange={handleEnterToSendChange}
-                                        label={t('chat.chatInput.actions.enterToSend')}
-                                        ariaLabel={t('chat.chatInput.actions.enterToSend')}
-                                        settingsItem="chat.enter-to-send"
-                                    />
-                                )}
                                 </SettingsSection>
                                 )}
                             </>
