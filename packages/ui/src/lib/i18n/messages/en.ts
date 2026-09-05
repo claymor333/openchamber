@@ -2324,6 +2324,7 @@ export const dict = {
   'chat.chatInput.actions.enterToSend': 'Enter sends',
   'chat.chatInput.actions.shiftEnterToSend': 'Shift+Enter sends',
   'chat.chatInput.actions.sendingAria': 'Sending message',
+  'chat.chatInput.actions.enterToSendHint': 'Once changed, this controls Enter and Shift+Enter on every surface. Until then, each surface keeps its existing behavior.',
   'chat.chatInput.actions.queueMessageAria': 'Queue message',
   'chat.chatInput.actions.stopGeneratingAria': 'Stop generating',
   'chat.chatInput.focusMode.toggleAria': 'Toggle focus mode',

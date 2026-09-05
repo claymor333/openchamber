@@ -382,6 +382,9 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const setLargeTextPasteBehavior = useUIStore(state => state.setLargeTextPasteBehavior);
     const enterToSend = useUIStore(state => state.enterToSend);
     const setEnterToSend = useUIStore(state => state.setEnterToSend);
+    const enterToSendConfigured = useUIStore(state => state.enterToSendConfigured);
+    const setEnterToSendConfigured = useUIStore(state => state.setEnterToSendConfigured);
+    const isExpandedInput = useUIStore(state => state.isExpandedInput);
     const showToolFileIcons = useUIStore(state => state.showToolFileIcons);
     const setShowToolFileIcons = useUIStore(state => state.setShowToolFileIcons);
     const showTurnChangedFiles = useUIStore(state => state.showTurnChangedFiles);
@@ -543,8 +546,9 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
 
     const handleEnterToSendChange = React.useCallback((enabled: boolean) => {
         setEnterToSend(enabled);
-        void updateDesktopSettings({ enterToSend: enabled });
-    }, [setEnterToSend]);
+        setEnterToSendConfigured(true);
+        void updateDesktopSettings({ enterToSend: enabled, enterToSendConfigured: true });
+    }, [setEnterToSend, setEnterToSendConfigured]);
 
     const handleChatRenderModeChange = React.useCallback((mode: 'sorted' | 'live') => {
         setChatRenderMode(mode);
@@ -1466,7 +1470,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                         />
                                     ))}
                                 </SettingsRadioGroup>
-                            </SettingsControlGroup>
+                                    </SettingsControlGroup>
                         )}
                         <div className={SETTINGS_OPTION_STACK_CLASS}>
                             {shouldShow('autoSaveEnabled') && (
@@ -2052,7 +2056,17 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                                 />
                                             ))}
                                         </SettingsRadioGroup>
-                                    </SettingsControlGroup>
+                                     </SettingsControlGroup>
+                                )}
+                                {shouldShow('enterToSend') && (
+                                    <SettingsCheckboxRow
+                                        checked={enterToSendConfigured ? enterToSend : !isMobile && !isExpandedInput}
+                                        onChange={handleEnterToSendChange}
+                                        label={t('chat.chatInput.actions.enterToSend')}
+                                        info={t('chat.chatInput.actions.enterToSendHint')}
+                                        ariaLabel={t('chat.chatInput.actions.enterToSend')}
+                                        settingsItem="chat.enter-to-send"
+                                    />
                                 )}
                                 {shouldShow('enterToSend') && (
                                     <SettingsCheckboxRow

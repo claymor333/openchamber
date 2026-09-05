@@ -51,6 +51,7 @@ import { ModelControls } from './ModelControls';
 import { parseAgentMentions } from '@/lib/messages/agentMentions';
 import { CONTEXT_METADATA_KEY, draftFromContextPayload } from '@/lib/messages/contextParts';
 import { ComposerStatusBar } from './ComposerStatusBar';
+import { shouldSubmitEnter } from './composer/keyboardPolicy';
 import { PendingChangesBar } from './PendingChangesBar';
 import { useChatColumnSession } from './chatColumnSession';
 import { useChatSurfaceMode } from './useChatSurfaceMode';
@@ -63,6 +64,7 @@ import { isVSCodeRuntime } from '@/lib/desktop';
 import { useTabletLayout } from '@/lib/device';
 import { useHardwareKeyboard } from '@/lib/hardwareKeyboard';
 import { isIMECompositionEvent } from '@/lib/ime';
+import { updateDesktopSettings } from '@/lib/persistence';
 import { getCycledPrimaryAgentName, type MobileControlsPanel } from './mobileControlsUtils';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
@@ -493,9 +495,12 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const setAgent = useConfigStore((state) => state.setAgent);
     const getVisibleAgents = useConfigStore((state) => state.getVisibleAgents);
     const agents = getVisibleAgents();
-    const isMobile = useUIStore((state) => state.isMobile);
-    const hasHardwareKeyboard = useHardwareKeyboard();
-    const enterToSend = useUIStore((state) => state.enterToSend);
+  const isMobile = useUIStore((state) => state.isMobile);
+  const hasHardwareKeyboard = useHardwareKeyboard();
+  const enterToSend = useUIStore((state) => state.enterToSend);
+  const enterToSendConfigured = useUIStore((state) => state.enterToSendConfigured);
+  const setEnterToSend = useUIStore((state) => state.setEnterToSend);
+  const setEnterToSendConfigured = useUIStore((state) => state.setEnterToSendConfigured);
     const { enabled: isTabletLayout } = useTabletLayout();
     const setImagePreviewOpen = useUIStore((state) => state.setImagePreviewOpen);
     const inputBarOffset = useUIStore((state) => state.inputBarOffset);
@@ -504,6 +509,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const largeTextPasteBehavior = useUIStore((state) => state.largeTextPasteBehavior);
     const isExpandedInput = useUIStore((state) => state.isExpandedInput);
     const setExpandedInput = useUIStore((state) => state.setExpandedInput);
+    const effectiveEnterToSend = enterToSendConfigured
+        ? enterToSend
+        : !isMobile && !isExpandedInput;
     const setTimelineDialogOpen = useUIStore((state) => state.setTimelineDialogOpen);
     const { git: runtimeGit, vscode: vscodeApi, linear: runtimeLinear } = useRuntimeAPIs();
     const cycleAgentShortcutOverride = useUIStore((state) => state.shortcutOverrides.cycle_agent);
@@ -1194,6 +1202,13 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const handleToggleExpandedInput = React.useCallback(() => {
         setExpandedInput(!isExpandedInput);
     }, [isExpandedInput, setExpandedInput]);
+
+    const handleToggleEnterToSend = React.useCallback(() => {
+        const next = !effectiveEnterToSend;
+        setEnterToSend(next);
+        setEnterToSendConfigured(true);
+        void updateDesktopSettings({ enterToSend: next, enterToSendConfigured: true });
+    }, [effectiveEnterToSend, setEnterToSend, setEnterToSendConfigured]);
 
     const openIssuePicker = React.useCallback(() => {
         setIssuePickerOpen(true);
@@ -1894,12 +1909,18 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             return;
         }
 
-        // Mobile and desktop focus mode require a modifier by default. The
-        // setting opts into plain Enter submission without changing desktop's
-        // existing default.
-        const requiresModifierToSend = (isMobile || isDesktopExpanded) && !enterToSend;
+        // Preserve each surface's existing default until the user changes the
+        // setting. Once configured, the choice applies consistently everywhere.
         const isCtrlEnter = e.ctrlKey || e.metaKey;
-        if (e.key === 'Enter' && !e.shiftKey && (!requiresModifierToSend || e.ctrlKey || e.metaKey)) {
+        if (e.key === 'Enter' && shouldSubmitEnter({
+            isMobile,
+            isDesktopExpanded,
+            enterToSend,
+            enterToSendConfigured,
+            shiftKey: e.shiftKey,
+            ctrlKey: e.ctrlKey,
+            metaKey: e.metaKey,
+        })) {
             e.preventDefault();
 
             // Queueing / steering only works when there's an existing busy
@@ -3251,6 +3272,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                         canAbort={canAbort}
                         hasContent={Boolean(hasContent)}
                         isExpandedInput={isExpandedInput}
+                        enterToSend={effectiveEnterToSend}
                         permissionAutoAcceptEnabled={permissionAutoAcceptEnabled}
                         isPermissionAutoAcceptInteractive={isPermissionAutoAcceptInteractive}
                         dictationActive={mobileShell.dictationActive}
@@ -3263,6 +3285,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                         onOpenAttachSheet={openMobileAttachSheet}
                         onToggleExpandedInput={handleToggleExpandedInput}
                         onTogglePermissionAutoAccept={handlePermissionAutoAcceptToggle}
+                        onToggleEnterToSend={handleToggleEnterToSend}
                         onPrimaryAction={handlePrimaryAction}
                         onQueueMessage={handleQueueMessage}
                         onAbort={handleAbort}

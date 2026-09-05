@@ -2043,6 +2043,7 @@ export const dict = {
   'chat.chatInput.actions.enterToSend': 'Entrée envoie',
   'chat.chatInput.actions.shiftEnterToSend': 'Maj+Entrée envoie',
   'chat.chatInput.actions.sendingAria': 'Envoi du message',
+  'chat.chatInput.actions.enterToSendHint': 'Après modification, ce réglage contrôle Entrée et Maj+Entrée sur toutes les surfaces. En attendant, chaque surface conserve son comportement actuel.',
   'chat.chatInput.actions.queueMessageAria': 'Message de file d\'attente',
   'chat.chatInput.actions.stopGeneratingAria': 'Arrêter de générer',
   'chat.chatInput.focusMode.toggleAria': 'Basculer le mode de mise au point',
