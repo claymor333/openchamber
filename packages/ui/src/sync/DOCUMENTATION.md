@@ -291,6 +291,7 @@ Rules:
 9. `SessionLiveActivity` has three answers and `unknown` is never `idle`. `getSessionLiveActivity` reports `active` when any child store or the global session-status index holds a non-idle status, `idle` only when a child store actually covers the session's directory, and `unknown` otherwise — child stores are evicted for background directories, and the global index keeps only non-idle entries, so absence of a status is not proof of idleness. Callers that gate a destructive action (worktree moves) must refuse on `unknown`.
 10. Revert and unrevert cascade through known descendant sessions before mutating the parent. Revert uses the first descendant user message at or after the parent's target timestamp, including equal timestamps because message IDs do not define chronology. A descendant failure is logged and does not block its siblings or the parent. The parent runs last so its shared-directory file snapshot remains authoritative. A busy descendant is aborted before it is reverted, like the parent, so nothing keeps writing past the revert boundary. Redo clears the revert marker on every descendant, including markers the user set on a subagent independently of the parent undo.
 11. Starting a session from an assistant answer carries the source session ID, rendered directory, and answer text into the action. It must not rediscover that context from the globally active child store or the OpenCode client's fallback directory: the visible session may belong to an existing worktree while the active provider directory points elsewhere. New isolated worktrees resolve their registered parent project from that captured directory, preferring recorded worktree metadata when available. The dialog offers creation only after the project root is confirmed as a Git repository, and the creation boundary repeats that check so stale or bypassed UI state cannot run Git commands against a non-repository directory; failures leave the dialog open and visible.
+12. OpenCode commands and skills keep the authoritative `session.command` route when their only additional part is explicitly tagged session knowledge. Every other additional part, including unstructured synthetic conflict instructions, requires the prompt route; primary file attachments remain supported by `session.command`. Because session knowledge cannot be forwarded through the command route, it remains pending for the session's next prompt instead of being marked as delivered.
 
 Examples of global-store updates performed in `session-actions.ts`:
 
@@ -337,6 +338,26 @@ captured runtime is returned in `failedIds` so existing partial-failure
 feedback stays truthful.
 Callers whose confirmation can span a runtime switch may pass an
 `expectedRuntimeKey` captured earlier; ordinary callers are guarded by default.
+
+When the session being restored belongs to a worktree that no longer exists,
+writing `time.archived = 0` alone would leave it grouped under a directory the
+sidebar can never surface. Restore therefore probes the session's owned
+directory with `getDirectoryAvailability` and, only on an exact `missing`
+result, relocates it: it resolves the owning OpenCode project's primary
+directory by the session's server `projectID` (from `project.list()`, never a
+local project ID or the active project), then unarchives and moves the whole
+subtree still stranded in the missing directory to that project directory
+through `moveSessionToDirectory(..., false)`. `available`, `unknown`, an
+availability probe failure, a missing project record, and non-worktree sessions
+keep the plain restore path. The subtree is drawn from the global cache so
+archived descendants that never materialized in a live child store are still
+relocated, and a node is kept while it is archived **or** still owns the
+missing directory, so a retry after a partial restore (root already unarchived
+but not yet moved) completes the move instead of reporting a false success.
+`moveSessionToDirectory` accepts the captured `expectedRuntimeKey` and skips all
+local store/routing publication when the runtime changed during the
+control-plane request, so the server move can complete without seeding the new
+runtime with stale directory state.
 
 Deletion needs this guard more than archiving does. Session IDs are not unique
 across runtimes, and a committed deletion does more than hide a row: it evicts

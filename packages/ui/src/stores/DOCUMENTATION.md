@@ -115,6 +115,10 @@ run monitor, and made Zustand persist rewrite the session-storage snapshot per c
 
 Invariants to preserve when editing:
 
+- Directory keys come from `normalizeTerminalDirectory` (`lib/pathNormalization.ts`) and
+  nothing else. Server `cwd` strings, sidebar project paths and the panel's own directory
+  all pass through it, so a folder has exactly one entry on every platform. Read `sessions`
+  through `getDirectoryState`, never by indexing the map with a path normalized elsewhere.
 - Output actions (`appendToBuffer`, `replaceBuffer`) must leave `sessions` referentially
   unchanged; only `buffers` and `nextChunkId` may change.
 - Buffer entries are owned by their tab. `closeTab`, `removeDirectory`, `clearAll`, and
@@ -124,6 +128,25 @@ Invariants to preserve when editing:
   projection while both are referentially unchanged, and the storage adapter skips a write
   for an unchanged projection, so streaming output performs no persistence work.
 - Consumers that react to output must subscribe to `buffers`, not `sessions`.
+- Action tab IDs remain stable while each command execution receives a fresh terminal ID.
+  Starting or adopting a different execution resets its buffer sequence and preview together;
+  reconnecting to the same execution and observing its exit preserve scrollback.
+- Reconciliation selects one record per action before updating tabs. A running execution wins
+  over retained exited records independently of listing order. An in-progress stop remains
+  stopping until the same execution exits or explicit termination failure restores running.
+- `terminalSessionObserver` shares one five-second refresh loop per terminal adapter across
+  the visible sidebar, headers and panels. The existing empty-cwd listing returns all server
+  sessions in one request; directory subscribers receive only their own records. A sidebar
+  subscriber reconciles the complete list, including omitted known action directories.
+  Focus and online recovery refresh immediately. Hidden/offline clients pause, failed reads
+  preserve state, and the last consumer stops the loop. Replaced runtimes cannot publish old
+  responses. Mutation revisions are captured for every subscribed scope before the request.
+- Passive action adoption may restore output but has no launch-time authority to open browser
+  tabs. Preview navigation belongs to the initiating host directory even for a parent action.
+- Server session listings capture the directory's per-action mutation revisions when the
+  request starts. Coalesced callers share that first snapshot. A response cannot replace or
+  remove an action execution mutated after its request began, while a fresh successful empty
+  response still clears an omitted run.
 
 ## Git / PR Stores
 
