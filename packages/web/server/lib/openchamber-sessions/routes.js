@@ -36,6 +36,9 @@ const FALLBACK_PROVIDER_ID = 'opencode';
 const FALLBACK_MODEL_ID = 'big-pickle';
 const MIN_GOAL_TOKEN_BUDGET = 1_000;
 const MAX_GOAL_TOKEN_BUDGET = 100_000_000;
+const MAX_ROLE_KEY_LENGTH = 200;
+const ROLE_RESERVATION_TTL_MS = 60_000;
+const MAX_ROLE_RESERVATIONS = 1_000;
 
 const resolveGoalInput = (payload, prompt) => {
   const enabled = payload?.goal === true;
@@ -88,6 +91,17 @@ const buildDirectoryHeaders = (directory) => ({
   // paths such as "Masaüstü" otherwise fail every dispatched prompt).
   ...(directory ? { 'x-opencode-directory': encodeURIComponent(directory) } : {}),
 });
+
+const resolveRoleKey = (value) => {
+  const roleKey = asNonEmptyString(value);
+  if (!roleKey) return null;
+  if (roleKey.length > MAX_ROLE_KEY_LENGTH) {
+    throw new OpenChamberControlError(`roleKey must be ${MAX_ROLE_KEY_LENGTH} characters or fewer`, 400);
+  }
+  return roleKey;
+};
+
+const roleKeyFromSession = (session) => asNonEmptyString(session?.metadata?.openchamber?.roleKey);
 
 const fetchJson = async (url, authHeaders, fallback, directory) => {
   const response = await fetch(url.toString(), {
@@ -196,7 +210,7 @@ const runPromptAsync = async ({ baseUrl, authHeaders, sessionID, directory, payl
   }
 };
 
-const createSession = async ({ baseUrl, authHeaders, directory, title }) => {
+const createSession = async ({ baseUrl, authHeaders, directory, title, parentSessionId, roleKey }) => {
   const sessionUrl = new URL(`${baseUrl}/session`);
   sessionUrl.searchParams.set('directory', directory);
   const response = await fetch(sessionUrl.toString(), {
@@ -207,7 +221,12 @@ const createSession = async ({ baseUrl, authHeaders, directory, title }) => {
       'content-type': 'application/json',
       accept: 'application/json',
     },
-    body: JSON.stringify({ directory, ...(title ? { title } : {}) }),
+    body: JSON.stringify({
+      directory,
+      ...(title ? { title } : {}),
+      ...(parentSessionId ? { parentID: parentSessionId } : {}),
+      ...(roleKey ? { metadata: { openchamber: { roleKey } } } : {}),
+    }),
   });
 
   if (!response.ok) {
@@ -395,6 +414,7 @@ export const createOpenChamberSessionService = (dependencies) => {
     emitSessionCreatedEvent,
     createSessionGoal: createSessionGoalOverride,
     sessionKnowledgeRuntime = null,
+    now = Date.now,
   } = dependencies;
 
   // Last user message of an existing session, as a selection to reuse. Returns
@@ -460,6 +480,97 @@ export const createOpenChamberSessionService = (dependencies) => {
         );
       }
     }
+  };
+
+  const roleLocks = new Map();
+  const roleReservations = new Map();
+
+  const roleLockKey = (parentSessionId, roleKey) => `${parentSessionId}\u0000${roleKey}`;
+
+  const withRoleKeyLock = async (parentSessionId, roleKey, operation) => {
+    const lockKey = roleLockKey(parentSessionId, roleKey);
+    const previous = roleLocks.get(lockKey) || Promise.resolve();
+    let release;
+    const current = new Promise((resolve) => {
+      release = resolve;
+    });
+    roleLocks.set(lockKey, current);
+    await previous;
+    try {
+      return await operation();
+    } finally {
+      release();
+      if (roleLocks.get(lockKey) === current) roleLocks.delete(lockKey);
+    }
+  };
+
+  const rememberRoleReservation = (reservationKey, reservation) => {
+    const cutoff = reservation.finishedAt - ROLE_RESERVATION_TTL_MS;
+    for (const [key, candidate] of roleReservations) {
+      if (candidate.finishedAt < cutoff) roleReservations.delete(key);
+    }
+    while (roleReservations.size >= MAX_ROLE_RESERVATIONS) {
+      const oldestKey = roleReservations.keys().next().value;
+      if (oldestKey === undefined) break;
+      roleReservations.delete(oldestKey);
+    }
+    roleReservations.set(reservationKey, reservation);
+  };
+
+  const findRoleSession = async ({ client, parentSessionId, roleKey, directory }) => {
+    const experimentalSession = client.experimental?.session;
+    if (typeof experimentalSession?.list !== 'function') {
+      throw new OpenChamberControlError('Role-keyed session reuse requires the global session list API', 503);
+    }
+
+    let response;
+    try {
+      response = await experimentalSession.list({});
+    } catch (error) {
+      throw new OpenChamberControlError(
+        `Unable to verify existing session for roleKey '${roleKey}'${error?.message ? `: ${error.message}` : ''}`,
+        503,
+      );
+    }
+
+    if (!Array.isArray(response?.data)) {
+      throw new OpenChamberControlError(`Unable to verify existing session for roleKey '${roleKey}'`, 503);
+    }
+
+    const candidates = response.data
+      .filter((session) => session?.parentID === parentSessionId
+        && roleKeyFromSession(session) === roleKey
+        && !session?.time?.archived)
+      .sort((left, right) => (Number(right?.time?.updated) || 0) - (Number(left?.time?.updated) || 0));
+    const session = candidates[0];
+    if (!session?.id) return null;
+
+    const sessionDirectory = asNonEmptyString(session.directory) || directory;
+    if (!sessionDirectory) {
+      throw new OpenChamberControlError(`Existing roleKey '${roleKey}' has no session directory`, 503);
+    }
+
+    let statusResponse;
+    try {
+      statusResponse = await client.session.status({ directory: sessionDirectory });
+    } catch (error) {
+      throw new OpenChamberControlError(
+        `Unable to verify status for roleKey '${roleKey}'${error?.message ? `: ${error.message}` : ''}`,
+        503,
+      );
+    }
+    if (!statusResponse?.data || typeof statusResponse.data !== 'object' || Array.isArray(statusResponse.data)) {
+      throw new OpenChamberControlError(`Unable to verify status for roleKey '${roleKey}'`, 503);
+    }
+    const status = statusResponse.data[session.id]?.type || 'idle';
+    if (status !== 'idle') {
+      throw new OpenChamberControlError(
+        `roleKey '${roleKey}' already has child session '${session.id}' with status '${status}'; reuse that session instead of creating a replacement`,
+        409,
+      );
+    }
+
+    return { sessionID: session.id, directory: sessionDirectory };
   };
 
   const dispatchPrompt = async ({
@@ -672,8 +783,17 @@ export const createOpenChamberSessionService = (dependencies) => {
   };
 
   const create = async (payload = {}) => {
+    const requestStartedAt = now();
     const title = asNonEmptyString(payload.title);
     const prompt = asNonEmptyString(payload.prompt);
+    const roleKey = resolveRoleKey(payload.roleKey);
+    const parentSessionId = asNonEmptyString(payload.parentSessionId);
+    if (payload.roleKey !== undefined && payload.roleKey !== null && !roleKey) {
+      throw new OpenChamberControlError('roleKey must be a non-empty string', 400);
+    }
+    if (roleKey && !parentSessionId) {
+      throw new OpenChamberControlError('parentSessionId is required with roleKey', 400);
+    }
     const goalInput = resolveGoalInput(payload, prompt);
     if (!goalInput.ok) {
       throw new OpenChamberControlError(goalInput.error, 400);
@@ -693,8 +813,6 @@ export const createOpenChamberSessionService = (dependencies) => {
     }
 
     const worktreeInput = resolveWorktreeInput(payload);
-    let worktree = null;
-    let sessionDirectory = resolvedDirectory.directory;
     if (payload?.worktree && !worktreeInput) {
       throw new OpenChamberControlError('worktree.name is required when worktree is provided', 400);
     }
@@ -710,38 +828,103 @@ export const createOpenChamberSessionService = (dependencies) => {
       });
     }
 
-    if (worktreeInput) {
-      worktree = await createWorktree(resolvedDirectory.directory, worktreeInput);
-      sessionDirectory = worktree.path;
-      await waitForWorktreeBootstrapReady({ directory: sessionDirectory });
-    }
-
     const baseUrl = buildOpenCodeUrl('/', '').replace(/\/$/, '');
     const authHeaders = getOpenCodeAuthHeaders();
     const client = createOpencodeClient({ baseUrl, headers: authHeaders });
-    const sessionID = await createSession({
-      client,
-      baseUrl,
-      authHeaders,
-      directory: sessionDirectory,
-      ...(title ? { title } : {}),
-    });
 
-    let dispatch = { model, agent, variant, promptDispatched: false, dispatchedAsCommand: false };
-    if (prompt) {
-      dispatch = await dispatchPrompt({
+    const createOrReuseSession = async () => {
+      if (roleKey) {
+        const existing = await findRoleSession({
+          client,
+          parentSessionId,
+          roleKey,
+          directory: resolvedDirectory.directory,
+        });
+        if (existing) {
+          return { sessionID: existing.sessionID, sessionDirectory: existing.directory, worktree: null, reused: true };
+        }
+      }
+
+      let worktree = null;
+      let sessionDirectory = resolvedDirectory.directory;
+      if (worktreeInput) {
+        worktree = await createWorktree(resolvedDirectory.directory, worktreeInput);
+        sessionDirectory = worktree.path;
+        await waitForWorktreeBootstrapReady({ directory: sessionDirectory });
+      }
+
+      const sessionID = await createSession({
         client,
         baseUrl,
         authHeaders,
-        sessionID,
         directory: sessionDirectory,
-        prompt,
-        goalInput,
-        requestedModel: model,
-        requestedAgent: agent,
-        requestedVariant: variant,
+        ...(title ? { title } : {}),
+        ...(parentSessionId ? { parentSessionId } : {}),
+        ...(roleKey ? { roleKey } : {}),
       });
-    }
+      return { sessionID, sessionDirectory, worktree, reused: false };
+    };
+
+    const createAndDispatch = async () => {
+      const reservationKey = roleKey ? roleLockKey(parentSessionId, roleKey) : null;
+      const reservation = reservationKey ? roleReservations.get(reservationKey) : null;
+      if (reservation && requestStartedAt > reservation.finishedAt) {
+        roleReservations.delete(reservationKey);
+      }
+      const activeReservation = reservationKey ? roleReservations.get(reservationKey) : null;
+      if (activeReservation && requestStartedAt <= activeReservation.finishedAt) {
+        if (activeReservation.prompt === prompt) {
+          return {
+            session: {
+              sessionID: activeReservation.sessionID,
+              sessionDirectory: activeReservation.directory,
+              worktree: null,
+              reused: true,
+            },
+            dispatch: { model, agent, variant, promptDispatched: false, dispatchedAsCommand: false },
+            deduplicated: true,
+          };
+        }
+        throw new OpenChamberControlError(
+          `roleKey '${roleKey}' already has an overlapping prompt on child session '${activeReservation.sessionID}'; wait for it to finish`,
+          409,
+        );
+      }
+
+      const session = await createOrReuseSession();
+      const { sessionID, sessionDirectory, reused } = session;
+      let dispatch = { model, agent, variant, promptDispatched: false, dispatchedAsCommand: false };
+      if (prompt) {
+        dispatch = await dispatchPrompt({
+          client,
+          baseUrl,
+          authHeaders,
+          sessionID,
+          directory: sessionDirectory,
+          prompt,
+          goalInput,
+          requestedModel: model,
+          requestedAgent: agent,
+          requestedVariant: variant,
+          reuseSessionSelection: reused,
+        });
+      }
+      if (reservationKey && prompt && dispatch.promptDispatched) {
+        rememberRoleReservation(reservationKey, {
+          sessionID,
+          directory: sessionDirectory,
+          prompt,
+          finishedAt: now(),
+        });
+      }
+      return { session, dispatch, deduplicated: false };
+    };
+
+    const execution = roleKey
+      ? await withRoleKeyLock(parentSessionId, roleKey, createAndDispatch)
+      : await createAndDispatch();
+    const { session, dispatch, deduplicated } = execution;
+    const { sessionID, sessionDirectory, worktree, reused } = session;
 
     const result = {
       sessionId: sessionID,
@@ -749,6 +932,8 @@ export const createOpenChamberSessionService = (dependencies) => {
       ...(resolvedDirectory.projectId ? { projectId: resolvedDirectory.projectId } : {}),
       ...(title ? { title } : {}),
       ...(worktree ? { worktree } : {}),
+      ...(roleKey ? { roleKey, reused } : {}),
+      ...(deduplicated ? { deduplicated: true } : {}),
       ...(prompt && dispatch.model ? { model: dispatch.model } : {}),
       ...(prompt && dispatch.agent ? { agent: dispatch.agent } : {}),
       ...(prompt && dispatch.variant ? { variant: dispatch.variant } : {}),
@@ -759,23 +944,26 @@ export const createOpenChamberSessionService = (dependencies) => {
       ...(goalInput.tokenBudget ? { goalTokenBudget: goalInput.tokenBudget } : {}),
     };
 
-    try {
-      emitSessionCreatedEvent?.({
-        sessionID,
-        directory: sessionDirectory,
-        ...(resolvedDirectory.projectId ? { projectID: resolvedDirectory.projectId } : {}),
-        ...(title ? { title } : {}),
-        ...(worktree ? { worktree } : {}),
-        ...(prompt && dispatch.model ? { model: dispatch.model } : {}),
-        ...(prompt && dispatch.agent ? { agent: dispatch.agent } : {}),
-        ...(prompt && dispatch.variant ? { variant: dispatch.variant } : {}),
-        promptDispatched: dispatch.promptDispatched,
-        dispatchedAsCommand: dispatch.dispatchedAsCommand,
-        ...(goalInput.enabled ? { goalEnabled: true } : {}),
-        ...(goalInput.tokenBudget ? { goalTokenBudget: goalInput.tokenBudget } : {}),
-        createdAt: Date.now(),
-      });
-    } catch {
+    if (!reused) {
+      try {
+        emitSessionCreatedEvent?.({
+          sessionID,
+          directory: sessionDirectory,
+          ...(resolvedDirectory.projectId ? { projectID: resolvedDirectory.projectId } : {}),
+          ...(title ? { title } : {}),
+          ...(worktree ? { worktree } : {}),
+          ...(prompt && dispatch.model ? { model: dispatch.model } : {}),
+          ...(prompt && dispatch.agent ? { agent: dispatch.agent } : {}),
+          ...(prompt && dispatch.variant ? { variant: dispatch.variant } : {}),
+          promptDispatched: dispatch.promptDispatched,
+          dispatchedAsCommand: dispatch.dispatchedAsCommand,
+          ...(roleKey ? { roleKey } : {}),
+          ...(goalInput.enabled ? { goalEnabled: true } : {}),
+          ...(goalInput.tokenBudget ? { goalTokenBudget: goalInput.tokenBudget } : {}),
+          createdAt: Date.now(),
+        });
+      } catch {
+      }
     }
 
     return result;

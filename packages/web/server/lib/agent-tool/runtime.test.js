@@ -131,6 +131,7 @@ describe('managed agent tool runtime', () => {
     expect(Object.keys(tool.openchamber_web.args.parameters.properties)).toContain('url');
     expect(Object.keys(tool.openchamber.args.parameters.properties)).not.toContain('url');
     expect(Object.keys(tool.openchamber.args.parameters.properties)).toContain('sessionId');
+    expect(tool.openchamber.args.parameters.properties.roleKey).toEqual(expect.objectContaining({ type: 'string' }));
   });
 
   it('accepts inputs passed beside the action, not only inside parameters', async () => {
@@ -150,7 +151,7 @@ describe('managed agent tool runtime', () => {
       sent.push(JSON.parse(init.body));
       return new Response(JSON.stringify({ schemaVersion: 1, ok: true, action: 'browser.open', data: {} }));
     };
-    const context = { directory: '/work/project', abort: new AbortController().signal, metadata: () => {} };
+    const context = { sessionID: 'ses_parent', directory: '/work/project', abort: new AbortController().signal, metadata: () => {} };
 
     try {
       // The shape a model actually produced: url and viewport next to action.
@@ -177,6 +178,25 @@ describe('managed agent tool runtime', () => {
     expect(sent[0].input).toEqual({ action: 'browser.open', url: 'https://example.test', viewport: 'mobile' });
     expect(sent[1].input.url).toBe('https://example.test/nested');
     expect(sent[2].input).toEqual({ action: 'session.messages', sessionId: 'ses_1', limit: 3 });
+    expect(sent[2].contextSessionId).toBe('ses_parent');
+  });
+
+  it('forwards the calling session id for authoritative child-session reuse', async () => {
+    const executeAction = vi.fn(async () => ({ sessionId: 'ses_child', reused: false }));
+    const { runtime } = await createRuntime({ executeAction });
+
+    await runtime.execute({
+      input: { action: 'session.create', roleKey: 'review:tests' },
+      contextSessionId: 'ses_parent',
+      contextDirectory: '/work/project',
+    });
+
+    expect(executeAction).toHaveBeenCalledWith(
+      'session.create',
+      expect.objectContaining({ action: 'session.create', roleKey: 'review:tests', contextSessionId: 'ses_parent' }),
+      '/work/project',
+      {},
+    );
   });
 
   it('omits a tool the user turned off', async () => {

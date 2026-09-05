@@ -18,6 +18,8 @@ const sessionCreateMock = vi.fn(async () => ({ data: { id: 'ses_123' } }));
 const sessionForkMock = vi.fn(async () => ({ data: { id: 'ses_fork', title: 'Forked session' } }));
 const sessionMessagesMock = vi.fn(async () => ({ data: [] }));
 const sessionUpdateMock = vi.fn(async ({ sessionID }) => ({ data: { id: sessionID, time: { archived: 1 } } }));
+const sessionListMock = vi.fn(async () => ({ data: [] }));
+const sessionStatusMock = vi.fn(async () => ({ data: {} }));
 
 let existingSessionMessages = [];
 let dispatchedUserMessageSeq = 0;
@@ -78,8 +80,15 @@ vi.mock('@opencode-ai/sdk/v2', () => ({
       create: sessionCreateMock,
       fork: sessionForkMock,
       messages: sessionMessagesMock,
+      list: sessionListMock,
+      status: sessionStatusMock,
       command: sessionCommandMock,
       update: sessionUpdateMock,
+    },
+    experimental: {
+      session: {
+        list: sessionListMock,
+      },
     },
     command: {
       list: commandListMock,
@@ -126,6 +135,10 @@ describe('openchamber session routes', () => {
     }));
     sessionCreateMock.mockClear();
     sessionForkMock.mockClear();
+    sessionListMock.mockReset();
+    sessionListMock.mockResolvedValue({ data: [] });
+    sessionStatusMock.mockReset();
+    sessionStatusMock.mockResolvedValue({ data: {} });
     existingSessionMessages = [];
     dispatchedUserMessageSeq = 0;
     sessionMessagesMock.mockReset();
@@ -267,6 +280,425 @@ describe('openchamber session routes', () => {
           }),
         }),
       );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('reuses an idle role-keyed child instead of creating a replacement', async () => {
+    const originalFetch = globalThis.fetch;
+    const fetchMock = vi.fn(async (url) => {
+      if (String(url).includes('/session?')) return { ok: true, json: async () => ({ id: 'ses_replacement' }) };
+      return selectionInputResponse(url) || { ok: true, text: async () => '' };
+    });
+    globalThis.fetch = fetchMock;
+    sessionListMock.mockResolvedValue({ data: [{
+      id: 'ses_existing',
+      parentID: 'ses_root',
+      directory: '/repo/app',
+      metadata: { openchamber: { roleKey: 'review:tests' } },
+      time: { updated: 20 },
+    }] });
+    sessionStatusMock.mockResolvedValue({ data: { ses_existing: { type: 'idle' } } });
+
+    try {
+      const { app } = createApp();
+      const response = await request(app)
+        .post('/api/openchamber/sessions')
+        .send({
+          directory: '/repo/app',
+          parentSessionId: 'ses_root',
+          roleKey: 'review:tests',
+          prompt: 'Re-review the corrected tests',
+          model: 'openai/gpt-5.5',
+          agent: 'build',
+        })
+        .expect(200);
+
+      expect(response.body).toMatchObject({
+        sessionId: 'ses_existing',
+        reused: true,
+        roleKey: 'review:tests',
+        promptDispatched: true,
+      });
+      expect(sessionStatusMock).toHaveBeenCalledWith({ directory: '/repo/app' });
+      expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/session?'))).toBe(false);
+      expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/session/ses_existing/prompt_async'))).toBe(true);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('reuses the existing child model and agent when a role re-review omits them', async () => {
+    const originalFetch = globalThis.fetch;
+    const fetchMock = vi.fn(async (url) => {
+      if (String(url).includes('/prompt_async')) return { ok: true, text: async () => '' };
+      return selectionInputResponse(url) || { ok: true, text: async () => '' };
+    });
+    globalThis.fetch = fetchMock;
+    sessionListMock.mockResolvedValue({ data: [{
+      id: 'ses_existing',
+      parentID: 'ses_root',
+      directory: '/repo/app',
+      metadata: { openchamber: { roleKey: 'review:tests' } },
+      time: { updated: 20 },
+    }] });
+    sessionStatusMock.mockResolvedValue({ data: { ses_existing: { type: 'idle' } } });
+    sessionMessagesMock.mockResolvedValueOnce({ data: [{
+      info: {
+        id: 'msg_existing_selection',
+        role: 'user',
+        agent: 'plan',
+        model: { providerID: 'anthropic', modelID: 'claude-sonnet-5', variant: 'high' },
+        time: { created: 10 },
+      },
+    }] });
+
+    try {
+      const { app } = createApp();
+      const response = await request(app)
+        .post('/api/openchamber/sessions')
+        .send({
+          directory: '/repo/app',
+          parentSessionId: 'ses_root',
+          roleKey: 'review:tests',
+          prompt: 'Re-review without changing selection',
+        })
+        .expect(200);
+
+      expect(response.body).toMatchObject({
+        sessionId: 'ses_existing',
+        reused: true,
+        model: { providerID: 'anthropic', modelID: 'claude-sonnet-5' },
+        agent: 'plan',
+        variant: 'high',
+      });
+      expect(fetchMock.mock.calls.every(([url]) => String(url).includes('/prompt_async'))).toBe(true);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it.each(['busy', 'retry'])('rejects a duplicate role while its existing child is %s', async (status) => {
+    const originalFetch = globalThis.fetch;
+    const fetchMock = vi.fn(async (url) => {
+      if (String(url).includes('/session?')) return { ok: true, json: async () => ({ id: 'ses_replacement' }) };
+      return selectionInputResponse(url) || { ok: true, text: async () => '' };
+    });
+    globalThis.fetch = fetchMock;
+    sessionListMock.mockResolvedValue({ data: [{
+      id: 'ses_existing',
+      parentID: 'ses_root',
+      directory: '/repo/app',
+      metadata: { openchamber: { roleKey: 'review:tests' } },
+      time: { updated: 20 },
+    }] });
+    sessionStatusMock.mockResolvedValue({ data: { ses_existing: { type: status } } });
+
+    try {
+      const { app } = createApp();
+      const response = await request(app)
+        .post('/api/openchamber/sessions')
+        .send({
+          directory: '/repo/app',
+          parentSessionId: 'ses_root',
+          roleKey: 'review:tests',
+          prompt: 'Do not create a second reviewer',
+          model: 'openai/gpt-5.5',
+          agent: 'build',
+        })
+        .expect(409);
+
+      expect(response.body.error).toContain('review:tests');
+      expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/session?'))).toBe(false);
+      expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/prompt_async'))).toBe(false);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('fails closed when the existing role status cannot be verified', async () => {
+    const originalFetch = globalThis.fetch;
+    const fetchMock = vi.fn(async (url) => selectionInputResponse(url) || { ok: true, text: async () => '' });
+    globalThis.fetch = fetchMock;
+    sessionListMock.mockResolvedValue({ data: [{
+      id: 'ses_existing',
+      parentID: 'ses_root',
+      directory: '/repo/app',
+      metadata: { openchamber: { roleKey: 'review:tests' } },
+      time: { updated: 20 },
+    }] });
+    sessionStatusMock.mockResolvedValue({ data: null });
+
+    try {
+      const { app } = createApp();
+      await request(app)
+        .post('/api/openchamber/sessions')
+        .send({
+          directory: '/repo/app',
+          parentSessionId: 'ses_root',
+          roleKey: 'review:tests',
+          prompt: 'Do not create without status',
+          model: 'openai/gpt-5.5',
+          agent: 'build',
+        })
+        .expect(503);
+
+      expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/session?'))).toBe(false);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('stores the parent session and role key when creating a new child', async () => {
+    const originalFetch = globalThis.fetch;
+    const fetchMock = vi.fn(async (url, init) => {
+      if (String(url).includes('/prompt_async')) return { ok: true, text: async () => '' };
+      if (String(url).includes('/session?')) return { ok: true, json: async () => ({ id: 'ses_new' }) };
+      return selectionInputResponse(url) || { ok: true, text: async () => '' };
+    });
+    globalThis.fetch = fetchMock;
+
+    try {
+      const { app } = createApp();
+      const response = await request(app)
+        .post('/api/openchamber/sessions')
+        .send({
+          directory: '/repo/app',
+          parentSessionId: 'ses_root',
+          roleKey: 'review:tests',
+          prompt: 'Review the tests',
+          model: 'openai/gpt-5.5',
+          agent: 'build',
+        })
+        .expect(200);
+
+      expect(response.body).toMatchObject({ sessionId: 'ses_new', reused: false, roleKey: 'review:tests' });
+      const createCall = fetchMock.mock.calls.find(([url]) => String(url).includes('/session?'));
+      expect(JSON.parse(createCall[1].body)).toMatchObject({
+        directory: '/repo/app',
+        parentID: 'ses_root',
+        metadata: { openchamber: { roleKey: 'review:tests' } },
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('creates a replacement when the previous role-keyed child is archived', async () => {
+    const originalFetch = globalThis.fetch;
+    const fetchMock = vi.fn(async (url) => {
+      if (String(url).includes('/session?')) return { ok: true, json: async () => ({ id: 'ses_replacement' }) };
+      if (String(url).includes('/prompt_async')) return { ok: true, text: async () => '' };
+      return selectionInputResponse(url) || { ok: true, text: async () => '' };
+    });
+    globalThis.fetch = fetchMock;
+    sessionListMock.mockResolvedValue({ data: [{
+      id: 'ses_archived',
+      parentID: 'ses_root',
+      directory: '/repo/app',
+      metadata: { openchamber: { roleKey: 'review:tests' } },
+      time: { archived: 20, updated: 20 },
+    }] });
+
+    try {
+      const { app } = createApp();
+      const response = await request(app)
+        .post('/api/openchamber/sessions')
+        .send({
+          directory: '/repo/app',
+          parentSessionId: 'ses_root',
+          roleKey: 'review:tests',
+          prompt: 'Review the replacement',
+          model: 'openai/gpt-5.5',
+          agent: 'build',
+        })
+        .expect(200);
+
+      expect(response.body).toMatchObject({ sessionId: 'ses_replacement', reused: false, roleKey: 'review:tests' });
+      expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/session?'))).toBe(true);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('fails closed when role lookup does not return a session list', async () => {
+    const originalFetch = globalThis.fetch;
+    const fetchMock = vi.fn(async (url) => {
+      if (String(url).includes('/session?')) return { ok: true, json: async () => ({ id: 'ses_should_not_create' }) };
+      return selectionInputResponse(url) || { ok: true, text: async () => '' };
+    });
+    globalThis.fetch = fetchMock;
+    sessionListMock.mockResolvedValue({ data: null });
+
+    try {
+      const { app } = createApp();
+      await request(app)
+        .post('/api/openchamber/sessions')
+        .send({
+          directory: '/repo/app',
+          parentSessionId: 'ses_root',
+          roleKey: 'review:tests',
+          prompt: 'Do not create when lookup is unavailable',
+          model: 'openai/gpt-5.5',
+          agent: 'build',
+        })
+        .expect(503);
+
+      expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/session?'))).toBe(false);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('serializes concurrent role-keyed creates so only one child is created', async () => {
+    const originalFetch = globalThis.fetch;
+    let signalPromptStarted;
+    const promptStarted = new Promise((resolve) => {
+      signalPromptStarted = resolve;
+    });
+    let releasePrompt;
+    const promptGate = new Promise((resolve) => {
+      releasePrompt = resolve;
+    });
+    let created = false;
+    let timestamp = 100;
+    const fetchMock = vi.fn(async (url) => {
+      if (String(url).includes('/session?')) {
+        created = true;
+        return { ok: true, json: async () => ({ id: 'ses_created_once' }) };
+      }
+      if (String(url).includes('/prompt_async')) {
+        signalPromptStarted();
+        await promptGate;
+        timestamp = 200;
+        return { ok: true, text: async () => '' };
+      }
+      return selectionInputResponse(url) || { ok: true, text: async () => '' };
+    });
+    globalThis.fetch = fetchMock;
+    sessionListMock.mockImplementation(async () => ({ data: created ? [{
+      id: 'ses_created_once',
+      parentID: 'ses_root',
+      directory: '/repo/app',
+      metadata: { openchamber: { roleKey: 'review:tests' } },
+      time: { updated: 20 },
+    }] : [] }));
+    sessionStatusMock.mockResolvedValue({ data: { ses_created_once: { type: 'idle' } } });
+
+    const payload = {
+      directory: '/repo/app',
+      parentSessionId: 'ses_root',
+      roleKey: 'review:tests',
+      prompt: 'Review once',
+      model: 'openai/gpt-5.5',
+      agent: 'build',
+    };
+
+    try {
+      const { app } = createApp({ now: () => timestamp });
+      const first = request(app).post('/api/openchamber/sessions').send(payload).then((response) => response);
+      await promptStarted;
+      const second = request(app).post('/api/openchamber/sessions').send(payload).then((response) => response);
+      await new Promise((resolve) => setImmediate(resolve));
+      releasePrompt();
+      const [firstResponse, secondResponse] = await Promise.all([first, second]);
+      expect(firstResponse.status).toBe(200);
+      expect(secondResponse.status).toBe(200);
+      expect(firstResponse.body.reused).toBe(false);
+      expect(secondResponse.body.reused).toBe(true);
+      expect(secondResponse.body.deduplicated).toBe(true);
+      expect(fetchMock.mock.calls.filter(([url]) => String(url).includes('/session?')).length).toBe(1);
+      expect(fetchMock.mock.calls.filter(([url]) => String(url).includes('/prompt_async')).length).toBe(1);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('rejects an overlapping role-keyed create with a different prompt', async () => {
+    const originalFetch = globalThis.fetch;
+    let signalPromptStarted;
+    const promptStarted = new Promise((resolve) => {
+      signalPromptStarted = resolve;
+    });
+    let releasePrompt;
+    const promptGate = new Promise((resolve) => {
+      releasePrompt = resolve;
+    });
+    let created = false;
+    let promptCalls = 0;
+    const fetchMock = vi.fn(async (url) => {
+      if (String(url).includes('/session?')) {
+        created = true;
+        return { ok: true, json: async () => ({ id: 'ses_created_once' }) };
+      }
+      if (String(url).includes('/prompt_async')) {
+        promptCalls += 1;
+        if (promptCalls === 1) {
+          signalPromptStarted();
+          await promptGate;
+        }
+        return { ok: true, text: async () => '' };
+      }
+      return selectionInputResponse(url) || { ok: true, text: async () => '' };
+    });
+    globalThis.fetch = fetchMock;
+    sessionListMock.mockImplementation(async () => ({ data: created ? [{
+      id: 'ses_created_once',
+      parentID: 'ses_root',
+      directory: '/repo/app',
+      metadata: { openchamber: { roleKey: 'review:tests' } },
+      time: { updated: 20 },
+    }] : [] }));
+    sessionStatusMock.mockResolvedValue({ data: { ses_created_once: { type: 'idle' } } });
+
+    const firstPayload = {
+      directory: '/repo/app',
+      parentSessionId: 'ses_root',
+      roleKey: 'review:tests',
+      prompt: 'Review once',
+      model: 'openai/gpt-5.5',
+      agent: 'build',
+    };
+
+    try {
+      const { app } = createApp({ now: () => 100 });
+      const first = request(app).post('/api/openchamber/sessions').send(firstPayload).then((response) => response);
+      await promptStarted;
+      const second = request(app).post('/api/openchamber/sessions').send({
+        ...firstPayload,
+        prompt: 'Apply correction',
+      }).then((response) => response);
+      await new Promise((resolve) => setImmediate(resolve));
+      releasePrompt();
+      const [firstResponse, secondResponse] = await Promise.all([first, second]);
+
+      expect(firstResponse.status).toBe(200);
+      expect(secondResponse.status).toBe(409);
+      expect(secondResponse.body.error).toContain('overlapping prompt');
+      expect(fetchMock.mock.calls.filter(([url]) => String(url).includes('/session?')).length).toBe(1);
+      expect(promptCalls).toBe(1);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it.each([
+    [{ roleKey: '   ', parentSessionId: 'ses_root' }, 'roleKey must be a non-empty string'],
+    [{ roleKey: 'review:tests' }, 'parentSessionId is required with roleKey'],
+  ])('rejects role-keyed creates without valid scope', async (payload, error) => {
+    const originalFetch = globalThis.fetch;
+    const fetchMock = vi.fn();
+    globalThis.fetch = fetchMock;
+
+    try {
+      const { app } = createApp();
+      await request(app)
+        .post('/api/openchamber/sessions')
+        .send({ directory: '/repo/app', prompt: 'Invalid scope', ...payload })
+        .expect(400, { error });
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(sessionListMock).not.toHaveBeenCalled();
     } finally {
       globalThis.fetch = originalFetch;
     }
