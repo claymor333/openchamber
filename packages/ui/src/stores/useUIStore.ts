@@ -920,7 +920,6 @@ interface UIStore {
   inputSpellcheckEnabled: boolean;
   enterToSend: boolean;
   largeTextPasteBehavior: LargeTextPasteBehavior;
-  enterToSend: boolean;
   enterToSendConfigured: boolean;
   wideChatLayoutEnabled: boolean;
   codeBlockLineWrap: boolean;
@@ -1108,7 +1107,6 @@ interface UIStore {
   setInputSpellcheckEnabled: (value: boolean) => void;
   setEnterToSend: (value: boolean) => void;
   setLargeTextPasteBehavior: (value: LargeTextPasteBehavior) => void;
-  setEnterToSend: (value: boolean) => void;
   setEnterToSendConfigured: (value: boolean) => void;
   setWideChatLayoutEnabled: (value: boolean) => void;
   setCodeBlockLineWrap: (value: boolean) => void;
@@ -1279,9 +1277,8 @@ export const useUIStore = create<UIStore>()(
         projectContextSidebarWidth: 168,
         projectContextTab: 'notes',
         inputSpellcheckEnabled: false,
-        enterToSend: true,
-        largeTextPasteBehavior: DEFAULT_LARGE_TEXT_PASTE_BEHAVIOR,
         enterToSend: false,
+        largeTextPasteBehavior: DEFAULT_LARGE_TEXT_PASTE_BEHAVIOR,
         enterToSendConfigured: false,
         wideChatLayoutEnabled: false,
         codeBlockLineWrap: true,
@@ -2563,9 +2560,6 @@ export const useUIStore = create<UIStore>()(
         setLargeTextPasteBehavior: (value) => {
           set({ largeTextPasteBehavior: normalizeLargeTextPasteBehavior(value) });
         },
-        setEnterToSend: (value) => {
-          set({ enterToSend: value });
-        },
         setEnterToSendConfigured: (value) => {
           set({ enterToSendConfigured: value });
         },
@@ -2991,7 +2985,6 @@ export const useUIStore = create<UIStore>()(
           inputSpellcheckEnabled: state.inputSpellcheckEnabled,
           enterToSend: state.enterToSend,
           largeTextPasteBehavior: state.largeTextPasteBehavior,
-          enterToSend: state.enterToSend,
           enterToSendConfigured: state.enterToSendConfigured,
           wideChatLayoutEnabled: state.wideChatLayoutEnabled,
           codeBlockLineWrap: state.codeBlockLineWrap,
