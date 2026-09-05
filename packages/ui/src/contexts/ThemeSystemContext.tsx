@@ -35,6 +35,7 @@ import { useMaterialYouThemes } from '@/lib/materialYou/useMaterialYou';
 import {
   adoptThemePreferencesForRuntime,
   resolveThemePreferencesForRuntime,
+  resolveThemePreferencesFromSettingsSync,
   resolveThemePreferencesFromStorageEvent,
   writeThemePreferencesForRuntime,
 } from './theme-storage';
@@ -598,46 +599,14 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
       return;
     }
     const handleSettingsSynced = (event: Event) => {
-      const detail = (event as CustomEvent<SettingsSyncedDetail>).detail?.settings;
+      const detail = (event as CustomEvent<SettingsSyncedDetail>).detail?.settings
+        ? (event as CustomEvent<SettingsSyncedDetail>).detail
+        : null;
       if (!detail) {
         return;
       }
 
-      setPreferences((prev) => {
-        let nextMode = prev.themeMode;
-        if (detail.useSystemTheme === true) {
-          nextMode = 'system';
-        } else if (detail.useSystemTheme === false) {
-          if (detail.themeVariant === 'dark' || detail.themeVariant === 'light') {
-            nextMode = detail.themeVariant;
-          }
-        }
-
-        let nextLight = prev.lightThemeId;
-        if (typeof detail.lightThemeId === 'string' && detail.lightThemeId.length > 0) {
-          nextLight = detail.lightThemeId.trim();
-        }
-
-        let nextDark = prev.darkThemeId;
-        if (typeof detail.darkThemeId === 'string' && detail.darkThemeId.length > 0) {
-          nextDark = detail.darkThemeId.trim();
-        }
-
-        const same =
-          nextMode === prev.themeMode &&
-          nextLight === prev.lightThemeId &&
-          nextDark === prev.darkThemeId;
-
-        if (same) {
-          return prev;
-        }
-
-        return {
-          themeMode: nextMode,
-          lightThemeId: nextLight,
-          darkThemeId: nextDark,
-        };
-      });
+      setPreferences((prev) => resolveThemePreferencesFromSettingsSync(detail, prev) ?? prev);
     };
 
     window.addEventListener('openchamber:settings-synced', handleSettingsSynced);
