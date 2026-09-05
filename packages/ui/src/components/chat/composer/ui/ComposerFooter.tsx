@@ -44,6 +44,7 @@ export interface ComposerFooterProps {
     stopIconSizeClass: string;
 
     canSend: boolean;
+    isSending: boolean;
     canAbort: boolean;
     hasContent: boolean;
     isExpandedInput: boolean;
@@ -86,6 +87,7 @@ export function ComposerFooter(props: ComposerFooterProps) {
         sendIconSizeClass,
         stopIconSizeClass,
         canSend,
+        isSending,
         canAbort,
         hasContent,
         isExpandedInput,
@@ -183,6 +185,7 @@ export function ComposerFooter(props: ComposerFooterProps) {
                                     sendIconSizeClass={sendIconSizeClass}
                                     stopIconSizeClass={stopIconSizeClass}
                                     canSend={canSend}
+                                    isSending={isSending}
                                     canAbort={canAbort}
                                     hasContent={hasContent}
                                     currentSessionId={currentSessionId}
@@ -252,6 +255,7 @@ export function ComposerFooter(props: ComposerFooterProps) {
                             sendIconSizeClass={sendIconSizeClass}
                             stopIconSizeClass={stopIconSizeClass}
                             canSend={canSend}
+                            isSending={isSending}
                             canAbort={canAbort}
                             hasContent={hasContent}
                             currentSessionId={currentSessionId}

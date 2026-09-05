@@ -2289,6 +2289,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.chatInput.actions.sendMessageAria': '发送消息',
   'chat.chatInput.actions.enterToSend': 'Enter 发送',
   'chat.chatInput.actions.shiftEnterToSend': 'Shift+Enter 发送',
+  'chat.chatInput.actions.sendingAria': '正在发送消息',
   'chat.chatInput.actions.queueMessageAria': '将消息加入队列',
   'chat.chatInput.actions.stopGeneratingAria': '停止生成',
   'chat.chatInput.focusMode.toggleAria': '切换专注模式',

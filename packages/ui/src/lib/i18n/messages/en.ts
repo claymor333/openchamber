@@ -2323,6 +2323,7 @@ export const dict = {
   'chat.chatInput.actions.sendMessageAria': 'Send message',
   'chat.chatInput.actions.enterToSend': 'Enter sends',
   'chat.chatInput.actions.shiftEnterToSend': 'Shift+Enter sends',
+  'chat.chatInput.actions.sendingAria': 'Sending message',
   'chat.chatInput.actions.queueMessageAria': 'Queue message',
   'chat.chatInput.actions.stopGeneratingAria': 'Stop generating',
   'chat.chatInput.focusMode.toggleAria': 'Toggle focus mode',

@@ -2106,6 +2106,7 @@ export const dict = {
   'chat.chatInput.actions.sendMessageAria': 'Nachricht senden',
   'chat.chatInput.actions.enterToSend': 'Enter sendet',
   'chat.chatInput.actions.shiftEnterToSend': 'Shift+Enter sendet',
+  'chat.chatInput.actions.sendingAria': 'Nachricht wird gesendet',
   'chat.chatInput.actions.queueMessageAria': 'Nachricht in die Warteschlange stellen',
   'chat.chatInput.actions.stopGeneratingAria': 'Generierung stoppen',
   'chat.chatInput.focusMode.toggleAria': 'Fokusmodus umschalten',
