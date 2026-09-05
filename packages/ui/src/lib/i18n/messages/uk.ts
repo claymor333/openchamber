@@ -2300,6 +2300,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.chatInput.actions.modelAgentSettings": "Параметри моделі та агента",
   "chat.chatInput.actions.sendMessageAria": "Надіслати повідомлення",
   'chat.chatInput.actions.enterToSend': 'Enter надсилає',
+  'chat.chatInput.actions.shiftEnterToSend': 'Shift+Enter надсилає',
   'chat.chatInput.actions.enterToSendHint': 'Після зміни цей параметр керує поведінкою Enter і Shift+Enter на всіх поверхнях. До цього кожна поверхня зберігає свою поточну поведінку.',
   "chat.chatInput.actions.queueMessageAria": "Поставити повідомлення в чергу",
   "chat.chatInput.actions.stopGeneratingAria": "Припинити генерацію",

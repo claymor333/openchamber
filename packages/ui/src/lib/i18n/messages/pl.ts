@@ -1255,6 +1255,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.chatInput.actions.queueMessageAria': 'Queue message',
   'chat.chatInput.actions.sendMessageAria': 'Send message',
   'chat.chatInput.actions.enterToSend': 'Enter wysyła',
+  'chat.chatInput.actions.shiftEnterToSend': 'Shift+Enter wysyła',
   'chat.chatInput.actions.enterToSendHint': 'Po zmianie ustawienie steruje działaniem klawiszy Enter i Shift+Enter na każdej powierzchni. Do tego czasu każda powierzchnia zachowuje dotychczasowe działanie.',
   'chat.chatInput.actions.stopGeneratingAria': 'Stop generating',
   'chat.chatInput.branch': 'Gałąź',
