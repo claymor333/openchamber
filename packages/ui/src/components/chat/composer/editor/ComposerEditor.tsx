@@ -98,6 +98,8 @@ export interface ComposerEditorProps {
      */
     autoCorrect?: ComposerAutoCorrect;
     autoCapitalize?: 'none' | 'sentences';
+    /** Retain the untouched key policy before a mobile user opts in. */
+    preserveDeferredEnterShift?: boolean;
     /** Fill the available height instead of growing with the content. */
     fillContainer?: boolean;
     /** Lines of text shown before the editor starts scrolling. */
@@ -231,7 +233,7 @@ export const ComposerEditor = React.forwardRef<ComposerEditorHandle, ComposerEdi
                 any: (_view, event) => {
                     // A deferred Enter loses its modifiers in the re-dispatch.
                     if (event.key === 'Enter' && isDeferredSyntheticEvent(event)) {
-                        const preserveShift = handlersRef.current.autoCapitalize === 'none';
+                        const preserveShift = handlersRef.current.preserveDeferredEnterShift !== false;
                         restoreDeferredEnterModifiers(event, lastRealEnterModsRef.current, { preserveShift });
                         clearDeferredEnterModifiers();
                     }

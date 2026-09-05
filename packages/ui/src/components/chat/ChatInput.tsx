@@ -3255,6 +3255,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                                 editable={Boolean(currentSessionId || newSessionDraftOpen)}
                                 autoCorrect={composerAutoCorrect({ isMobile })}
                                 autoCapitalize={isMobile ? 'sentences' : 'none'}
+                                preserveDeferredEnterShift={!enterToSendConfigured || !isMobile}
                                 spellCheck={isMobile || inputSpellcheckEnabled}
                                 fillContainer={isComposerExpanded}
                                 maxLines={isMobile ? MAX_MOBILE_COMPOSER_LINES : MAX_VISIBLE_COMPOSER_LINES}

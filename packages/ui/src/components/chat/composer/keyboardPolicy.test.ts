@@ -26,11 +26,19 @@ const enterPolicyCases: Array<[string, Partial<EnterKeyPolicyInput>, boolean]> =
         ['configured enabled Shift+Enter inserts a newline', { enterToSendConfigured: true, enterToSend: true, shiftKey: true }, false],
         ['configured disabled Enter inserts a newline', { enterToSendConfigured: true, enterToSend: false }, false],
         ['configured disabled Shift+Enter sends', { enterToSendConfigured: true, enterToSend: false, shiftKey: true }, true],
-        ['Ctrl+Enter always sends', { isMobile: true, isDesktopExpanded: true, shiftKey: true, ctrlKey: true }, true],
-        ['Meta+Enter always sends', { isMobile: true, isDesktopExpanded: true, shiftKey: true, metaKey: true }, true],
+        ['configured Ctrl+Enter always sends', { enterToSendConfigured: true, isMobile: true, isDesktopExpanded: true, shiftKey: true, ctrlKey: true }, true],
+        ['configured Meta+Enter always sends', { enterToSendConfigured: true, isMobile: true, isDesktopExpanded: true, shiftKey: true, metaKey: true }, true],
 ];
 
 describe('Enter key policy', () => {
+    for (const surface of [{}, { isMobile: true }, { isDesktopExpanded: true }]) {
+        for (const modifiers of [{}, { ctrlKey: true }, { metaKey: true }, { ctrlKey: true, metaKey: true }]) {
+            test(`untouched Shift+Enter does not submit: ${JSON.stringify({ ...surface, ...modifiers })}`, () => {
+                expect(shouldSubmitEnter(policy({ ...surface, ...modifiers, shiftKey: true }))).toBe(false);
+            });
+        }
+    }
+
     for (const [name, overrides, expected] of enterPolicyCases) {
         test(name, () => {
         expect(shouldSubmitEnter(policy(overrides))).toBe(expected);
@@ -46,6 +54,14 @@ const deferredModifierCases: Array<[string, EnterModifierState]> = [
 ];
 
 describe('deferred Enter modifiers', () => {
+    for (const modifiers of [{ shiftKey: true, ctrlKey: true, metaKey: false }, { shiftKey: true, ctrlKey: false, metaKey: true }]) {
+        test(`untouched mobile deferred Shift does not submit: ${JSON.stringify(modifiers)}`, () => {
+            const event = { shiftKey: false, ctrlKey: false, metaKey: false };
+            restoreDeferredEnterModifiers(event, modifiers, { preserveShift: true });
+            expect(shouldSubmitEnter(policy({ isMobile: true, ...event }))).toBe(false);
+        });
+    }
+
     for (const [name, modifiers] of deferredModifierCases) {
         test(`preserves ${name}`, () => {
         const event = { shiftKey: false, ctrlKey: false, metaKey: false };
