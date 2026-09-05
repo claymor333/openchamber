@@ -126,6 +126,12 @@ export const normalizeTunnelRequest = async (
   const url = ABSOLUTE_URL_PATTERN.test(urlValue) ? new URL(urlValue) : new URL(urlValue, TUNNEL_PARSE_BASE);
   const { body, contentType } = await resolveBody(bodySource);
   if (contentType && !headers.has('content-type')) headers.set('content-type', contentType);
+  // Advertise gzip so the relay host re-compresses large JSON/text bodies before
+  // sending them across the tunnel (the tunnel carries bodies decompressed, and
+  // the relay is bandwidth/latency-bound). Only when we can decompress back.
+  if (!headers.has('accept-encoding') && typeof DecompressionStream !== 'undefined') {
+    headers.set('accept-encoding', 'gzip');
+  }
 
   const headerRecord: Record<string, string> = {};
   headers.forEach((value, key) => {
