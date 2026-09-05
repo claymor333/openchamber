@@ -4,6 +4,7 @@ import '@/styles/fonts';
 import '@/index.css';
 import '@/lib/debug';
 import { DiffWorkerProvider } from '@/contexts/DiffWorkerProvider';
+import { FireworksProvider } from '@/contexts/FireworksContext';
 import { ThemeProvider } from '@/components/providers/ThemeProvider';
 import { ThemeSystemProvider } from '@/contexts/ThemeSystemContext';
 import type { RuntimeAPIs } from '@/lib/api/types';
@@ -47,7 +48,12 @@ export function renderMobileApp(apis: RuntimeAPIs) {
   // Stamp the surface before anything else reads it: perf tuning, sync paging,
   // and device info all key off isMobileSurfaceRuntime(), and without the stamp
   // a wide native device (iPad landscape) would fall out of the mobile branch.
-  window.__OPENCHAMBER_SURFACE__ = 'mobile';
+  // EXCEPT when the URL explicitly requests the desktop surface — the context
+  // panel's embedded session-chat iframe loads with `?surface=desktop` so the
+  // desktop App renders just the chat; stamping 'mobile' would override that.
+  if (new URLSearchParams(window.location.search).get('surface') !== 'desktop') {
+    window.__OPENCHAMBER_SURFACE__ = 'mobile';
+  }
   preloadMarkdownRenderer();
   initializeSharedPreferences();
 
@@ -89,7 +95,9 @@ export function renderMobileApp(apis: RuntimeAPIs) {
         <ThemeSystemProvider>
           <ThemeProvider>
             <DiffWorkerProvider>
-              {isNativeShell ? app : <SessionAuthGate>{app}</SessionAuthGate>}
+              <FireworksProvider>
+                {isNativeShell ? app : <SessionAuthGate>{app}</SessionAuthGate>}
+              </FireworksProvider>
             </DiffWorkerProvider>
           </ThemeProvider>
         </ThemeSystemProvider>

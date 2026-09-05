@@ -124,6 +124,10 @@ export const WalkthroughView = ({ directory: rootDirectory, visible = true }: Wa
   const handleTocResizeStart = useCallback(
     (event: React.PointerEvent<HTMLDivElement>) => {
       event.preventDefault();
+      // Capture the pointer so drags that drift off the 4px handle (a finger
+      // does, almost immediately) keep delivering moves until release — same
+      // touch behavior the iPad sidebar resize handles use.
+      event.currentTarget.setPointerCapture(event.pointerId);
       const startX = event.clientX;
       const startWidth = tocWidth;
       const maxWidth = Math.max(TOC_MIN_WIDTH, (rootRef.current?.clientWidth ?? 0) * TOC_MAX_FRACTION);
@@ -845,8 +849,10 @@ export const WalkthroughView = ({ directory: rootDirectory, visible = true }: Wa
                   onPointerDown={handleTocResizeStart}
                   onKeyDown={handleTocResizeKey}
                   className={cn(
-                    'group relative w-1 shrink-0 cursor-col-resize',
-                    'before:absolute before:inset-y-0 before:-left-1 before:-right-1 before:content-[\'\']',
+                    // touch-none: let pointermove drive the resize instead of
+                    // letting the browser claim the gesture for scrolling.
+                    'group relative w-1 shrink-0 cursor-col-resize touch-none',
+                    'before:absolute before:inset-y-0 before:-left-3 before:-right-3 before:content-[\'\']',
                     'hover:bg-interactive-selection focus-visible:bg-interactive-selection focus-visible:outline-none',
                     draggingToc && 'bg-interactive-selection'
                   )}

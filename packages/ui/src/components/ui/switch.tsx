@@ -20,6 +20,19 @@ const Switch = React.forwardRef<
     style={{ width: '36px', height: '20px', minWidth: '36px', minHeight: '20px' }}
     {...props}
     aria-busy={loading || undefined}
+    onClick={(event) => {
+      if (props.disabled || props.readOnly) return;
+      // Drive the toggle from the source of truth instead of Base UI's hidden
+      // checkbox: Base UI flips it by dispatching a synthetic
+      // PointerEvent('click'), which does not activate a React-controlled
+      // checkbox in the WebView Chromium used on the tablets, so the switch
+      // never toggles on touch. mergeProps runs handlers right-to-left and this
+      // one sits right of Base UI's internal click, so prevent the internal
+      // dispatch from running too — no double toggle where it would work.
+      (props.onCheckedChange as ((checked: boolean) => void) | undefined)?.(!props.checked);
+      event.preventDefault();
+      (event as unknown as { preventBaseUIHandler?: () => void }).preventBaseUIHandler?.();
+    }}
     ref={ref}
   >
     <BaseSwitch.Thumb

@@ -3,12 +3,15 @@ import React from 'react';
 import { Icon } from '@/components/icon/Icon';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
+import { useGitBranchLabel } from '@/stores/useGitStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSession } from '@/sync/sync-context';
 
 import { MobileSessionMetadataButton } from './MobileSessionMetadata';
 import { MobileSessionSwitcher } from './MobileSessionSwitcher';
+import { useUIStore } from '@/stores/useUIStore';
+import { useHybridTabletLayout } from '@/hooks/useHybridTabletLayout';
 
 export const MobileHeader: React.FC<{
   onOpenSessions: () => void;
@@ -30,12 +33,26 @@ export const MobileHeader: React.FC<{
   const effectiveDirectory = currentSessionDirectory || currentDirectory;
   const currentSession = useSession(currentSessionId, effectiveDirectory || undefined);
   const isNewSessionDraftOpen = useSessionUIStore((state) => Boolean(state.newSessionDraft?.open));
+  const { isHybridTablet } = useHybridTabletLayout();
+  const workStatusPanelEnabled = useUIStore((state) => state.workStatusPanelEnabled);
+  const setWorkStatusPanelEnabled = useUIStore((state) => state.setWorkStatusPanelEnabled);
 
   const sessionTitle = currentSession?.title?.trim();
-  // Single-line title, desktop-style: session title, or the "New session"
-  // placeholder on the draft screen. No project/branch metadata line.
+  // Session title, or the "New session" placeholder on the draft screen.
+  // The branch renders as a second line beneath it.
   const primaryLabel = sessionTitle
     || (currentSessionId ? t('mobile.sessions.untitled') : t('sessions.switcher.draftTitle'));
+
+  // Branch shown beneath the session name: live git label for the session's
+  // directory first, then the branch captured in the session↔worktree
+  // metadata, mirroring the desktop Header's resolution order.
+  const gitBranchForDirectory = useGitBranchLabel(effectiveDirectory || null);
+  const sessionWorktreeBranch = useSessionUIStore((state) => {
+    if (!currentSessionId) return null;
+    return state.worktreeMetadata.get(currentSessionId)?.branch?.trim() ?? null;
+  });
+  const currentBranchLabel = gitBranchForDirectory || sessionWorktreeBranch;
+  const showBranchLine = Boolean(currentBranchLabel && currentSessionId);
 
   React.useEffect(() => {
     setMetadataOpen(false);
@@ -96,17 +113,25 @@ export const MobileHeader: React.FC<{
             onClick={toggleSwitcher}
             style={{ touchAction: 'manipulation' }}
           >
-            <span className="flex min-w-0 items-center gap-1">
-              <span className="block min-w-0 truncate typography-ui-label text-foreground">{primaryLabel}</span>
-              {/* Discoverability: the chevron marks the title as a disclosure
-                  trigger and flips while the switcher is open. */}
-              <Icon
-                name="arrow-down-s"
-                className={cn(
-                  'size-4 shrink-0 text-muted-foreground transition-transform duration-150',
-                  switcherOpen && 'rotate-180',
-                )}
-              />
+            <span className="flex min-w-0 flex-col items-stretch gap-0.5">
+              <span className="flex min-w-0 items-center gap-1">
+                <span className="block min-w-0 truncate typography-ui-label text-foreground">{primaryLabel}</span>
+                {/* Discoverability: the chevron marks the title as a disclosure
+                    trigger and flips while the switcher is open. */}
+                <Icon
+                  name="arrow-down-s"
+                  className={cn(
+                    'size-4 shrink-0 text-muted-foreground transition-transform duration-150',
+                    switcherOpen && 'rotate-180',
+                  )}
+                />
+              </span>
+              {showBranchLine ? (
+                <span className="flex min-w-0 items-center gap-1 truncate typography-micro text-[10.5px] font-normal leading-tight text-muted-foreground/75">
+                  <Icon name="git-branch" className="h-3 w-3 flex-shrink-0 text-muted-foreground/70" />
+                  <span className="truncate">{currentBranchLabel}</span>
+                </span>
+              ) : null}
             </span>
           </button>
 
@@ -121,6 +146,35 @@ export const MobileHeader: React.FC<{
             effectiveDirectory={effectiveDirectory}
             isNewSessionDraftOpen={isNewSessionDraftOpen}
           />
+
+          {/* Work-status panel toggle, next to the context donut. Only on the
+              hybrid tablet: the panel cannot mount on a phone, where the
+              button would toggle nothing visible. On the hybrid it mirrors the
+              desktop header's on state — the panel is on by default, so the
+              button dims when off rather than filling when on. */}
+          {isHybridTablet ? (
+            <button
+              type="button"
+              data-work-status-toggle="true"
+              className={cn(
+                'flex size-10 shrink-0 items-center justify-center rounded-full transition-colors hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
+                workStatusPanelEnabled
+                  ? 'text-foreground hover:text-foreground'
+                  : 'text-muted-foreground/50 hover:text-foreground',
+              )}
+              aria-pressed={workStatusPanelEnabled}
+              aria-label={t('header.workStatusPanel.toggleAria')}
+              title={workStatusPanelEnabled ? t('header.workStatusPanel.hide') : t('header.workStatusPanel.show')}
+              onClick={() => {
+                setMetadataOpen(false);
+                setSwitcherOpen(false);
+                setWorkStatusPanelEnabled(!workStatusPanelEnabled);
+              }}
+              style={{ touchAction: 'manipulation' }}
+            >
+              <Icon name="list-indefinite" className="size-5" />
+            </button>
+          ) : null}
 
           <button
             type="button"

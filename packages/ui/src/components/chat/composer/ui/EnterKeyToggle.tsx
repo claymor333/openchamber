@@ -1,4 +1,10 @@
-/** Toggle whether Enter or Shift+Enter sends the composer message. */
+/**
+ * Composer Enter-key toggle: switches between "Enter sends" and "Shift+Enter
+ * sends" (and the inverse newline behavior). Replaces the old settings-page
+ * "Enter sends with a keyboard attached" checkbox, which tried to infer the
+ * input source and got GBoard's hardware-keyboard strip wrong. This is a plain
+ * user choice, shown where it matters — next to the composer's send controls.
+ */
 
 import React from 'react';
 

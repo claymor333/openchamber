@@ -895,6 +895,7 @@ interface UIStore {
   maxLastMessageLength: number; // chars — truncate {last_message} when summarization is off
 
   showTerminalQuickKeysOnDesktop: boolean;
+  hybridTabletUIEnabled: boolean;
   /** Header session tabs (web/desktop), opt-in. Off keeps the plain session title. */
   sessionTabsEnabled: boolean;
   persistChatDraft: boolean;
@@ -917,6 +918,7 @@ interface UIStore {
   /** Active tab of the project context panel (notes/todos/plans). */
   projectContextTab: string;
   inputSpellcheckEnabled: boolean;
+  enterToSend: boolean;
   largeTextPasteBehavior: LargeTextPasteBehavior;
   enterToSend: boolean;
   enterToSendConfigured: boolean;
@@ -1080,6 +1082,7 @@ interface UIStore {
   setNativeNotificationsEnabled: (value: boolean) => void;
   setNotificationMode: (mode: 'always' | 'hidden-only') => void;
   setShowTerminalQuickKeysOnDesktop: (value: boolean) => void;
+  setHybridTabletUIEnabled: (value: boolean) => void;
   setSessionTabsEnabled: (value: boolean) => void;
   setNotifyOnSubtasks: (value: boolean) => void;
   setDockBadgeEnabled: (value: boolean) => void;
@@ -1103,6 +1106,7 @@ interface UIStore {
   setProjectContextSidebarWidth: (width: number) => void;
   setProjectContextTab: (value: string) => void;
   setInputSpellcheckEnabled: (value: boolean) => void;
+  setEnterToSend: (value: boolean) => void;
   setLargeTextPasteBehavior: (value: LargeTextPasteBehavior) => void;
   setEnterToSend: (value: boolean) => void;
   setEnterToSendConfigured: (value: boolean) => void;
@@ -1263,6 +1267,7 @@ export const useUIStore = create<UIStore>()(
         maxLastMessageLength: 250,
 
         showTerminalQuickKeysOnDesktop: false,
+        hybridTabletUIEnabled: false,
         sessionTabsEnabled: false,
         persistChatDraft: true,
         showOpenCodeUpdateNotifications: !isWindowsArm64(),
@@ -1274,6 +1279,7 @@ export const useUIStore = create<UIStore>()(
         projectContextSidebarWidth: 168,
         projectContextTab: 'notes',
         inputSpellcheckEnabled: false,
+        enterToSend: true,
         largeTextPasteBehavior: DEFAULT_LARGE_TEXT_PASTE_BEHAVIOR,
         enterToSend: false,
         enterToSendConfigured: false,
@@ -2486,6 +2492,9 @@ export const useUIStore = create<UIStore>()(
           set({ showTerminalQuickKeysOnDesktop: value });
         },
 
+        setHybridTabletUIEnabled: (value) => {
+          set({ hybridTabletUIEnabled: value });
+        },
         setSessionTabsEnabled: (value) => {
           set({ sessionTabsEnabled: value });
         },
@@ -2547,6 +2556,9 @@ export const useUIStore = create<UIStore>()(
         },
         setInputSpellcheckEnabled: (value) => {
           set({ inputSpellcheckEnabled: value });
+        },
+        setEnterToSend: (value) => {
+          set({ enterToSend: value });
         },
         setLargeTextPasteBehavior: (value) => {
           set({ largeTextPasteBehavior: normalizeLargeTextPasteBehavior(value) });
@@ -2957,6 +2969,7 @@ export const useUIStore = create<UIStore>()(
           nativeNotificationsEnabled: state.nativeNotificationsEnabled,
           notificationMode: state.notificationMode,
           showTerminalQuickKeysOnDesktop: state.showTerminalQuickKeysOnDesktop,
+          hybridTabletUIEnabled: state.hybridTabletUIEnabled,
           sessionTabsEnabled: state.sessionTabsEnabled,
           notifyOnSubtasks: state.notifyOnSubtasks,
           dockBadgeEnabled: state.dockBadgeEnabled,
@@ -2976,6 +2989,7 @@ export const useUIStore = create<UIStore>()(
           agentMemoryViewedAt: state.agentMemoryViewedAt,
           projectContextSidebarWidth: state.projectContextSidebarWidth,
           inputSpellcheckEnabled: state.inputSpellcheckEnabled,
+          enterToSend: state.enterToSend,
           largeTextPasteBehavior: state.largeTextPasteBehavior,
           enterToSend: state.enterToSend,
           enterToSendConfigured: state.enterToSendConfigured,

@@ -500,12 +500,12 @@ export const useKeyboardShortcuts = () => {
         if (!state.isMobile && effectiveDirectory) {
           const directory = normalizeContextPanelDirectoryKey(effectiveDirectory);
           const panel = state.contextPanelByDirectory[directory];
-          const visibleSurfaces = getVisibleContextRailSurfaces({
-            railOrder: state.contextRailOrder,
-            hiddenSurfaces: state.contextRailHiddenSurfaces,
-            planModeEnabled: useFeatureFlagsStore.getState().planModeEnabled,
-            isVSCode: isVSCodeRuntime(),
-            screenWidth: window.innerWidth,
+            const visibleSurfaces = getVisibleContextRailSurfaces({
+              railOrder: state.contextRailOrder,
+              hiddenSurfaces: state.contextRailHiddenSurfaces,
+              planModeEnabled: useFeatureFlagsStore.getState().planModeEnabled,
+              isVSCode: isVSCodeRuntime(),
+              screenWidth: window.innerWidth,
             tabs: panel?.tabs ?? [],
             linearConnected: useLinearAuthStore.getState().status?.connected === true,
             githubConnected: useGitHubAuthStore.getState().status?.connected === true,
