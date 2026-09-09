@@ -1,17 +1,9 @@
 import { z } from 'zod';
-import type { ProjectEntry, RuntimeAPIs, TerminalShell } from '@/lib/api/types';
+import type { RuntimeAPIs } from '@/lib/api/types';
 import { getInjectedBootOutcome } from '@/lib/desktopBoot';
-import type { DraftStarterRef } from '@/lib/draftStarters';
-import type { MobileKeyboardMode } from '@/lib/mobileKeyboardMode';
 import { getRuntimeApiBaseUrl, getRuntimeKey } from '@/lib/runtime-switch';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { isVSCodeBootstrapPresent } from '@/lib/vscodeBootstrap';
-
-type ManagedRemoteTunnelPreset = {
-  id: string;
-  name: string;
-  hostname: string;
-};
 
 export type UpdateInfo = {
   available: boolean;
@@ -32,13 +24,7 @@ export type UpdateProgress = {
   total?: number;
 };
 
-export type SkillCatalogConfig = {
-  id: string;
-  label: string;
-  source: string;
-  subpath?: string;
-  gitIdentityId?: string;
-};
+export type { SkillCatalogConfig } from '@/lib/settings/parsers';
 
 export type DesktopWindowControlsPosition = 'left' | 'right';
 export type DesktopWindowControlsSide = 'left' | 'right';
