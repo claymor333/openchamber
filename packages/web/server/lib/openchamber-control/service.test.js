@@ -124,6 +124,35 @@ describe('OpenChamber control service', () => {
     expect(sessionService.create).toHaveBeenCalledWith({ directory: '/repo', title: 'From tool' });
   });
 
+  it('scopes a role key to the calling session when creating a managed child', async () => {
+    const { service, sessionService } = createService();
+    await service.execute('session.create', {
+      directory: '/repo',
+      roleKey: 'review:tests',
+      contextSessionId: 'ses_root',
+      prompt: 'Review the tests',
+    }, '/repo');
+
+    expect(sessionService.create).toHaveBeenCalledWith({
+      directory: '/repo',
+      prompt: 'Review the tests',
+      roleKey: 'review:tests',
+      parentSessionId: 'ses_root',
+    });
+  });
+
+  it('rejects an invalid role key before creating a managed child', async () => {
+    const { service, sessionService } = createService();
+
+    await expect(service.execute('session.create', {
+      directory: '/repo',
+      roleKey: '   ',
+      contextSessionId: 'ses_root',
+    }, '/repo')).rejects.toThrow('roleKey must be a non-empty string');
+
+    expect(sessionService.create).not.toHaveBeenCalled();
+  });
+
   it.each([
     ['session.send', 'send'],
     ['session.fork', 'fork'],

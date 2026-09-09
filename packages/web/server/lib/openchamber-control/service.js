@@ -265,6 +265,10 @@ export const createOpenChamberControlService = (dependencies) => {
     if (input.timeout !== undefined && input.wait !== true) throw new OpenChamberControlError('timeout requires wait', 400);
     if (input.lastAssistant === true && input.wait !== true) throw new OpenChamberControlError('lastAssistant requires wait', 400);
     const sessionID = asNonEmptyString(input.sessionId);
+    const roleKey = asNonEmptyString(input.roleKey);
+    if (action === 'session.create' && input.roleKey !== undefined && input.roleKey !== null && !roleKey) {
+      throw new OpenChamberControlError('roleKey must be a non-empty string', 400);
+    }
     let directory = asNonEmptyString(input.directory) || (!input.projectId ? asNonEmptyString(contextDirectory) : null);
     if (sessionID && action !== 'session.create' && !asNonEmptyString(input.directory) && !input.projectId) {
       const resolvedSessionDirectory = await resolveSessionDirectory(sessionID);
@@ -287,6 +291,12 @@ export const createOpenChamberControlService = (dependencies) => {
       } } : {}),
       ...(typeof input.setUpstream === 'boolean' ? { setUpstream: input.setUpstream } : {}),
       ...(asNonEmptyString(input.messageId) ? { messageId: input.messageId.trim() } : {}),
+      ...(action === 'session.create' && roleKey
+        ? { roleKey: roleKey.trim() }
+        : {}),
+      ...(action === 'session.create' && asNonEmptyString(input.contextSessionId)
+        ? { parentSessionId: input.contextSessionId.trim() }
+        : {}),
     };
     const startedAt = now();
     let result;
