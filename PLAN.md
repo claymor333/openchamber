@@ -21,3 +21,12 @@ worktree untouched.
   files.
 - Run formatting/diff checks and focused tests for each integrated area.
 - Record remaining refresh-on-send work in the final report.
+
+## Result
+
+- Integrated the four safe fix areas and the repaired refresh send/relay work.
+- Preserved CRLF event-frame normalization while resolving the relay merge.
+- Restored pending BTW flow, early duplicate-submit locking, and draft
+  preservation during in-flight sends.
+- Focused tests, UI/web type checks, and diff checks pass.
+- UI lint passes with one pre-existing warning in `MobileChangesSurface.tsx`.
