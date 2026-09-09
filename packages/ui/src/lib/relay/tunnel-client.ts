@@ -174,10 +174,9 @@ export interface RelayTunnelClientOptions {
    *  answers in milliseconds; on timeout the attempt is failed over and the
    *  request waits for a fresh channel. Default 3_000. */
   probeTimeoutMs?: number;
-  /** Max wait (ms) for an ordinary GET request's response head (HttpResponse or
-   *  StreamEnd) after its HttpRequest was written. POST and event-stream
-   *  requests are excluded because their response head may legitimately be
-   *  delayed. Default 30_000. */
+  /** Max wait (ms) for an ordinary GET response head after its HttpRequest was
+   *  written. POST and event-stream requests are excluded. On timeout the
+   *  request fails as an ambiguous transport failure. Default 30_000. */
   headTimeoutMs?: number;
 }
 
@@ -597,7 +596,7 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
       probeActivityRef = (signal?: AbortSignal) => {
         if (channelObj.dead) return Promise.resolve();
         if (signal?.aborted) return Promise.reject(abortError());
-        // Fresh inbound traffic proves the wire alive — dispatching is safe.
+        // Fresh traffic proves the wire alive — dispatching is safe, no probe.
         if (Date.now() - lastInboundActivityAt < probeStaleAfterMs) return Promise.resolve();
         // Only the first waiter sends the ping; concurrent requests piggyback on
         // the same in-flight probe.
@@ -989,6 +988,7 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
       // Bound a silently-lost response: if the head never arrives, fail as an
       // ambiguous transport failure (dispatched, outcome unknown) rather than
       // hanging the caller forever. Cleared on head receipt or any failure.
+      // POST responses and event streams may legitimately delay their heads.
       const acceptsEventStream = (request.headers.accept ?? '').toLowerCase().includes('text/event-stream');
       const isEventStreamPath = request.path.includes('/event');
       const shouldApplyHeadTimeout = request.method === 'GET' && !acceptsEventStream && !isEventStreamPath;

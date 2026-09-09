@@ -37,7 +37,7 @@ const renderButtons = (overrides: Partial<SendButtonProps> = {}): string =>
     );
 
 describe('ComposerActionButtons send state', () => {
-    test('idle: "Send message" aria-label, enabled, send icon, no spinner', () => {
+    test('idle renders an enabled send button', () => {
         const markup = renderButtons();
         expect(markup).toContain('aria-label="Send message"');
         expect(markup).not.toContain('disabled=""');
@@ -46,7 +46,7 @@ describe('ComposerActionButtons send state', () => {
         expect(markup).not.toContain('animate-spin');
     });
 
-    test('sending: spinner replaces the send icon, button disabled, "Sending message" aria-label', () => {
+    test('sending renders a disabled spinner button', () => {
         const markup = renderButtons({ isSending: true });
         expect(markup).toContain('aria-label="Sending message"');
         expect(markup).toContain('disabled=""');
@@ -61,7 +61,7 @@ describe('ComposerActionButtons send state', () => {
         expect(markup).not.toContain('animate-spin');
     });
 
-    test('sending on mobile keeps the spinner, disabled state, and sends via click handler', () => {
+    test('sending on mobile keeps the spinner and disabled state', () => {
         const markup = renderButtons({ isMobile: true, isSending: true });
         expect(markup).toContain('type="button"');
         expect(markup).toContain('aria-label="Sending message"');

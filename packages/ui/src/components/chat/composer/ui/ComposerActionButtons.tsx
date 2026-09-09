@@ -67,11 +67,9 @@ export const ComposerActionButtons = React.memo(function ComposerActionButtons(p
                         ? 'text-primary hover:text-primary'
                         : 'opacity-30'
             )}
-            aria-label={
-                isSending
-                    ? t('chat.chatInput.actions.sendingAria')
-                    : t('chat.chatInput.actions.sendMessageAria')
-            }
+            aria-label={isSending
+                ? t('chat.chatInput.actions.sendingAria')
+                : t('chat.chatInput.actions.sendMessageAria')}
         >
             {isSending ? (
                 <Icon name="loader-4" className={cn(sendIconSizeClass, 'animate-spin')} />
@@ -125,7 +123,7 @@ export const ComposerActionButtons = React.memo(function ComposerActionButtons(p
     && prev.footerIconButtonClass === next.footerIconButtonClass
     && prev.sendIconSizeClass === next.sendIconSizeClass
     && prev.stopIconSizeClass === next.stopIconSizeClass
-    &&     prev.canSend === next.canSend
+    && prev.canSend === next.canSend
     && prev.isSending === next.isSending
     && prev.canAbort === next.canAbort
     && prev.hasContent === next.hasContent

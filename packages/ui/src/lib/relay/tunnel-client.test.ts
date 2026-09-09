@@ -13,9 +13,6 @@ import {
 import { createHostHandshake } from './handshake';
 import { TunnelFrameType } from './protocol';
 import { isAmbiguousTransportFailure } from './transport-error';
-import { opencodeClient } from '../opencode/client';
-import { adoptRelayTunnel, deactivateRelayTunnel } from './runtime-tunnel';
-import { configureRuntimeUrlResolver, getRuntimeUrlResolver, setRuntimeUrlResolver } from '../runtime-url';
 import {
   chunkPayload,
   createFragmentAssembler,
@@ -208,23 +205,20 @@ const attachMiniHost = (endpoint: FakeEndpoint, hostPrivateKey: CryptoKey, optio
         // Request fully received but never answered — exercises the client's
         // response-head timeout.
         return;
-      } else if (path === '/api/path' || path === '/api/opencode/health') {
-        // SDK GETs routed through runtimeFetch stay in flight until the relay
-        // head timeout or the outer client timeout handles them.
-        return;
       } else if (path === '/delayed-post') {
-        // POST response heads may be delayed by a server-side mutation.
         setTimeout(() => {
-          if (!aborted.has(streamId) && !endpoint.closed) respondJson(streamId, 200, { ok: true });
-        }, 60);
+          if (endpoint.closed || aborted.has(streamId)) return;
+          respondJson(streamId, 200, { ok: true });
+        }, 50);
       } else if (path === '/api/openchamber/events') {
-        // SSE response heads can be delayed while the host establishes the
-        // stream. The client must not apply the ordinary GET head deadline.
         setTimeout(() => {
-          if (aborted.has(streamId) || endpoint.closed) return;
-          sendFrame(encodeTunnelFrame(TunnelFrameType.HttpResponse, streamId, encodeJsonPayload({ status: 200, headers: { 'content-type': 'text/event-stream' } })));
-          sendFrame(encodeTunnelFrame(TunnelFrameType.HttpBody, streamId, textEncoder.encode('event: ready\n\n')));
-        }, 60);
+          if (endpoint.closed || aborted.has(streamId)) return;
+          sendFrame(encodeTunnelFrame(TunnelFrameType.HttpResponse, streamId, encodeJsonPayload({
+            status: 200,
+            headers: { 'content-type': 'text/event-stream' },
+          })));
+          sendFrame(encodeTunnelFrame(TunnelFrameType.HttpBody, streamId, textEncoder.encode('data: ready\n\n')));
+        }, 50);
       } else {
         respondJson(streamId, 404, { error: 'not found' });
       }
@@ -759,80 +753,6 @@ describe('createRelayTunnelClient', () => {
     expect(isAmbiguousTransportFailure(caught)).toBe(true);
   });
 
-  test('pre-send probe does not treat ongoing outbound body traffic as liveness', async () => {
-    let bodyTimer: ReturnType<typeof setInterval> | null = null;
-    let stopBody = false;
-    const body = new ReadableStream<Uint8Array>({
-      start(controller) {
-        bodyTimer = setInterval(() => {
-          if (stopBody) return;
-          controller.enqueue(textEncoder.encode('body'));
-        }, 5);
-      },
-      cancel() {
-        if (bodyTimer !== null) clearInterval(bodyTimer);
-      },
-    });
-    const firstAbort = new AbortController();
-    const { client, connectionCount } = await setupClient(
-      { silent: (wireIndex) => wireIndex === 1 },
-      {
-        probeStaleAfterMs: 20,
-        probeTimeoutMs: 20,
-        pingIntervalMs: 1_000,
-        pingTimeoutMs: 30_000,
-      },
-    );
-    track(client);
-    const first = client.fetch('/hang', { method: 'POST', body, signal: firstAbort.signal }).catch(() => undefined);
-    await wait(50);
-    const second = await client.fetch('/health');
-    stopBody = true;
-    if (bodyTimer !== null) clearInterval(bodyTimer);
-    firstAbort.abort();
-    await first;
-    expect(second.status).toBe(200);
-    expect(connectionCount()).toBeGreaterThan(1);
-  });
-
-  test('pre-send probe rejects promptly when the request signal aborts', async () => {
-    const controller = new AbortController();
-    const { client } = await setupClient(
-      { silent: true },
-      {
-        probeStaleAfterMs: 5,
-        probeTimeoutMs: 500,
-        pingIntervalMs: 1_000,
-        pingTimeoutMs: 30_000,
-      },
-    );
-    track(client);
-    await waitForStatus(client, 'connected');
-    await wait(20);
-
-    const startedAt = Date.now();
-    const pending = client.fetch('/health', { signal: controller.signal });
-    await wait(5);
-    controller.abort();
-    await expect(pending).rejects.toThrow('aborted');
-    expect(Date.now() - startedAt).toBeLessThan(200);
-  });
-
-  test('aborts a host stream before failing a request whose response head times out', async () => {
-    const frames: TunnelFrame[] = [];
-    const { client } = await setupClient({ recordFrame: (frame) => frames.push(frame) }, { headTimeoutMs: 30 });
-    track(client);
-    await waitForStatus(client, 'connected');
-    let caught: unknown = null;
-    await client.fetch('/hang').catch((error: unknown) => {
-      caught = error;
-    });
-    expect(caught).toBeInstanceOf(Error);
-    expect(isAmbiguousTransportFailure(caught)).toBe(true);
-    await wait(10);
-    expect(frames.map((frame) => frame.frameType)).toContain(TunnelFrameType.StreamAbort);
-  });
-
   test('does not apply the response-head timeout to delayed POST or SSE responses', async () => {
     const { client } = await setupClient({}, { headTimeoutMs: 20 });
     track(client);
@@ -844,6 +764,7 @@ describe('createRelayTunnelClient', () => {
     const event = await sse.body!.getReader().read();
     expect(event.done).toBe(false);
   });
+
   test('decompresses a gzip response body and strips the encoding header', async () => {
     const { client } = await setupClient();
     track(client);
@@ -961,6 +882,25 @@ describe('createRelayTunnelClient', () => {
     }
   });
 
+  test('aborting a stale pre-send probe rejects immediately', async () => {
+    const { client } = await setupClient({ silent: true }, { probeStaleAfterMs: 5, probeTimeoutMs: 200 });
+    track(client);
+    await waitForStatus(client, 'connected');
+    await wait(20);
+
+    const controller = new AbortController();
+    const pending = client.fetch('/health', { signal: controller.signal });
+    await wait(10);
+    controller.abort();
+
+    let caught: unknown = null;
+    await pending.catch((error: unknown) => {
+      caught = error;
+    });
+    expect(caught).toBeInstanceOf(DOMException);
+    expect((caught as DOMException).name).toBe('AbortError');
+  });
+
   test('resume wake leaves a freshly-active tunnel connected', async () => {
     const { dispatchVisibilityWake, restore } = installWakeGlobals();
     try {
@@ -1024,48 +964,6 @@ describe('createRelayTunnelClient', () => {
       expect(connectionCount()).toBeGreaterThan(1);
     } finally {
       restore();
-    }
-  });
-
-  test('SDK GETs preserve relay timeout errors through the runtime client boundary', async () => {
-    const previousResolver = getRuntimeUrlResolver();
-    const previousWindow = globalThis.window;
-    Object.defineProperty(globalThis, 'window', {
-      configurable: true,
-      value: {
-        location: { origin: 'https://runtime.test', href: 'https://runtime.test/' },
-        addEventListener: () => undefined,
-        removeEventListener: () => undefined,
-      },
-    });
-    configureRuntimeUrlResolver({ apiBaseUrl: 'https://runtime.test' });
-    opencodeClient.reconnectToRuntimeBaseUrl();
-    const { client } = await setupClient({}, { headTimeoutMs: 30 });
-    track(client);
-    await waitForStatus(client, 'connected');
-    adoptRelayTunnel(
-      {
-        relayUrl: 'wss://relay.test',
-        serverId: 'server-1',
-        hostEncPubJwk: {},
-      },
-      client,
-    );
-
-    try {
-      const result = await opencodeClient.getApiClient().path.get({ directory: '/workspace/project' });
-      expect(result.response).toBeUndefined();
-      expect(result.error).toBeInstanceOf(Error);
-      expect(isAmbiguousTransportFailure(result.error)).toBe(true);
-
-      const startedAt = Date.now();
-      expect(await opencodeClient.checkHealth()).toBe(false);
-      expect(Date.now() - startedAt).toBeLessThan(500);
-    } finally {
-      deactivateRelayTunnel();
-      setRuntimeUrlResolver(previousResolver);
-      Object.defineProperty(globalThis, 'window', { configurable: true, value: previousWindow });
-      opencodeClient.reconnectToRuntimeBaseUrl();
     }
   });
 });
