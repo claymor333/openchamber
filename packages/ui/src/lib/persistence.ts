@@ -1,27 +1,21 @@
 import type { DesktopSettings } from '@/lib/desktop';
-import { sanitizeWorkStatusHiddenSections } from '@/components/chat/work-status/sections';
-import { createProjectIdFromPath } from '@/lib/projectId';
 import { useUIStore } from '@/stores/useUIStore';
-import { isMonoFontOption, isUiFontOption } from '@/lib/fontOptions';
-import {
-  DEFAULT_FOLLOW_UP_BEHAVIOR,
-  isFollowUpBehavior,
-  normalizeFollowUpBehavior,
-  useMessageQueueStore,
-  type FollowUpBehavior,
-} from '@/stores/messageQueueStore';
-import { setDirectoryShowHidden } from '@/lib/directoryShowHidden';
-import { setFilesViewShowGitignored } from '@/lib/filesViewShowGitignored';
 import { loadAppearancePreferences, applyAppearancePreferences } from '@/lib/appearancePersistence';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
-import { sanitizeStarterRefs } from '@/lib/draftStarters';
-import { normalizeMobileKeyboardMode, setStoredMobileKeyboardMode } from '@/lib/mobileKeyboardMode';
+import { setStoredMobileKeyboardMode } from '@/lib/mobileKeyboardMode';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { isCapacitorApp } from '@/lib/platform';
-import { isTerminalShell } from '@/lib/terminalShell';
 import { getRuntimeKey, subscribeRuntimeEndpointChanged, subscribeRuntimeEndpointWillChange } from '@/lib/runtime-switch';
-import { DEFAULT_OPEN_IN_APP_ID } from '@/lib/openInApps';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
+import {
+  applySettingsToStores,
+  isDeviceSettingsKey,
+  isWritableSettingsKey,
+  MIRRORED_KEYS,
+  parseSettingsDocument,
+  SETTINGS_KEYS,
+} from '@/lib/settings/registry';
+import { SETTINGS_SURFACE_QUERY, getSettingsSurface } from '@/lib/settings/surface';
 
 export const applyPersistedHomeDirectoryToWindow = (homeDirectory: string): void => {
   if (typeof window === 'undefined') {
@@ -39,6 +33,33 @@ export const applyPersistedHomeDirectoryToWindow = (homeDirectory: string): void
 };
 
 const SETTINGS_MIRROR_INDEX_KEY = 'openchamber.settingsMirror.v2.index';
+// Set once a runtime's device fields have been read from the server document
+// (installs that predate the settings split still carry them there). After
+// that the local store is the only owner and the server copy is ignored.
+const DEVICE_SEED_KEY_PREFIX = 'openchamber.deviceSeeded.v1:';
+const getDeviceSeedStorageKey = (runtimeKey: string): string => `${DEVICE_SEED_KEY_PREFIX}${encodeURIComponent(runtimeKey)}`;
+
+/**
+ * The part of a server document this window may apply: everything but device
+ * fields, plus the device fields exactly once per runtime as a migration seed.
+ */
+const withoutStaleDeviceFields = (settings: DesktopSettings, runtimeKey: string): DesktopSettings => {
+  const seedKey = getDeviceSeedStorageKey(runtimeKey);
+  let seedDevice = false;
+  try {
+    seedDevice = localStorage.getItem(seedKey) === null;
+    if (seedDevice) localStorage.setItem(seedKey, String(Date.now()));
+  } catch {
+    seedDevice = false;
+  }
+  if (seedDevice) return settings;
+  const next: DesktopSettings = {};
+  for (const key of SETTINGS_KEYS) {
+    if (settings[key] === undefined || isDeviceSettingsKey(key)) continue;
+    Object.assign(next, { [key]: settings[key] });
+  }
+  return next;
+};
 const SETTINGS_MIRROR_KEY_PREFIX = 'openchamber.settingsMirror.v2:';
 const MAX_SETTINGS_MIRROR_RUNTIMES = 5;
 
@@ -54,35 +75,13 @@ const setOrRemoveLocalStorage = (key: string, value: string | null): void => {
 };
 
 const persistRuntimeSettingsMirror = (settings: DesktopSettings, runtimeKey: string): void => {
-  const mirror = {
-    themeId: settings.themeId,
-    themeVariant: settings.themeVariant,
-    lightThemeId: settings.lightThemeId,
-    darkThemeId: settings.darkThemeId,
-    useSystemTheme: settings.useSystemTheme,
-    lastDirectory: settings.lastDirectory,
-    homeDirectory: settings.homeDirectory,
-    projects: settings.projects,
-    activeProjectId: settings.activeProjectId,
-    sidebarProjectDisplayMode: settings.sidebarProjectDisplayMode,
-    sidebarSessionGroupingMode: settings.sidebarSessionGroupingMode,
-    sidebarProjectSortOrder: settings.sidebarProjectSortOrder,
-    sidebarShowRecentSection: settings.sidebarShowRecentSection,
-    pinnedDirectories: settings.pinnedDirectories,
-    gitmojiEnabled: settings.gitmojiEnabled,
-    directoryShowHidden: settings.directoryShowHidden,
-    filesViewShowGitignored: settings.filesViewShowGitignored,
-    openInAppId: settings.openInAppId,
-    pwaAppName: settings.pwaAppName,
-    mobileKeyboardMode: settings.mobileKeyboardMode,
-    openCodeUpdateToastDismissedVersion: settings.openCodeUpdateToastDismissedVersion,
-    dictationEnabled: settings.dictationEnabled,
-    sttProvider: settings.sttProvider,
-    sttServerUrl: settings.sttServerUrl,
-    sttModel: settings.sttModel,
-    sttLocalModel: settings.sttLocalModel,
-    sttLanguage: settings.sttLanguage,
-  };
+  // Every user-owned field the server holds for this runtime, so a later
+  // phase can serve the profile from the mirror; secrets and computed flags
+  // never land in browser storage.
+  const mirror: DesktopSettings = {};
+  for (const key of MIRRORED_KEYS) {
+    if (settings[key] !== undefined) Object.assign(mirror, { [key]: settings[key] });
+  }
   localStorage.setItem(getRuntimeSettingsMirrorStorageKey(runtimeKey), JSON.stringify(mirror));
 
   let previous: string[] = [];
@@ -270,262 +269,6 @@ type PersistApi = {
   onFinishHydration?: (callback: () => void) => (() => void) | undefined;
 };
 
-const sanitizeSkillCatalogs = (value: unknown): DesktopSettings['skillCatalogs'] | undefined => {
-  if (!Array.isArray(value)) {
-    return undefined;
-  }
-
-  const result: NonNullable<DesktopSettings['skillCatalogs']> = [];
-  const seen = new Set<string>();
-
-  for (const entry of value) {
-    if (!entry || typeof entry !== 'object') continue;
-    const candidate = entry as Record<string, unknown>;
-
-    const id = typeof candidate.id === 'string' ? candidate.id.trim() : '';
-    const label = typeof candidate.label === 'string' ? candidate.label.trim() : '';
-    const source = typeof candidate.source === 'string' ? candidate.source.trim() : '';
-    const subpath = typeof candidate.subpath === 'string' ? candidate.subpath.trim() : '';
-    const gitIdentityId = typeof candidate.gitIdentityId === 'string' ? candidate.gitIdentityId.trim() : '';
-
-    if (!id || !label || !source) continue;
-    if (seen.has(id)) continue;
-    seen.add(id);
-
-    const catalog: NonNullable<DesktopSettings['skillCatalogs']>[number] = {
-      id,
-      label,
-      source,
-    };
-    if (subpath) catalog.subpath = subpath;
-    if (gitIdentityId) catalog.gitIdentityId = gitIdentityId;
-    result.push(catalog);
-  }
-
-  return result;
-};
-
-const sanitizeShortcutOverrides = (value: unknown): Record<string, string> | undefined => {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    return undefined;
-  }
-  const result: Record<string, string> = {};
-  for (const [key, combo] of Object.entries(value)) {
-    const normalizedKey = typeof key === 'string' ? key.trim() : '';
-    const normalizedCombo = typeof combo === 'string' ? combo.trim() : '';
-    if (!normalizedKey || !normalizedCombo) continue;
-    result[normalizedKey] = normalizedCombo;
-  }
-  return result;
-};
-
-const areStringRecordsEqual = (left: Record<string, string>, right: Record<string, string>): boolean => {
-  const leftEntries = Object.entries(left);
-  const rightEntries = Object.entries(right);
-  if (leftEntries.length !== rightEntries.length) return false;
-  return leftEntries.every(([key, value]) => right[key] === value);
-};
-
-const areModelRefsEqual = (
-  left: Array<{ providerID: string; modelID: string }>,
-  right: Array<{ providerID: string; modelID: string }>,
-): boolean => (
-  left.length === right.length &&
-  left.every((item, idx) => item.providerID === right[idx]?.providerID && item.modelID === right[idx]?.modelID)
-);
-
-const areStringArraysEqual = (left: string[], right: string[]): boolean => (
-  left.length === right.length && left.every((value, idx) => value === right[idx])
-);
-
-const sanitizeStringArray = (value: unknown): string[] | undefined => {
-  if (!Array.isArray(value)) return undefined;
-  return Array.from(new Set(value.filter((entry): entry is string => typeof entry === 'string' && entry.length > 0)));
-};
-
-const sanitizeRecentEfforts = (value: unknown): Record<string, string[]> | undefined => {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
-  const result: Record<string, string[]> = {};
-  for (const [key, variants] of Object.entries(value)) {
-    if (!key || !Array.isArray(variants)) continue;
-    const sanitized = sanitizeStringArray(variants);
-    if (sanitized && sanitized.length > 0) {
-      result[key] = sanitized.slice(0, 5);
-    }
-  }
-  return Object.keys(result).length > 0 ? result : undefined;
-};
-
-const areRecentEffortsEqual = (left: Record<string, string[]>, right: Record<string, string[]>): boolean => {
-  const leftKeys = Object.keys(left);
-  if (leftKeys.length !== Object.keys(right).length) return false;
-  return leftKeys.every((key) => Array.isArray(right[key]) && areStringArraysEqual(left[key], right[key]));
-};
-
-const HEX_COLOR_PATTERN = /^#(?:[\da-fA-F]{3}|[\da-fA-F]{6})$/;
-
-const normalizeIconBackground = (value: unknown): string | null => {
-  if (typeof value !== 'string') {
-    return null;
-  }
-  const trimmed = value.trim();
-  if (!trimmed) {
-    return null;
-  }
-  return HEX_COLOR_PATTERN.test(trimmed) ? trimmed.toLowerCase() : null;
-};
-
-const sanitizeProjects = (value: unknown): DesktopSettings['projects'] | undefined => {
-  if (!Array.isArray(value)) {
-    return undefined;
-  }
-
-  const result: NonNullable<DesktopSettings['projects']> = [];
-  const seenIds = new Set<string>();
-  const seenPaths = new Set<string>();
-
-  for (const entry of value) {
-    if (!entry || typeof entry !== 'object') continue;
-    const candidate = entry as Record<string, unknown>;
-
-    const rawPath = typeof candidate.path === 'string' ? candidate.path.trim() : '';
-    if (!rawPath) continue;
-
-    const normalizedPath = rawPath === '/' ? rawPath : rawPath.replace(/\\/g, '/').replace(/\/+$/, '');
-    if (!normalizedPath) continue;
-
-    const id = createProjectIdFromPath(normalizedPath);
-    if (!id) continue;
-
-    if (seenIds.has(id) || seenPaths.has(normalizedPath)) continue;
-    seenIds.add(id);
-    seenPaths.add(normalizedPath);
-
-    const project: NonNullable<DesktopSettings['projects']>[number] = {
-      id,
-      path: normalizedPath,
-    };
-
-    if (typeof candidate.label === 'string' && candidate.label.trim().length > 0) {
-      project.label = candidate.label.trim();
-    }
-    if (typeof candidate.icon === 'string' && candidate.icon.trim().length > 0) {
-      project.icon = candidate.icon.trim();
-    }
-    if (candidate.iconImage === null) {
-      project.iconImage = null;
-    } else if (candidate.iconImage && typeof candidate.iconImage === 'object') {
-      const iconImage = candidate.iconImage as Record<string, unknown>;
-      const mime = typeof iconImage.mime === 'string' ? iconImage.mime.trim() : '';
-      const updatedAt = typeof iconImage.updatedAt === 'number' && Number.isFinite(iconImage.updatedAt)
-        ? Math.max(0, Math.round(iconImage.updatedAt))
-        : 0;
-      const source = iconImage.source === 'custom' || iconImage.source === 'auto'
-        ? iconImage.source
-        : null;
-      if (mime && updatedAt > 0 && source) {
-        project.iconImage = { mime, updatedAt, source };
-      }
-    }
-    if (typeof candidate.color === 'string' && candidate.color.trim().length > 0) {
-      project.color = candidate.color.trim();
-    }
-    if (candidate.iconBackground === null) {
-      project.iconBackground = null;
-    } else {
-      const iconBackground = normalizeIconBackground(candidate.iconBackground);
-      if (iconBackground) {
-        project.iconBackground = iconBackground;
-      }
-    }
-    if (typeof candidate.addedAt === 'number' && Number.isFinite(candidate.addedAt) && candidate.addedAt >= 0) {
-      project.addedAt = candidate.addedAt;
-    }
-    if (
-      typeof candidate.lastOpenedAt === 'number' &&
-      Number.isFinite(candidate.lastOpenedAt) &&
-      candidate.lastOpenedAt >= 0
-    ) {
-      project.lastOpenedAt = candidate.lastOpenedAt;
-    }
-    if (typeof candidate.sidebarCollapsed === 'boolean') {
-      project.sidebarCollapsed = candidate.sidebarCollapsed;
-    }
-    result.push(project);
-  }
-
-  return result.length > 0 ? result : undefined;
-};
-
-const sanitizeManagedRemoteTunnelPresets = (value: unknown): DesktopSettings['managedRemoteTunnelPresets'] | undefined => {
-  if (!Array.isArray(value)) {
-    return undefined;
-  }
-
-  const result: NonNullable<DesktopSettings['managedRemoteTunnelPresets']> = [];
-  const seenIds = new Set<string>();
-  const seenHostnames = new Set<string>();
-
-  for (const entry of value) {
-    if (!entry || typeof entry !== 'object') continue;
-    const candidate = entry as Record<string, unknown>;
-
-    const id = typeof candidate.id === 'string' ? candidate.id.trim() : '';
-    const name = typeof candidate.name === 'string' ? candidate.name.trim() : '';
-    const hostname = typeof candidate.hostname === 'string' ? candidate.hostname.trim().toLowerCase() : '';
-
-    if (!id || !name || !hostname) continue;
-    if (seenIds.has(id) || seenHostnames.has(hostname)) continue;
-    seenIds.add(id);
-    seenHostnames.add(hostname);
-
-    result.push({ id, name, hostname });
-  }
-
-  return result;
-};
-
-const sanitizeManagedRemoteTunnelPresetTokens = (value: unknown): DesktopSettings['managedRemoteTunnelPresetTokens'] | undefined => {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    return undefined;
-  }
-
-  const candidate = value as Record<string, unknown>;
-  const result: Record<string, string> = {};
-  for (const [key, tokenValue] of Object.entries(candidate)) {
-    const id = key.trim();
-    const token = typeof tokenValue === 'string' ? tokenValue.trim() : '';
-    if (!id || !token) continue;
-    result[id] = token;
-  }
-
-  return Object.keys(result).length > 0 ? result : undefined;
-};
-
-const sanitizeModelRefs = (value: unknown, limit: number): Array<{ providerID: string; modelID: string }> | undefined => {
-  if (!Array.isArray(value)) {
-    return undefined;
-  }
-
-  const result: Array<{ providerID: string; modelID: string }> = [];
-  const seen = new Set<string>();
-
-  for (const entry of value) {
-    if (!entry || typeof entry !== 'object') continue;
-    const candidate = entry as Record<string, unknown>;
-    const providerID = typeof candidate.providerID === 'string' ? candidate.providerID.trim() : '';
-    const modelID = typeof candidate.modelID === 'string' ? candidate.modelID.trim() : '';
-    if (!providerID || !modelID) continue;
-    const key = `${providerID}/${modelID}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    result.push({ providerID, modelID });
-    if (result.length >= limit) break;
-  }
-
-  return result;
-};
-
 const getPersistApi = (): PersistApi | undefined => {
   const candidate = useUIStore.persist;
   if (candidate && typeof candidate === 'object') {
@@ -536,8 +279,7 @@ const getPersistApi = (): PersistApi | undefined => {
 
 const getRuntimeSettingsAPI = () => getRegisteredRuntimeAPIs()?.settings ?? null;
 
-const materializeAuthoritativeUiSettings = (settings: DesktopSettings): DesktopSettings => {
-  const defaults = useUIStore.getInitialState();
+const settingsEndpointForSurface = (): string => `/api/config/settings?${SETTINGS_SURFACE_QUERY}=${getSettingsSurface()}`;
 
   return {
     // Theme fields are deliberately NOT defaulted: the theme authority is the
@@ -1710,6 +1452,8 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
 };
 
 type SettingsRuntimeContext = { runtimeKey: string; generation: number };
+/** Whether a settings write reached its store. A no-op (nothing to send) counts as ok. */
+export type SettingsWriteResult = { ok: boolean };
 type SettingsMutation = { revision: number; changes: Partial<DesktopSettings> };
 type SettingsOperation = { revision: number };
 
@@ -1770,11 +1514,33 @@ class SettingsMutationTracker {
 // Short-lived cache + in-flight dedup for settings fetches to avoid repeated GET calls during startup
 let _settingsRuntimeGeneration = 0;
 let _settingsCache: { value: DesktopSettings | null; at: number; context: SettingsRuntimeContext } | null = null;
+// The last value the server was seen holding for each key, for the current
+// runtime. A write whose value equals it is redundant and is dropped before it
+// reaches the wire — this is what turns "the store changed because we adopted
+// the server's value" into zero PUTs instead of an echo (appearanceAutoSave and
+// the model-prefs auto-save both subscribe to the store, not to intent).
+let _serverKnownSettings: Partial<DesktopSettings> = {};
+// True while server values are being copied into the stores. Store
+// subscribers that mirror changes back to the server (appearanceAutoSave,
+// modelPrefsAutoSave) read this to tell "a person changed it" from "we just
+// adopted it" — the second must never become a write.
+let _applyingServerSettings = false;
+
+export const isApplyingServerSettings = (): boolean => _applyingServerSettings;
+
+const applyServerSettings = (settings: DesktopSettings): void => {
+  _applyingServerSettings = true;
+  try {
+    applyDesktopUiPreferences(settings);
+  } finally {
+    _applyingServerSettings = false;
+  }
+};
 let _settingsInflight: { promise: Promise<DesktopSettings | null>; context: SettingsRuntimeContext } | null = null;
 let _pendingSettingsChanges: Partial<DesktopSettings> | null = null;
 let _pendingSettingsContext: SettingsRuntimeContext | null = null;
 let _settingsFlushTimer: ReturnType<typeof setTimeout> | null = null;
-let _settingsFlushWaiters: Array<() => void> = [];
+let _settingsFlushWaiters: Array<(result: SettingsWriteResult) => void> = [];
 let _settingsLifecycleInitialized = false;
 let _pendingSettingsRevision = 0;
 const _settingsMutationTracker = new SettingsMutationTracker();
@@ -1785,6 +1551,39 @@ const captureSettingsRuntimeContext = (): SettingsRuntimeContext => ({
   runtimeKey: getRuntimeKey(),
   generation: _settingsRuntimeGeneration,
 });
+
+type SettingsKey = keyof DesktopSettings;
+type SettingsValue = DesktopSettings[SettingsKey];
+
+// SAFETY: a Partial<DesktopSettings> here always comes from the typed stores or
+// from `sanitizeWebSettings`, both of which only ever set DesktopSettings keys.
+const settingsKeysOf = (changes: Partial<DesktopSettings>): SettingsKey[] => Object.keys(changes) as SettingsKey[];
+
+const isSameSettingValue = (left: SettingsValue | undefined, right: SettingsValue | undefined): boolean => {
+  if (left === right) return true;
+  if (left === undefined || right === undefined) return false;
+  return JSON.stringify(left) === JSON.stringify(right);
+};
+
+const rememberServerSettings = (settings: Partial<DesktopSettings>): void => {
+  _serverKnownSettings = { ..._serverKnownSettings, ...settings };
+};
+
+const forgetServerSettings = (keys: SettingsKey[]): void => {
+  const next: Partial<DesktopSettings> = { ..._serverKnownSettings };
+  for (const key of keys) delete next[key];
+  _serverKnownSettings = next;
+};
+
+/** Keys of `changes` whose value differs from what the server is known to hold. */
+const withoutRedundantSettings = (changes: Partial<DesktopSettings>): Partial<DesktopSettings> => {
+  const next: Partial<DesktopSettings> = {};
+  for (const key of settingsKeysOf(changes)) {
+    if (isSameSettingValue(changes[key], _serverKnownSettings[key])) continue;
+    Object.assign(next, { [key]: changes[key] });
+  }
+  return next;
+};
 
 const isSameSettingsRuntimeContext = (left: SettingsRuntimeContext, right: SettingsRuntimeContext): boolean => (
   left.runtimeKey === right.runtimeKey && left.generation === right.generation
@@ -1830,6 +1629,7 @@ const ensureSettingsRuntimeLifecycle = (): void => {
     _pendingSettingsRevision = 0;
     _settingsCache = null;
     _settingsInflight = null;
+    _serverKnownSettings = {};
   });
 
   // Mirror the deferred safe-storage lifecycle: without these listeners, a
@@ -1880,6 +1680,7 @@ const fetchWebSettings = async (context = captureSettingsRuntimeContext()): Prom
           if (!isSettingsRuntimeContextCurrent(context)) return null;
           const settings = sanitizeWebSettings(result.settings);
           _settingsCache = { value: settings, at: Date.now(), context };
+          if (settings) rememberServerSettings(settings);
           return settings;
         } catch (error) {
           if (!isSettingsRuntimeContextCurrent(context)) return null;
@@ -1889,7 +1690,10 @@ const fetchWebSettings = async (context = captureSettingsRuntimeContext()): Prom
 
       if (!isSettingsRuntimeContextCurrent(context)) return null;
       try {
-        const response = await runtimeFetch('/api/config/settings', {
+        // The surface kind travels as a query parameter, not a header: a header
+        // would turn the request into a CORS preflight, which older instances
+        // (and the packaged desktop's cross-origin shell) refuse.
+        const response = await runtimeFetch(settingsEndpointForSurface(), {
           method: 'GET',
           headers: { Accept: 'application/json' },
         });
@@ -1901,6 +1705,7 @@ const fetchWebSettings = async (context = captureSettingsRuntimeContext()): Prom
         if (!isSettingsRuntimeContextCurrent(context)) return null;
         const settings = sanitizeWebSettings(data);
         _settingsCache = { value: settings, at: Date.now(), context };
+        if (settings) rememberServerSettings(settings);
         return settings;
       } catch (error) {
         if (!isSettingsRuntimeContextCurrent(context)) return null;
@@ -1917,9 +1722,11 @@ const fetchWebSettings = async (context = captureSettingsRuntimeContext()): Prom
   return inflight.promise;
 };
 
-/** Invalidate cached settings (call after a successful PUT) */
+/** Forget everything cached about the server document: the GET cache and the
+ * last-known per-key values used to drop redundant writes. */
 export const invalidateSettingsCache = (): void => {
   _settingsCache = null;
+  _serverKnownSettings = {};
 };
 
 export const syncDesktopSettings = async (options?: { bootstrap?: boolean; adoptTheme?: boolean }): Promise<void> => {
@@ -1982,78 +1789,26 @@ export const syncDesktopSettings = async (options?: { bootstrap?: boolean; adopt
     let settings = overlayPendingChanges(_settingsMutationTracker.reconcile(loadedSettings, operation));
     await waitForHydration();
     if (!isSettingsRuntimeContextCurrent(context)) return;
-    settings = overlayPendingChanges(_settingsMutationTracker.reconcile(loadedSettings, operation));
-    const shouldPersistCraftGoalMigration = settings.draftStartersCraftGoalAdded !== true
-      || settings.draftStartersScheduleTaskAdded !== true;
-    // `autoSaveEnabled` is new to the settings backend. Until the server has a
-    // value, materialize would invent the client default (true) and overwrite a
-    // deliberate legacy "off" preference migrated from
-    // `openchamber:files:auto-save-enabled`. Prefer the hydrated store value and
-    // seed the backend once so later omitted→default authority is correct.
-    const shouldSeedAutoSaveEnabled = typeof settings.autoSaveEnabled !== 'boolean';
-    const shouldSeedSidebarProjectDisplayMode = settings.sidebarProjectDisplayMode === undefined;
-    const shouldSeedSidebarSessionGroupingMode = settings.sidebarSessionGroupingMode === undefined;
-    const shouldSeedSidebarProjectSortOrder = settings.sidebarProjectSortOrder === undefined;
-    const shouldSeedSidebarShowRecentSection = settings.sidebarShowRecentSection === undefined;
-    const authoritativeSettings = materializeAuthoritativeUiSettings(settings);
+    settings = withoutStaleDeviceFields(
+      overlayPendingChanges(_settingsMutationTracker.reconcile(loadedSettings, operation)),
+      context.runtimeKey,
+    );
+    // Keys the server omits are "unset", not "reset": this window keeps
+    // whatever it already holds for them and nothing is written back. A
+    // bootstrap therefore never seeds the server from local state — a write
+    // only ever carries a change a person made in this window.
     try {
       persistToLocalStorage(settings);
     } catch (error) {
       console.warn('persistToLocalStorage failed:', error);
     }
-    if (shouldSeedAutoSaveEnabled) {
-      authoritativeSettings.autoSaveEnabled = useUIStore.getState().autoSaveEnabled;
-    }
-    const sessionDisplayState = useSessionDisplayStore.getState();
-    if (shouldSeedSidebarProjectDisplayMode) {
-      authoritativeSettings.sidebarProjectDisplayMode = sessionDisplayState.projectDisplayMode;
-    }
-    if (shouldSeedSidebarSessionGroupingMode) {
-      authoritativeSettings.sidebarSessionGroupingMode = sessionDisplayState.sessionGroupingMode;
-    }
-    if (shouldSeedSidebarProjectSortOrder) {
-      authoritativeSettings.sidebarProjectSortOrder = sessionDisplayState.projectSortOrder;
-    }
-    if (shouldSeedSidebarShowRecentSection) {
-      authoritativeSettings.sidebarShowRecentSection = sessionDisplayState.showRecentSection;
-    }
-    if (settings.draftStarters === undefined) {
-      useUIStore.setState({ globalDraftStarters: null });
-    }
     try {
-      applyDesktopUiPreferences(authoritativeSettings);
+      applyServerSettings(settings);
     } catch (error) {
       console.warn('applyDesktopUiPreferences failed:', error);
     }
-    const migrationPatch: Partial<DesktopSettings> = {};
-    if (shouldPersistCraftGoalMigration) {
-      if (authoritativeSettings.draftStarters) {
-        migrationPatch.draftStarters = authoritativeSettings.draftStarters;
-      }
-      migrationPatch.draftStartersCraftGoalAdded = true;
-      migrationPatch.draftStartersScheduleTaskAdded = true;
-    }
-    if (shouldSeedAutoSaveEnabled) {
-      migrationPatch.autoSaveEnabled = authoritativeSettings.autoSaveEnabled;
-    }
-    if (shouldSeedSidebarProjectDisplayMode) {
-      migrationPatch.sidebarProjectDisplayMode = authoritativeSettings.sidebarProjectDisplayMode;
-    }
-    if (shouldSeedSidebarSessionGroupingMode) {
-      migrationPatch.sidebarSessionGroupingMode = authoritativeSettings.sidebarSessionGroupingMode;
-    }
-    if (shouldSeedSidebarProjectSortOrder) {
-      migrationPatch.sidebarProjectSortOrder = authoritativeSettings.sidebarProjectSortOrder;
-    }
-    if (shouldSeedSidebarShowRecentSection) {
-      migrationPatch.sidebarShowRecentSection = authoritativeSettings.sidebarShowRecentSection;
-    }
-    if (Object.keys(migrationPatch).length > 0) {
-      await updateDesktopSettings(migrationPatch);
-      if (!isSettingsRuntimeContextCurrent(context)) return;
-    }
 
-    dispatchSettingsSynced(authoritativeSettings, bootstrap, adoptTheme);
+    dispatchSettingsSynced(settings, bootstrap, adoptTheme);
   };
 
   try {
@@ -2072,6 +1827,7 @@ export const syncDesktopSettings = async (options?: { bootstrap?: boolean; adopt
 // `keepalive` is set only on the lifecycle-suspend path, where the document may
 // be torn down mid-request; the ordinary debounced write uses a plain fetch.
 async function _flushSettingsUpdate({ keepalive = false }: { keepalive?: boolean } = {}): Promise<void> {
+  let ok = false;
   const changes = _pendingSettingsChanges;
   const context = _pendingSettingsContext;
   const revision = _pendingSettingsRevision;
@@ -2084,23 +1840,33 @@ async function _flushSettingsUpdate({ keepalive = false }: { keepalive?: boolean
   try {
     if (!changes || !context || Object.keys(changes).length === 0 || !isSettingsRuntimeContextCurrent(context)) {
       // Nothing will be written — clear any pending "Saving…" indicator.
+      ok = true;
       dispatchSettingsSaveState('saved');
       return;
     }
     const operation = _settingsMutationTracker.begin(revision);
+    // Assume the merge lands so a same-value write arriving mid-flight is not
+    // sent twice; a failed request forgets these keys so a retry goes through.
+    rememberServerSettings(changes);
+    const forgetSentSettings = () => forgetServerSettings(settingsKeysOf(changes));
 
     try {
       const runtimeSettings = getRuntimeSettingsAPI();
       if (runtimeSettings) {
         try {
-          const updated = await runtimeSettings.save(changes);
+          // The runtime API hands back whatever the bridge or server returned;
+          // it is parsed here like any other boundary payload.
+          const updated = sanitizeWebSettings(await runtimeSettings.save(changes));
           if (!isSettingsRuntimeContextCurrent(context)) return;
           if (updated) {
+            rememberServerSettings(updated);
             const reconciled = _settingsMutationTracker.reconcile(updated, operation);
-            applyDesktopUiPreferences(reconciled);
+            applyServerSettings(reconciled);
             dispatchSettingsSynced(reconciled, false);
             _settingsCache = null;
           }
+          if (!updated) forgetSentSettings();
+          ok = Boolean(updated);
           dispatchSettingsSaveState(updated ? 'saved' : 'error');
           return;
         } catch (error) {
@@ -2111,7 +1877,7 @@ async function _flushSettingsUpdate({ keepalive = false }: { keepalive?: boolean
 
       if (!isSettingsRuntimeContextCurrent(context)) return;
       try {
-        const response = await runtimeFetch('/api/config/settings', {
+        const response = await runtimeFetch(settingsEndpointForSurface(), {
           method: 'PUT',
           headers: {
             'Content-Type': 'application/json',
@@ -2124,6 +1890,7 @@ async function _flushSettingsUpdate({ keepalive = false }: { keepalive?: boolean
         if (!isSettingsRuntimeContextCurrent(context)) return;
         if (!response.ok) {
           console.warn('Failed to update shared settings via API:', response.status, response.statusText);
+          forgetSentSettings();
           dispatchSettingsSaveState('error');
           return;
         }
@@ -2131,18 +1898,22 @@ async function _flushSettingsUpdate({ keepalive = false }: { keepalive?: boolean
         const updated = sanitizeWebSettings(await response.json().catch(() => null));
         if (!isSettingsRuntimeContextCurrent(context)) return;
         if (updated) {
+          rememberServerSettings(updated);
           const reconciled = _settingsMutationTracker.reconcile(updated, operation);
-          applyDesktopUiPreferences(reconciled);
+          applyServerSettings(reconciled);
           dispatchSettingsSynced(reconciled, false);
+          ok = true;
           dispatchSettingsSaveState('saved');
           // Invalidate GET cache so next read sees the fresh data
           _settingsCache = null;
         } else {
+          forgetSentSettings();
           dispatchSettingsSaveState('error');
         }
       } catch (error) {
         if (isSettingsRuntimeContextCurrent(context)) {
           console.warn('Failed to update shared settings via API:', error);
+          forgetSentSettings();
           dispatchSettingsSaveState('error');
         }
       }
@@ -2150,13 +1921,26 @@ async function _flushSettingsUpdate({ keepalive = false }: { keepalive?: boolean
       _settingsMutationTracker.finish(operation);
     }
   } finally {
-    waiters.forEach((resolve) => resolve());
+    waiters.forEach((resolve) => resolve({ ok }));
   }
 }
 
-export const updateDesktopSettings = async (changes: Partial<DesktopSettings>): Promise<void> => {
+/**
+ * Load the shared settings document for the current runtime (cached briefly
+ * during startup bursts). Pages that need a field the stores do not carry read
+ * it from here instead of fetching the endpoint themselves. `null` is a load
+ * failure, never an empty document.
+ */
+export const loadDesktopSettings = (): Promise<DesktopSettings | null> => fetchWebSettings();
+
+/**
+ * Queue a change a person made in this window for the debounced write. Keys
+ * whose value the server already holds are dropped; computed server flags are
+ * never sent. Resolves once the write (or the decision not to write) settled.
+ */
+export const updateDesktopSettings = async (changes: Partial<DesktopSettings>): Promise<SettingsWriteResult> => {
   if (typeof window === 'undefined') {
-    return;
+    return { ok: false };
   }
   ensureSettingsRuntimeLifecycle();
   const context = captureSettingsRuntimeContext();
@@ -2166,15 +1950,36 @@ export const updateDesktopSettings = async (changes: Partial<DesktopSettings>): 
     void _flushSettingsUpdate();
   }
 
-  _pendingSettingsChanges = { ...(_pendingSettingsChanges ?? {}), ...changes };
+  // Merge first, then drop keys that now equal the server: a toggle back to
+  // the server's value inside the debounce window cancels the pending write
+  // for that key instead of leaving the earlier value queued.
+  const writable: Partial<DesktopSettings> = {};
+  for (const key of settingsKeysOf(changes)) {
+    if (isWritableSettingsKey(key)) Object.assign(writable, { [key]: changes[key] });
+  }
+  const pending = withoutRedundantSettings({ ...(_pendingSettingsChanges ?? {}), ...writable });
+  if (Object.keys(pending).length === 0) {
+    _pendingSettingsChanges = null;
+    _pendingSettingsContext = null;
+    if (_settingsFlushTimer) {
+      clearTimeout(_settingsFlushTimer);
+      _settingsFlushTimer = null;
+    }
+    const waiters = _settingsFlushWaiters;
+    _settingsFlushWaiters = [];
+    waiters.forEach((resolve) => resolve({ ok: true }));
+    dispatchSettingsSaveState('saved');
+    return { ok: true };
+  }
+  _pendingSettingsChanges = pending;
   _pendingSettingsContext = context;
-  _pendingSettingsRevision = _settingsMutationTracker.record(changes);
+  _pendingSettingsRevision = _settingsMutationTracker.record(withoutRedundantSettings(writable));
   dispatchSettingsSaveState('saving');
 
   if (_settingsFlushTimer) {
     clearTimeout(_settingsFlushTimer);
   }
-  const flushed = new Promise<void>((resolve) => {
+  const flushed = new Promise<SettingsWriteResult>((resolve) => {
     _settingsFlushWaiters.push(resolve);
   });
   _settingsFlushTimer = setTimeout(() => void _flushSettingsUpdate(), SETTINGS_DEBOUNCE_MS);

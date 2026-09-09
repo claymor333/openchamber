@@ -98,6 +98,8 @@ export interface ComposerEditorProps {
      */
     autoCorrect?: ComposerAutoCorrect;
     autoCapitalize?: 'none' | 'sentences';
+    /** Retain the untouched key policy before a mobile user opts in. */
+    preserveDeferredEnterShift?: boolean;
     /** Fill the available height instead of growing with the content. */
     fillContainer?: boolean;
     /** Lines of text shown before the editor starts scrolling. */
