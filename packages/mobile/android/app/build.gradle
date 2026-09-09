@@ -34,6 +34,10 @@ android {
         }
     }
     buildTypes {
+        // Keep locally built debug APKs installable beside the upstream app.
+        debug {
+            applicationIdSuffix ".build"
+        }
         release {
             if (hasCiSigning) {
                 signingConfig signingConfigs.release
