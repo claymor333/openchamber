@@ -3,6 +3,7 @@
 // the tunnel codec). No network, no real WebSocket.
 
 import { afterEach, describe, expect, test } from 'bun:test';
+import { gzipSync } from 'node:zlib';
 import {
   exportPublicKeyJwk,
   generateEcdhKeyPair,
@@ -13,6 +14,7 @@ import { createHostHandshake } from './handshake';
 import { TunnelFrameType } from './protocol';
 import { isAmbiguousTransportFailure } from './transport-error';
 import {
+  chunkPayload,
   createFragmentAssembler,
   decodeFrameBatch,
   decodeJsonPayload,
@@ -25,6 +27,7 @@ import {
 import {
   createRelayTunnelClient,
   type RelayTunnelClient,
+  type RelayTunnelState,
   type TunnelWireSocket,
 } from './tunnel-client';
 
@@ -83,7 +86,11 @@ class FakeEndpoint implements TunnelWireSocket {
 }
 
 type MiniHostOptions = {
-  silent?: boolean;
+  // True = the host answers the handshake but then ignores every tunnel frame
+  // (no pongs, no responses) — a wire that LOOKS connected but is dead. A
+  // function lets a test silence specific wires (e.g. the first) while later
+  // reconnects behave normally.
+  silent?: boolean | ((wireIndex: number) => boolean);
   onConnect?: () => void;
   // Delay handling of the first inbound text frame: with a delay longer than
   // the client's helloRetryMs this reproduces the first-connect race where the
@@ -91,8 +98,9 @@ type MiniHostOptions = {
   firstHelloDelayMs?: number;
   // Advertise batching from the host (default true = matches production).
   batch?: boolean;
-  // Records every tunnel frame the host received, in arrival order.
-  recordFrame?: (frame: TunnelFrame) => void;
+  // Records every tunnel frame the host received, in arrival order, tagged with
+  // the 1-based wire index that received it.
+  recordFrame?: (frame: TunnelFrame, wireIndex?: number) => void;
 };
 
 // A minimal host responder wired to one endpoint. Answers a few routes so the
@@ -164,6 +172,15 @@ const attachMiniHost = (endpoint: FakeEndpoint, hostPrivateKey: CryptoKey, optio
         sendFrame(encodeTunnelFrame(TunnelFrameType.HttpResponse, streamId, encodeJsonPayload({ status: 200, headers: {} })));
         sendFrame(encodeTunnelFrame(TunnelFrameType.HttpBody, streamId, body));
         sendFrame(encodeTunnelFrame(TunnelFrameType.StreamEnd, streamId, new Uint8Array(0)));
+      } else if (path === '/gzip') {
+        // The relay host re-compresses large JSON/text bodies when the client
+        // asks for gzip; the client must decode them and strip the header.
+        const compressed = gzipSync(body);
+        sendFrame(encodeTunnelFrame(TunnelFrameType.HttpResponse, streamId, encodeJsonPayload({ status: 200, headers: { 'content-encoding': 'gzip' } })));
+        for (const piece of chunkPayload(new Uint8Array(compressed), 16 * 1024)) {
+          sendFrame(encodeTunnelFrame(TunnelFrameType.HttpBody, streamId, piece));
+        }
+        sendFrame(encodeTunnelFrame(TunnelFrameType.StreamEnd, streamId, new Uint8Array(0)));
       } else if (path === '/stream') {
         sendFrame(encodeTunnelFrame(TunnelFrameType.HttpResponse, streamId, encodeJsonPayload({ status: 200, headers: {} })));
         const emit = (index: number): void => {
@@ -184,6 +201,10 @@ const attachMiniHost = (endpoint: FakeEndpoint, hostPrivateKey: CryptoKey, optio
           setTimeout(pump, 10);
         };
         pump();
+      } else if (path === '/hang') {
+        // Request fully received but never answered — exercises the client's
+        // response-head timeout.
+        return;
       } else {
         respondJson(streamId, 404, { error: 'not found' });
       }
@@ -238,6 +259,15 @@ const attachMiniHost = (endpoint: FakeEndpoint, hostPrivateKey: CryptoKey, optio
 
 const wait = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
+const waitForStatus = async (client: RelayTunnelClient, state: RelayTunnelState): Promise<void> => {
+  const deadline = Date.now() + 2_000;
+  while (Date.now() < deadline) {
+    if (client.getStatus().state === state) return;
+    await wait(5);
+  }
+  throw new Error(`tunnel never reached ${state}`);
+};
+
 const setupClient = async (
   hostOptions: MiniHostOptions = {},
   clientOverrides: Partial<Parameters<typeof createRelayTunnelClient>[0]> = {},
@@ -265,13 +295,21 @@ const setupClient = async (
     ...clientOverrides,
     createWireSocket: () => {
       count += 1;
+      const wireIndex = count;
       const clientEndpoint = new FakeEndpoint();
       const hostEndpoint = new FakeEndpoint();
       clientEndpoint.peer = hostEndpoint;
       hostEndpoint.peer = clientEndpoint;
       lastClientEndpoint = clientEndpoint;
       lastHostEndpoint = hostEndpoint;
-      attachMiniHost(hostEndpoint, hostKeyPair.privateKey, hostOptions);
+      const silent = typeof hostOptions.silent === 'function' ? hostOptions.silent(wireIndex) : hostOptions.silent;
+      attachMiniHost(hostEndpoint, hostKeyPair.privateKey, {
+        ...hostOptions,
+        silent,
+        recordFrame: (frame) => {
+          if (hostOptions.recordFrame) hostOptions.recordFrame(frame, wireIndex);
+        },
+      });
       queueMicrotask(() => clientEndpoint.onopen?.());
       return clientEndpoint;
     },
@@ -612,5 +650,275 @@ describe('createRelayTunnelClient', () => {
     expect(await message).toBe('echo:legacy');
     const health = await client.fetch('/health');
     expect(health.status).toBe(200);
+  });
+
+  test('pre-send probe: a stale silently-dead tunnel fails over before dispatching the request', async () => {
+    const requestsOnWire: number[] = [];
+    const { client, connectionCount } = await setupClient(
+      {
+        // The first wire establishes then ignores every frame (incl. pings) —
+        // the mobile "sleeping connection": connected on paper, dead underneath.
+        silent: (wireIndex) => wireIndex === 1,
+        recordFrame: (frame, wireIndex) => {
+          if (frame.frameType === TunnelFrameType.HttpRequest) requestsOnWire.push(wireIndex ?? 0);
+        },
+      },
+      {
+        probeStaleAfterMs: 5,
+        probeTimeoutMs: 20,
+        pingIntervalMs: 1_000,
+        pingTimeoutMs: 30_000,
+        reconnectBaseDelayMs: 10,
+        reconnectMaxDelayMs: 20,
+      },
+    );
+    track(client);
+    await waitForStatus(client, 'connected');
+    await wait(20); // let the tunnel go stale
+    const response = await client.fetch('/health');
+    expect(response.status).toBe(200);
+    expect(connectionCount()).toBeGreaterThan(1);
+    // The dead first wire only saw the probe ping — the request itself ran on a
+    // fresh wire, so it was never swallowed by the sleeping tunnel.
+    expect(requestsOnWire).toEqual([2]);
+  });
+
+  test('pre-send probe: concurrent requests on a stale tunnel share a single probe ping', async () => {
+    const probePings: number[] = [];
+    const { client, connectionCount } = await setupClient(
+      {
+        silent: (wireIndex) => wireIndex === 1,
+        recordFrame: (frame, wireIndex) => {
+          if (frame.frameType === TunnelFrameType.Ping && wireIndex === 1) probePings.push(Date.now());
+        },
+      },
+      {
+        probeStaleAfterMs: 5,
+        probeTimeoutMs: 20,
+        pingIntervalMs: 1_000,
+        pingTimeoutMs: 30_000,
+        reconnectBaseDelayMs: 10,
+        reconnectMaxDelayMs: 20,
+      },
+    );
+    track(client);
+    await waitForStatus(client, 'connected');
+    await wait(20); // let the tunnel go stale
+    const responses = await Promise.all([client.fetch('/health'), client.fetch('/health'), client.fetch('/health')]);
+    for (const r of responses) expect(r.status).toBe(200);
+    expect(connectionCount()).toBeGreaterThan(1);
+    expect(probePings.length).toBe(1);
+  });
+
+  test('pre-send probe: no probe ping while the tunnel is freshly active', async () => {
+    const pings: number[] = [];
+    const { client } = await setupClient(
+      {
+        recordFrame: (frame, wireIndex) => {
+          if (frame.frameType === TunnelFrameType.Ping) pings.push(wireIndex ?? 0);
+        },
+      },
+      { probeStaleAfterMs: 5, pingIntervalMs: 1_000, pingTimeoutMs: 30_000, batchWindowMs: 20 },
+    );
+    track(client);
+    const response = await client.fetch('/health');
+    expect(response.status).toBe(200);
+    // Probe suppressed: the tunnel had fresh activity when the request arrived.
+    expect(pings).toEqual([]);
+  });
+
+  test('fails a request whose response head never arrives as an ambiguous transport failure', async () => {
+    const { client } = await setupClient({}, { headTimeoutMs: 30 });
+    track(client);
+    await waitForStatus(client, 'connected');
+    let caught: unknown = null;
+    await client.fetch('/hang').catch((error: unknown) => {
+      caught = error;
+    });
+    expect(caught).toBeInstanceOf(Error);
+    expect(isAmbiguousTransportFailure(caught)).toBe(true);
+  });
+
+  test('decompresses a gzip response body and strips the encoding header', async () => {
+    const { client } = await setupClient();
+    track(client);
+    const response = await client.fetch('/gzip', { method: 'POST', body: 'compress-me-'.repeat(500) });
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-encoding')).toBeNull();
+    expect(await response.text()).toBe('compress-me-'.repeat(500));
+  });
+
+  // The wake path (visibilitychange/online) only arms when window/document exist.
+  // Bun's test env has neither, so these tests install minimal mocks that let us
+  // dispatch exactly the resume events a mobile WebView fires after backgrounding.
+  const installWakeGlobals = (): {
+    dispatchVisibilityWake: () => void;
+    setHidden: (hidden: boolean) => void;
+    setOffline: (offline: boolean) => void;
+    restore: () => void;
+  } => {
+    const windowEvents = new Map<string, Array<() => void>>();
+    const visibilityListeners: Array<() => void> = [];
+    const documentState = { visibilityState: 'visible' };
+    const networkState = { onLine: true };
+    const win = {
+      addEventListener: (event: string, handler: () => void): void => {
+        const set = windowEvents.get(event) ?? [];
+        set.push(handler);
+        windowEvents.set(event, set);
+      },
+      removeEventListener: (event: string, handler: () => void): void => {
+        const set = windowEvents.get(event) ?? [];
+        windowEvents.set(
+          event,
+          set.filter((h) => h !== handler),
+        );
+      },
+    };
+    const doc = {
+      get visibilityState(): string {
+        return documentState.visibilityState;
+      },
+      addEventListener: (event: string, handler: () => void): void => {
+        if (event === 'visibilitychange') visibilityListeners.push(handler);
+      },
+      removeEventListener: (event: string, handler: () => void): void => {
+        const index = visibilityListeners.indexOf(handler);
+        if (index !== -1) visibilityListeners.splice(index, 1);
+      },
+    };
+    const nav = {
+      get onLine(): boolean {
+        return networkState.onLine;
+      },
+    };
+    const g = globalThis as unknown as Record<string, unknown>;
+    g.window = win;
+    g.document = doc;
+    g.navigator = nav;
+    return {
+      dispatchVisibilityWake: (): void => {
+        documentState.visibilityState = 'visible';
+        for (const handler of [...visibilityListeners]) handler();
+      },
+      setHidden: (hidden: boolean): void => {
+        documentState.visibilityState = hidden ? 'hidden' : 'visible';
+      },
+      setOffline: (offline: boolean): void => {
+        networkState.onLine = !offline;
+      },
+      restore: (): void => {
+        delete g.window;
+        delete g.document;
+        delete g.navigator;
+      },
+    };
+  };
+
+  test('resume wake forces a reconnect when the connected wire is stale', async () => {
+    const { dispatchVisibilityWake, restore } = installWakeGlobals();
+    try {
+      const requestsOnWire: number[] = [];
+      const { client, connectionCount } = await setupClient(
+        {
+          // First wire establishes then ignores every frame — the mobile
+          // "sleeping connection": connected on paper, dead underneath.
+          silent: (wireIndex) => wireIndex === 1,
+          recordFrame: (frame, wireIndex) => {
+            if (frame.frameType === TunnelFrameType.HttpRequest) requestsOnWire.push(wireIndex ?? 0);
+          },
+        },
+        {
+          probeStaleAfterMs: 5,
+          probeTimeoutMs: 20,
+          pingIntervalMs: 1_000,
+          pingTimeoutMs: 30_000,
+          reconnectBaseDelayMs: 10,
+          reconnectMaxDelayMs: 20,
+        },
+      );
+      track(client);
+      await waitForStatus(client, 'connected');
+      await wait(20); // idle beyond probeStaleAfterMs -> stale
+      const before = connectionCount();
+      dispatchVisibilityWake();
+      await waitForStatus(client, 'connected');
+      // The stale wake tore the dead wire down and reconnected before any
+      // request had to probe it — a fresh wire exists even though nothing was
+      // dispatched in between.
+      expect(connectionCount()).toBeGreaterThan(before);
+      const response = await client.fetch('/health');
+      expect(response.status).toBe(200);
+      // The request ran on the fresh (second) wire, not the dead first one.
+      expect(requestsOnWire).toEqual([2]);
+    } finally {
+      restore();
+    }
+  });
+
+  test('resume wake leaves a freshly-active tunnel connected', async () => {
+    const { dispatchVisibilityWake, restore } = installWakeGlobals();
+    try {
+      const { client, connectionCount } = await setupClient(
+        {},
+        {
+          probeStaleAfterMs: 5_000,
+          pingIntervalMs: 1_000,
+          pingTimeoutMs: 30_000,
+          reconnectBaseDelayMs: 10,
+          reconnectMaxDelayMs: 20,
+        },
+      );
+      track(client);
+      await waitForStatus(client, 'connected');
+      const response = await client.fetch('/health');
+      expect(response.status).toBe(200);
+      const before = connectionCount();
+      dispatchVisibilityWake();
+      await wait(50);
+      // The wire had fresh activity, so the wake must not force a reconnect.
+      expect(connectionCount()).toBe(before);
+      expect(client.getStatus().state).toBe('connected');
+    } finally {
+      restore();
+    }
+  });
+
+  test('offline/hidden resume keeps the long backoff cap and the interruptible wait', async () => {
+    const { setHidden, setOffline, dispatchVisibilityWake, restore } = installWakeGlobals();
+    try {
+      setHidden(true);
+      setOffline(true);
+      const { client, connectionCount } = await setupClient(
+        { silent: (wireIndex) => wireIndex === 1 },
+        {
+          pingIntervalMs: 40,
+          pingTimeoutMs: 30,
+          // First-failure base (1s) already exceeds the online cap (100ms) but
+          // sits under the offline/hidden cap (5s), so which cap is honoured is
+          // observable: a short-cap reconnect would fire ~100ms after the
+          // keepalive timeout, a long-cap one stays pending for ~1s.
+          reconnectBaseDelayMs: 1_000,
+          reconnectMaxDelayMs: 100,
+          hiddenOrOfflineMaxDelayMs: 5_000,
+          probeStaleAfterMs: 5_000,
+          probeTimeoutMs: 20,
+        },
+      );
+      track(client);
+      // Wire 1 connects then turns silent; the keepalive times out (~70ms) and a
+      // reconnect is scheduled. Offline/hidden must use the LONG cap: no new wire
+      // appears within 200ms even though the short cap (100ms) would have fired.
+      await wait(200);
+      expect(connectionCount()).toBe(1);
+      // Coming back online + visible interrupts the wait and reconnects at once.
+      setHidden(false);
+      setOffline(false);
+      dispatchVisibilityWake();
+      await waitForStatus(client, 'connected');
+      expect(connectionCount()).toBeGreaterThan(1);
+    } finally {
+      restore();
+    }
   });
 });
