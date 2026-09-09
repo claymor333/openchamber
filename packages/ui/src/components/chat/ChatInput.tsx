@@ -32,6 +32,12 @@ import {
     type ChatDraftIdentity,
     type ChatDraftSnapshot,
 } from '@/lib/chatDraftPersistence';
+import {
+    acquireSendAttempt,
+    canRestoreSubmittedComposer,
+    matchesSubmittedComposer,
+    releaseSendAttempt,
+} from './composer/submit/sendState';
 import { ReviewFlowDialog, type ReviewFlowExecution } from '@/components/session/ReviewFlowDialog';
 import { BtwPanel } from './btw/BtwPanel';
 import { useBtwPanelState } from './btw/useBtwPanelState';
@@ -394,6 +400,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         composerViewStore.view = null;
     }, [composerViewStore]);
     const composerFormRef = React.useRef<HTMLFormElement | null>(null);
+    const sendingRef = React.useRef(false);
+    const [isSending, setIsSending] = React.useState(false);
     const cursorPosRef = React.useRef(0);
     const dropZoneRef = React.useRef<HTMLDivElement>(null);
     const dragEnterCountRef = React.useRef(0);
@@ -1163,7 +1171,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const handleSubmitRef = React.useRef<(options?: SubmitOptions) => Promise<void>>(async () => {});
 
     // Add message to queue instead of sending
-    const handleQueueMessage = React.useCallback(async () => {
+    const handleQueueMessage = React.useCallback(async (allowDuringSend = false) => {
+        if (sendingRef.current && !allowDuringSend) return;
         const inputSnapshot = getCurrentInputSnapshot();
         if (!inputSnapshot.hasContent || !currentSessionId || !messageQueueTarget) return;
 
@@ -1372,9 +1381,15 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     };
 
     const handleSubmit = async (options?: SubmitOptions) => {
-        if (isBtwActive && currentSessionId && (btwPanel.creating || useBtwStore.getState().byParent[currentSessionId]?.pendingSend)) return;
         const submitRuntimeKey = getRuntimeKey();
         const queuedOnly = options?.queuedOnly ?? false;
+        const directSend = !queuedOnly;
+        if (directSend && !acquireSendAttempt(sendingRef)) return;
+        if (directSend) setIsSending(true);
+        let keepSendLock = false;
+
+        try {
+        if (isBtwActive && currentSessionId && (btwPanel.creating || useBtwStore.getState().byParent[currentSessionId]?.pendingSend)) return;
         const queuedMessageId = options?.queuedMessageId;
         const delivery = options?.delivery === 'steer' && sessionPhase !== 'idle' ? 'steer' : undefined;
         const capturedTarget = messageQueueTarget;
@@ -1448,9 +1463,38 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         // the one outcome this handler must never produce. The mentions are
         // snapshotted here because sending clears them before it can fail.
         const confirmedMentionsSnapshot = new Set(confirmedMentionsRef.current);
-        const restoreComposerText = () => {
+        const submittedDraftKey = chatDraftIdentity ? getChatDraftIdentityKey(chatDraftIdentity) : null;
+        const restoreComposerText = (allowEmpty = false) => {
             if (queuedOnly || !inputSnapshot.message) return;
+            const currentText = composerRef.current?.getValue() ?? messageRef.current;
+            const currentDraftKey = currentChatDraftIdentityRef.current
+                ? getChatDraftIdentityKey(currentChatDraftIdentityRef.current)
+                : null;
+            if (!canRestoreSubmittedComposer({
+                submittedText: inputSnapshot.message,
+                currentText,
+                submittedDraftKey,
+                currentDraftKey,
+                allowEmpty,
+            })) return;
             restoreDraft(chatDraftIdentity, inputSnapshot.message, confirmedMentionsSnapshot);
+        };
+        const clearComposerAfterSuccessfulSend = () => {
+            if (!directSend) return;
+            const currentText = composerRef.current?.getValue() ?? messageRef.current;
+            const currentDraftKey = currentChatDraftIdentityRef.current
+                ? getChatDraftIdentityKey(currentChatDraftIdentityRef.current)
+                : null;
+            if (!matchesSubmittedComposer({
+                submittedText: inputSnapshot.message,
+                currentText,
+                submittedDraftKey,
+                currentDraftKey,
+            })) return;
+            setMessage('');
+            messageRef.current = '';
+            confirmedMentionsRef.current.clear();
+            persistDraftImmediately(chatDraftIdentity, '');
         };
 
         // The projection knows the captured send configuration; the full
@@ -1481,7 +1525,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         // rejected turn winds down and the session returns to idle. This avoids
         // aborting the turn (which would surface an "aborted" notice).
         if (currentSessionId && !queuedOnly && autoReviewRunning && !isBtwActive && !commandPlan) {
-            void handleQueueMessage();
+            void handleQueueMessage(true);
             return;
         }
 
@@ -1503,7 +1547,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                 sessionActions.dismissOpenQuestionsForSession(currentSessionId),
             ]);
             if (deniedPermissions || dismissedQuestions) {
-                void handleQueueMessage();
+                void handleQueueMessage(true);
                 return;
             }
         }
@@ -1536,7 +1580,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                     await opencodeClient.summarizeSession(currentSessionId, providerIdToSend, modelIdToSend, compactDirectory);
                 }
             } catch (error) {
-                restoreComposerText();
+                restoreComposerText(true);
                 if (actionName !== 'compact') throw error;
                 toast.error(getSubmitErrorMessage(error, t('chat.chatInput.toast.compactFailed')));
             }
@@ -1685,11 +1729,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
 
         // Clear input (the queue was taken above)
         if (!queuedOnly) {
-            setMessage('');
-            messageRef.current = '';
-            confirmedMentionsRef.current.clear();
-            // Clear per-session draft on submit
-            persistDraftImmediately(chatDraftIdentity, '');
             messageHistory.reset();
             if (attachedFiles.length > 0) {
                 clearAttachedFiles();
@@ -1729,6 +1768,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                         inputMode,
                         sendMessageOptions,
                     );
+                    clearComposerAfterSuccessfulSend();
                     scrollToBottom?.();
                 } catch (error) {
                     restoreConsumedInput();
@@ -1817,6 +1857,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                     return;
                 }
                 const forkDirectory = fork.directory ?? targetDirectory;
+                clearComposerAfterSuccessfulSend();
                 migrateDraft(chatDraftIdentity, createChatDraftIdentity(activeRuntimeKey, forkDirectory, fork.id));
                 if (inlineDraftTarget) {
                     const drafts = useInlineCommentDraftStore.getState();
@@ -1852,7 +1893,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             inputMode,
             sendMessageOptions,
         );
+        keepSendLock = directSend;
         void sendPromise.then(() => {
+            clearComposerAfterSuccessfulSend();
             if (isBtwActive) return;
             // On a draft there is no session yet in this closure: the send path
             // creates one and makes it current before resolving, so the id is
@@ -1926,10 +1969,21 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                 useInputStore.getState().setAttachedFiles(allAttachments);
             }
             toast.error(rawMessage || t('chat.chatInput.toast.messageSendFailed'));
+        }).finally(() => {
+            if (directSend) {
+                releaseSendAttempt(sendingRef);
+                setIsSending(false);
+            }
         });
 
         if (!isMobile) {
             composerRef.current?.focus();
+        }
+        } finally {
+            if (directSend && !keepSendLock) {
+                releaseSendAttempt(sendingRef);
+                setIsSending(false);
+            }
         }
     };
 
@@ -3538,6 +3592,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                         sendIconSizeClass={sendIconSizeClass}
                         stopIconSizeClass={stopIconSizeClass}
                         canSend={canSend}
+                        isSending={isSending}
                         canAbort={canAbort}
                         hasContent={Boolean(hasContent)}
                         isExpandedInput={isExpandedInput}

@@ -2284,6 +2284,7 @@ export const dict = {
   'chat.chatInput.actions.linkGithubPr': 'GitHub PR\'yi bağla',
   'chat.chatInput.actions.modelAgentSettings': 'Model ve agent ayarları',
   'chat.chatInput.actions.sendMessageAria': 'Mesaj gönder',
+  'chat.chatInput.actions.sendingAria': 'Mesaj gönderiliyor',
   'chat.chatInput.actions.queueMessageAria': 'Mesajı kuyruğa ekle',
   'chat.chatInput.actions.stopGeneratingAria': 'Üretmeyi durdur',
   'chat.chatInput.focusMode.toggleAria': 'Odak modunu aç/kapat',

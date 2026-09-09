@@ -205,6 +205,20 @@ const attachMiniHost = (endpoint: FakeEndpoint, hostPrivateKey: CryptoKey, optio
         // Request fully received but never answered — exercises the client's
         // response-head timeout.
         return;
+      } else if (path === '/delayed-post') {
+        setTimeout(() => {
+          if (endpoint.closed || aborted.has(streamId)) return;
+          respondJson(streamId, 200, { ok: true });
+        }, 50);
+      } else if (path === '/api/openchamber/events') {
+        setTimeout(() => {
+          if (endpoint.closed || aborted.has(streamId)) return;
+          sendFrame(encodeTunnelFrame(TunnelFrameType.HttpResponse, streamId, encodeJsonPayload({
+            status: 200,
+            headers: { 'content-type': 'text/event-stream' },
+          })));
+          sendFrame(encodeTunnelFrame(TunnelFrameType.HttpBody, streamId, textEncoder.encode('data: ready\n\n')));
+        }, 50);
       } else {
         respondJson(streamId, 404, { error: 'not found' });
       }
@@ -739,6 +753,18 @@ describe('createRelayTunnelClient', () => {
     expect(isAmbiguousTransportFailure(caught)).toBe(true);
   });
 
+  test('does not apply the response-head timeout to delayed POST or SSE responses', async () => {
+    const { client } = await setupClient({}, { headTimeoutMs: 20 });
+    track(client);
+    const post = await client.fetch('/delayed-post', { method: 'POST', body: 'mutation' });
+    expect(post.status).toBe(200);
+
+    const sse = await client.fetch('/api/openchamber/events', { headers: { Accept: 'text/event-stream' } });
+    expect(sse.status).toBe(200);
+    const event = await sse.body!.getReader().read();
+    expect(event.done).toBe(false);
+  });
+
   test('decompresses a gzip response body and strips the encoding header', async () => {
     const { client } = await setupClient();
     track(client);
@@ -854,6 +880,25 @@ describe('createRelayTunnelClient', () => {
     } finally {
       restore();
     }
+  });
+
+  test('aborting a stale pre-send probe rejects immediately', async () => {
+    const { client } = await setupClient({ silent: true }, { probeStaleAfterMs: 5, probeTimeoutMs: 200 });
+    track(client);
+    await waitForStatus(client, 'connected');
+    await wait(20);
+
+    const controller = new AbortController();
+    const pending = client.fetch('/health', { signal: controller.signal });
+    await wait(10);
+    controller.abort();
+
+    let caught: unknown = null;
+    await pending.catch((error: unknown) => {
+      caught = error;
+    });
+    expect(caught).toBeInstanceOf(DOMException);
+    expect((caught as DOMException).name).toBe('AbortError');
   });
 
   test('resume wake leaves a freshly-active tunnel connected', async () => {
