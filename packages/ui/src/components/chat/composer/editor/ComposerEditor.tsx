@@ -40,6 +40,7 @@ import { replaceWithCaret } from './documentEdits';
 import type { ComposerEditorViewStore } from './viewStore';
 import { composerEditorTheme, composerSelectionExtension } from './theme';
 import { handleComposerHostMouseDown } from './hostMouseDown';
+import { restoreDeferredEnterModifiers } from '../keyboardPolicy';
 
 export interface ComposerSelection {
     start: number;
@@ -97,6 +98,8 @@ export interface ComposerEditorProps {
      */
     autoCorrect?: ComposerAutoCorrect;
     autoCapitalize?: 'none' | 'sentences';
+    /** Retain the untouched key policy before a mobile user opts in. */
+    preserveDeferredEnterShift?: boolean;
     /** Fill the available height instead of growing with the content. */
     fillContainer?: boolean;
     /** Lines of text shown before the editor starts scrolling. */
@@ -335,6 +338,7 @@ export const ComposerEditor = React.forwardRef<ComposerEditorHandle, ComposerEdi
             view.contentDOM.addEventListener('keydown', trackRealEnterMods);
 
             return () => {
+                clearDeferredEnterModifiers();
                 viewRef.current = null;
                 // A stored view is detached, not destroyed: the store owns its
                 // lifetime now, and whoever owns the store ends it.
