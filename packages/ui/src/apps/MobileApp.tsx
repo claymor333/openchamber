@@ -383,6 +383,13 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
           return;
         }
         if (target === 'mcp') {
+          if (isHybridTablet) {
+            // Hybrid tablets render the desktop ContextPanel, which has no MCP
+            // tab. Open the MCP settings page instead of toggling hidden drawer state.
+            setSettingsPage('mcp');
+            openSettingsSurface('page-content');
+            return;
+          }
           setWorkspaceTab('mcp');
           setWorkspaceOpen(true);
           return;
@@ -397,7 +404,7 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
         openSettingsSurface(section ? 'page-content' : 'nav');
       },
     }),
-    [isTabletLayout, openChangesSurface, openFilesSurface, openSettingsSurface, openSurface, setSettingsPage],
+    [isHybridTablet, isTabletLayout, openChangesSurface, openFilesSurface, openSettingsSurface, openSurface, setSettingsPage],
   );
   useDeepLinkHandlers(deepLinkHandlers);
 

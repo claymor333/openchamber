@@ -41,4 +41,25 @@ describe('composer send state', () => {
         expect(canRestoreSubmittedComposer({ ...submitted, currentText: 'edited prompt', allowEmpty: true })).toBe(false);
         expect(canRestoreSubmittedComposer({ ...submitted, currentText: '', allowEmpty: false })).toBe(false);
     });
+
+    test('restores into a newly materialized draft session when its composer is still empty', () => {
+        const submitted = {
+            submittedText: 'original prompt',
+            submittedDraftKey: 'runtime:/repo:draft',
+            currentDraftKey: 'runtime:/repo:materialized-session',
+        };
+
+        expect(canRestoreSubmittedComposer({
+            ...submitted,
+            currentText: '',
+            allowEmpty: true,
+            allowDraftIdentityChange: true,
+        })).toBe(true);
+        expect(canRestoreSubmittedComposer({
+            ...submitted,
+            currentText: 'new prompt',
+            allowEmpty: true,
+            allowDraftIdentityChange: true,
+        })).toBe(false);
+    });
 });

@@ -1577,20 +1577,31 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         // snapshotted here because sending clears them before it can fail.
         const confirmedMentionsSnapshot = new Set(confirmedMentionsRef.current);
         const submittedDraftKey = chatDraftIdentity ? getChatDraftIdentityKey(chatDraftIdentity) : null;
+        const submittedDraftWasOpen = newSessionDraftOpen;
         const restoreComposerText = (allowEmpty = false) => {
             if (queuedOnly || !inputSnapshot.message) return;
             const currentText = composerRef.current?.getValue() ?? messageRef.current;
             const currentDraftKey = currentChatDraftIdentityRef.current
                 ? getChatDraftIdentityKey(currentChatDraftIdentityRef.current)
                 : null;
+            const materializedDraftTransition = submittedDraftWasOpen
+                && !useSessionUIStore.getState().newSessionDraft?.open
+                && currentText === ''
+                && currentDraftKey !== submittedDraftKey
+                && currentChatDraftIdentityRef.current !== null;
             if (!canRestoreSubmittedComposer({
                 submittedText: inputSnapshot.message,
                 currentText,
                 submittedDraftKey,
                 currentDraftKey,
                 allowEmpty,
+                allowDraftIdentityChange: materializedDraftTransition,
             })) return;
-            restoreDraft(chatDraftIdentity, inputSnapshot.message, confirmedMentionsSnapshot);
+            restoreDraft(
+                materializedDraftTransition ? currentChatDraftIdentityRef.current : chatDraftIdentity,
+                inputSnapshot.message,
+                confirmedMentionsSnapshot,
+            );
         };
         const clearComposerAfterSuccessfulSend = () => {
             if (!directSend) return;
