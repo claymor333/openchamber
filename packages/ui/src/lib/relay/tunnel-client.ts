@@ -674,7 +674,6 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
       // keepalive frames handled below.
       lastInboundActivityAt = Date.now();
       // Any received frame proves the tunnel is alive — clear the pong deadline.
-      lastReceivedAt = Date.now();
       if (pongDeadline !== null) {
         clearTimeout(pongDeadline);
         pongDeadline = null;
