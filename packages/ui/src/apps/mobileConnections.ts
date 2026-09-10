@@ -468,7 +468,10 @@ const probeRelaySession = async (
   };
   try {
     const headers = token ? { Authorization: `Bearer ${token}` } : undefined;
-    const session = await raceWithTimeout(timeoutMs, tunnel.fetch('/auth/session', { headers }).catch(() => null));
+    const session = await raceWithTimeout(timeoutMs, tunnel.fetch('/auth/session', { headers }).catch((error) => {
+      logConnect('relay:session:error', { error: String(error) });
+      return null;
+    }));
     logConnect('relay:session', { ok: session?.ok === true, status: session?.status ?? null, hasToken: Boolean(token) });
     if (!session) return finish('unreachable');
     if (session.status === 401) return finish(token ? 'auth-failed' : 'needs-login');
