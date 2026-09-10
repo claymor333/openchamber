@@ -190,7 +190,7 @@ export function ComposerFooter(props: ComposerFooterProps) {
                                     aria-label={t('chat.dictation.start')}
                                 >
                                     <Icon name="mic" className={cn(iconSizeClass, 'text-current')} />
-                                </button>
+                                </button> : null}
                                 <EnterKeyToggle
                                     footerIconButtonClass={footerIconButtonClass}
                                     iconSizeClass={iconSizeClass}
@@ -266,7 +266,7 @@ export function ComposerFooter(props: ComposerFooterProps) {
                             onInsert={onDictationInsert}
                             onInsertAndSend={onDictationInsertAndSend}
                             onContentHeightChange={onDictationContentHeightChange}
-                        />
+                        /> : null}
                         <EnterKeyToggle
                             footerIconButtonClass={footerIconButtonClass}
                             iconSizeClass={iconSizeClass}
