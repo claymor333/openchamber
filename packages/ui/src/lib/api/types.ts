@@ -1,5 +1,5 @@
 import type { WorktreeMetadata } from '@/types/worktree';
-import type { DesktopSettings } from '@/lib/settings/registry';
+import type { DraftStarterRef } from '@/lib/draftStarters';
 
 type RuntimePlatform = 'web' | 'desktop' | 'vscode';
 
