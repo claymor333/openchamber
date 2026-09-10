@@ -14,6 +14,7 @@ declare module "bun:test" {
     toContain(expected: unknown): void;
     toBeDefined(): void;
     toBeUndefined(): void;
+    toMatchObject(expected: unknown): void;
     rejects: {
       toThrow(expected?: string | RegExp | (new (...args: never[]) => unknown)): Promise<void>;
     };
