@@ -1,11 +1,6 @@
 package com.openchamber.app;
 
-import android.app.WallpaperColors;
-import android.app.WallpaperManager;
-import android.graphics.Color;
 import android.os.Build;
-import android.os.Handler;
-import android.os.Looper;
 
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
@@ -16,32 +11,33 @@ import com.getcapacitor.annotation.CapacitorPlugin;
 /**
  * Bridges the system wallpaper seed palette (Material You) to the WebView.
  *
- * <p>{@link WallpaperManager#getWallpaperColors(int)} and
- * {@link WallpaperManager.OnColorsChangedListener} require Android 8.1 (API 27).
- * On older devices the plugin still registers and answers {@code supported: false}
- * so the web side falls back to a fixed brand seed.
+ * <p>API-27 Android classes live in {@link MaterialYouApi27}, not in this
+ * plugin's class signature. This keeps Capacitor plugin discovery safe on the
+ * app's API-24 minimum while still enabling wallpaper listeners on newer
+ * devices.
  */
 @CapacitorPlugin(name = "MaterialYou")
-public class MaterialYouPlugin extends Plugin implements WallpaperManager.OnColorsChangedListener {
+public class MaterialYouPlugin extends Plugin {
 
     private static final String EVENT_WALLPAPER_COLORS = "wallpaperColors";
 
     private boolean wallpaperColorsSupported;
+    private Object api27Delegate;
 
     @Override
     public void load() {
         super.load();
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
             wallpaperColorsSupported = true;
-            WallpaperManager.getInstance(getContext())
-                .addOnColorsChangedListener(this, new Handler(Looper.getMainLooper()));
+            api27Delegate = MaterialYouApi27.register(getContext(), this);
         }
     }
 
     @Override
     protected void handleOnDestroy() {
-        if (wallpaperColorsSupported) {
-            WallpaperManager.getInstance(getContext()).removeOnColorsChangedListener(this);
+        if (api27Delegate != null) {
+            MaterialYouApi27.unregister(api27Delegate);
+            api27Delegate = null;
         }
         super.handleOnDestroy();
     }
@@ -49,46 +45,16 @@ public class MaterialYouPlugin extends Plugin implements WallpaperManager.OnColo
     /** Resolves the current system wallpaper seed colors (primary/secondary/tertiary). */
     @PluginMethod
     public void getWallpaperColors(PluginCall call) {
-        call.resolve(toResult(currentWallpaperColors()));
+        if (!wallpaperColorsSupported || api27Delegate == null) {
+            JSObject result = new JSObject();
+            result.put("supported", false);
+            call.resolve(result);
+            return;
+        }
+        call.resolve(MaterialYouApi27.currentResult(api27Delegate));
     }
 
-    @Override
-    public void onColorsChanged(WallpaperColors colors, int which) {
-        if ((which & WallpaperManager.FLAG_SYSTEM) != 0) {
-            notifyListeners(EVENT_WALLPAPER_COLORS, toResult(colors));
-        }
-    }
-
-    private WallpaperColors currentWallpaperColors() {
-        if (!wallpaperColorsSupported) {
-            return null;
-        }
-        return WallpaperManager.getInstance(getContext())
-            .getWallpaperColors(WallpaperManager.FLAG_SYSTEM);
-    }
-
-    private JSObject toResult(WallpaperColors colors) {
-        JSObject result = new JSObject();
-        result.put("supported", wallpaperColorsSupported);
-        if (colors == null) {
-            return result;
-        }
-        Color primary = colors.getPrimaryColor();
-        if (primary != null) {
-            result.put("primaryColor", toHex(primary));
-        }
-        Color secondary = colors.getSecondaryColor();
-        if (secondary != null) {
-            result.put("secondaryColor", toHex(secondary));
-        }
-        Color tertiary = colors.getTertiaryColor();
-        if (tertiary != null) {
-            result.put("tertiaryColor", toHex(tertiary));
-        }
-        return result;
-    }
-
-    private static String toHex(Color color) {
-        return String.format("#%06X", color.toArgb() & 0xFFFFFF);
+    void emitWallpaperColors(JSObject result) {
+        notifyListeners(EVENT_WALLPAPER_COLORS, result);
     }
 }

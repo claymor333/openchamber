@@ -15,6 +15,7 @@ type SubmittedComposerState = {
     currentText: string;
     submittedDraftKey: string | null;
     currentDraftKey: string | null;
+    allowDraftIdentityChange?: boolean;
 };
 
 export const matchesSubmittedComposer = ({
@@ -32,7 +33,8 @@ export const canRestoreSubmittedComposer = ({
     submittedDraftKey,
     currentDraftKey,
     allowEmpty,
+    allowDraftIdentityChange,
 }: SubmittedComposerState & { allowEmpty?: boolean }): boolean => (
-    submittedDraftKey === currentDraftKey
+    (submittedDraftKey === currentDraftKey || (allowDraftIdentityChange === true && currentText === ''))
     && (submittedText === currentText || (allowEmpty === true && currentText === ''))
 );

@@ -154,6 +154,7 @@ const GeneralSectionContent: React.FC = () => {
                 ...(!isVSCode ? ['terminalQuickKeys' as const] : []),
                 ...(!isVSCode ? ['terminalShell' as const] : []),
                 ...(!isVSCode ? ['terminalLoginShell' as const] : []),
+                'hybridTabletUI',
                 'messageTransport',
                 'reportUsage',
             ]} />
