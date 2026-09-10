@@ -25,10 +25,10 @@ import {
   encodeFragmentedMessage,
   encodeJsonPayload,
   encodeTunnelFrame,
+  encodeDeliveryAck,
   type OutboundFrameBatcher,
   type TunnelFrame,
 } from './tunnel-codec';
-import { TUNNEL_FRAGMENT_FLAG } from './protocol';
 import {
   isHttpResponsePayload,
   isStreamAbortPayload,
@@ -162,6 +162,8 @@ export interface RelayTunnelClientOptions {
   batchWindowMs?: number;
   /** Advertise frame batching in the handshake. Default true. */
   batch?: boolean;
+  /** Advertise downstream delivery acknowledgements. Default true. */
+  flowControl?: boolean;
   reconnectBaseDelayMs?: number;
   reconnectMaxDelayMs?: number;
   hiddenOrOfflineMaxDelayMs?: number;
@@ -252,6 +254,7 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
   const createWire = options.createWireSocket ?? ((url: string) => wrapNativeWebSocket(new WebSocket(url)));
 
   let closed = false;
+  let terminalError: Error | null = null;
   let status: RelayTunnelStatus = { state: 'idle' };
   // Plain listener set — status must not fan out through shared stores.
   const statusListeners = new Set<(next: RelayTunnelStatus) => void>();
@@ -413,7 +416,7 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
 
     let handshake;
     try {
-      handshake = await createClientHandshake(options.hostEncPubJwk, { batch: advertiseBatch });
+      handshake = await createClientHandshake(options.hostEncPubJwk, { batch: advertiseBatch, flowControl: options.flowControl });
     } catch (error) {
       if (generation !== attemptGeneration || closed) return;
       failAttempt(generation, toError(error), true);
@@ -443,6 +446,10 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
     let channel: ActiveChannel | null = null;
     let cryptoChannel: EstablishedChannelCrypto | null = null;
     let batchNegotiated = false;
+    let flowControlNegotiated = false;
+    let receivedBytes = 0;
+    let acknowledgedBytes = 0;
+    let ackTimer: ReturnType<typeof setTimeout> | null = null;
     let batcher: OutboundFrameBatcher | null = null;
     // Idle tracking: updated on any non-Ping/Pong frame in EITHER direction.
     // Ping/Pong are excluded so the keepalive can't sustain itself.
@@ -459,6 +466,10 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
     };
 
     const cleanupTimers = (): void => {
+      if (ackTimer !== null) {
+        clearTimeout(ackTimer);
+        ackTimer = null;
+      }
       if (helloInterval !== null) {
         clearInterval(helloInterval);
         helloInterval = null;
@@ -490,6 +501,7 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
     function failAttemptLocal(error: Error, asErrorState = false, terminal = false): void {
       if (settled || generation !== attemptGeneration) return;
       settled = true;
+      if (terminal) terminalError = error;
       cleanupTimers();
       settleProbeWaiters();
       probeActivityRef = null;
@@ -525,9 +537,10 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
       }
     };
 
-    const establish = (crypto: EstablishedChannelCrypto, batch: boolean): void => {
+    const establish = (crypto: EstablishedChannelCrypto, batch: boolean, flowControl: boolean): void => {
       cryptoChannel = crypto;
       batchNegotiated = batch;
+      flowControlNegotiated = flowControl;
       if (helloInterval !== null) {
         clearInterval(helloInterval);
         helloInterval = null;
@@ -548,10 +561,11 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
           .then(async () => {
             if (channelObj.dead) return;
             const encrypted = await crypto.encryptor.encrypt(plaintext);
+            if (channelObj.dead) return;
             wire.send(encrypted);
           })
           .catch(() => {
-            // Send failures surface via wire close; do not break the chain.
+            failAttemptLocal(new Error('relay encrypt/send failed'));
           });
       };
       const localBatcher = batch
@@ -565,10 +579,6 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
         dead: false,
         send(frame: Uint8Array): void {
           if (channelObj.dead) return;
-          const frameType = frame[0] & ~TUNNEL_FRAGMENT_FLAG;
-          if (frameType !== TunnelFrameType.Ping && frameType !== TunnelFrameType.Pong) {
-            lastActivityAt = Date.now();
-          }
           if (localBatcher) localBatcher.enqueue(frame);
           else sendEncryptedPlaintext(frame);
         },
@@ -576,7 +586,7 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
       channel = channelObj;
       activeChannel = channelObj;
       consecutiveFailures = 0;
-      lastActivityAt = Date.now();
+      lastReceivedAt = Date.now();
       setStatus({ state: 'connected' });
       resolveWaiters(channelObj);
       // Keep resume wake listeners installed while connected so a backgrounding
@@ -609,9 +619,8 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
       };
       pingTimer = setInterval(() => {
         const now = Date.now();
-        // Only ping when the tunnel has actually been idle; streaming traffic
-        // keeps lastActivityAt fresh, so sustained bursts send zero pings.
-        if (now - lastActivityAt < pingIntervalMs) return;
+        // Slow-but-progressing inbound traffic is healthy, even without Pongs.
+        if (now - lastReceivedAt < pingIntervalMs) return;
         channelObj.send(encodeTunnelFrame(TunnelFrameType.Ping, 0, EMPTY_PAYLOAD));
         // Expect a Pong (or any frame) before the deadline; otherwise it's dead.
         if (pongDeadline === null) {
@@ -623,6 +632,14 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
       }, pingIntervalMs);
     };
 
+    const acknowledgeDelivery = (): void => {
+      if (ackTimer !== null) clearTimeout(ackTimer);
+      ackTimer = null;
+      if (!channel || channel.dead || receivedBytes === acknowledgedBytes) return;
+      acknowledgedBytes = receivedBytes;
+      channel.send(encodeTunnelFrame(TunnelFrameType.DeliveryAck, 0, encodeDeliveryAck(receivedBytes)));
+    };
+
     const handleTunnelFrame = (channelObj: ActiveChannel, plaintext: Uint8Array): void => {
       let frame: TunnelFrame;
       try {
@@ -631,7 +648,17 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
         failAttemptLocal(toError(error));
         return;
       }
+      if (frame.frameType === TunnelFrameType.DeliveryAck) {
+        failAttemptLocal(new Error('unexpected downstream delivery acknowledgement'));
+        return;
+      }
+      if (flowControlNegotiated && frame.streamId !== 0) {
+        // Count even late/cancelled streams: they still consumed sender credit.
+        receivedBytes += plaintext.length;
+        if (ackTimer === null) ackTimer = setTimeout(acknowledgeDelivery, 10);
+      }
       // Any received frame proves the tunnel is alive — clear the pong deadline.
+      lastReceivedAt = Date.now();
       if (pongDeadline !== null) {
         clearTimeout(pongDeadline);
         pongDeadline = null;
@@ -644,8 +671,6 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
         return;
       }
       if (frame.frameType === TunnelFrameType.Pong) return;
-      // Non-keepalive inbound traffic counts as activity (suppresses our ping).
-      lastActivityAt = Date.now();
 
       let payload = frame.payload;
       if (frame.frameType === TunnelFrameType.WsText || frame.frameType === TunnelFrameType.WsBinary) {
@@ -688,7 +713,7 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
             const action = await handshake.handleText(data);
             if (action.type === 'established') {
               if (cryptoChannel) return;
-              establish(action.channel, action.batch);
+              establish(action.channel, action.batch, action.flowControl);
             } else if (action.type === 'fail') {
               failAttemptLocal(new Error(`relay handshake failed: ${action.reason}`));
             }
@@ -717,23 +742,20 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
             failAttemptLocal(toError(error));
             return;
           }
-          if (batchNegotiated) {
-            // One encrypted message may carry several tunnel frames; dispatch
-            // each in order through the same per-frame handling as legacy.
-            let frames: Uint8Array[];
-            try {
-              frames = decodeFrameBatch(plaintext);
-            } catch (error) {
-              failAttemptLocal(toError(error));
-              return;
-            }
-            for (const frame of frames) {
-              if (settled || generation !== attemptGeneration || currentChannel.dead) return;
-              handleTunnelFrame(currentChannel, frame);
-            }
+          let frames: Uint8Array[];
+          try {
+            frames = batchNegotiated ? decodeFrameBatch(plaintext) : [plaintext];
+          } catch (error) {
+            failAttemptLocal(toError(error));
             return;
           }
-          handleTunnelFrame(currentChannel, plaintext);
+          for (const frame of frames) {
+            if (settled || generation !== attemptGeneration || currentChannel.dead) return;
+            handleTunnelFrame(currentChannel, frame);
+          }
+          // One ACK per received batch, rather than one per fragment. Small
+          // tails use the timer so a final frame cannot strand sender credit.
+          if (flowControlNegotiated && receivedBytes - acknowledgedBytes >= 16 * 1024) acknowledgeDelivery();
         })
         .catch((error: unknown) => {
           failAttemptLocal(toError(error));
@@ -770,6 +792,7 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
   const waitForChannel = (signal?: AbortSignal): Promise<ActiveChannel> => {
     if (closed) return Promise.reject(new Error('relay tunnel closed'));
     if (signal?.aborted) return Promise.reject(abortError());
+    if (terminalError) return Promise.reject(terminalError);
     if (activeChannel && !activeChannel.dead) return Promise.resolve(activeChannel);
     return new Promise<ActiveChannel>((resolve, reject) => {
       let onAbort: (() => void) | null = null;
