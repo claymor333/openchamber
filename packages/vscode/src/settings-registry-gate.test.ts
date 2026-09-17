@@ -48,6 +48,11 @@ describe('filterPersistableSettingsChanges', () => {
     assert.deepEqual(result, { themeId: 'a' });
   });
 
+  test('rejects the generated local mobile session swipe setting', () => {
+    assert.equal(SETTINGS_REGISTRY_FIELDS.mobileSessionSwipeLimit?.local, true);
+    assert.deepEqual(filterPersistableSettingsChanges({ mobileSessionSwipeLimit: 3 }), {});
+  });
+
   test('ignores prototype keys that are not registry fields', () => {
     assert.deepEqual(filterPersistableSettingsChanges({ constructor: 'x', toString: 'y' }, fields), {});
   });

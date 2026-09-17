@@ -56,6 +56,9 @@ The default scripts assume the local Homebrew/Xcode paths prepared for this work
 
 Override `DEVELOPER_DIR`, `JAVA_HOME`, `ANDROID_HOME`, or `ANDROID_SDK_ROOT` when using a different local setup.
 
+Session swipe feedback uses the shared UI's `@capacitor/haptics` adapter on native iOS and Android.
+Hosted mobile and PWA builds use `navigator.vibrate` when available and otherwise do nothing.
+
 Required local tools:
 
 - Xcode with iOS Simulator support.

@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import type { Session } from '@opencode-ai/sdk/v2';
-import { isSessionPinned } from '@/stores/useSessionPinnedStore';
+import { isSessionPinnedForRuntime } from '@/stores/useSessionPinnedStore';
+import { getRuntimeKey } from '@/lib/runtime-switch';
 import { countSyncPerformance } from './performance-diagnostics';
 
 export type SessionActivityPhase = 'active' | 'settled';
@@ -195,9 +196,10 @@ export const compareSessionsByLifecycleOrder = (
   right: Session,
   pinnedSessionIds: Set<string>,
   rankById: ReadonlyMap<string, number>,
+  runtimeKey = getRuntimeKey(),
 ): number => {
-  const leftPinned = isSessionPinned(pinnedSessionIds, sessionDirectory(left), left.id);
-  const rightPinned = isSessionPinned(pinnedSessionIds, sessionDirectory(right), right.id);
+  const leftPinned = isSessionPinnedForRuntime(pinnedSessionIds, runtimeKey, sessionDirectory(left), left.id);
+  const rightPinned = isSessionPinnedForRuntime(pinnedSessionIds, runtimeKey, sessionDirectory(right), right.id);
   if (leftPinned !== rightPinned) return leftPinned ? -1 : 1;
 
   const leftFallback = baselineRank(left, leftPinned);
@@ -223,6 +225,7 @@ export const orderSessionsByLifecycleScopes = (
     rootIds: readonly string[];
     childrenByParentId: ReadonlyMap<string, readonly string[]>;
   },
+  runtimeKey = getRuntimeKey(),
 ): Session[] => {
   countSyncPerformance('sidebarOrderBuilds');
   const sessionIds = new Set(sessions.map((session) => session.id));
@@ -268,7 +271,7 @@ export const orderSessionsByLifecycleScopes = (
 
   const metadataById = new Map(sessions.map((session) => {
     const parentId = parentIdOf(session);
-    const pinned = isSessionPinned(pinnedSessionIds, sessionDirectory(session), session.id);
+    const pinned = isSessionPinnedForRuntime(pinnedSessionIds, runtimeKey, sessionDirectory(session), session.id);
     const fallback = baselineRank(session, pinned);
     return [session.id, {
       parentId,

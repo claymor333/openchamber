@@ -18,9 +18,17 @@ export interface SessionFolder {
 
 export type SessionFoldersMap = Record<string, SessionFolder[]>;
 
+export type SessionFolderHydrationStatus = 'loading' | 'ready' | 'failed';
+export type SessionFolderHydrationState = {
+  status: SessionFolderHydrationStatus;
+  generation: number;
+  error?: string;
+};
+
 interface SessionFoldersState {
   foldersMap: SessionFoldersMap;
   collapsedFolderIds: Set<string>;
+  folderHydrationByRuntime: Map<string, SessionFolderHydrationState>;
 }
 
 interface SessionFoldersActions {
@@ -62,6 +70,18 @@ let activeFolderRuntimeKey = getRuntimeKey();
 let folderRuntimeGeneration = 0;
 let folderMutationRevision = 0;
 const lastDiskUpdatedAtByRuntime = new Map<string, number>();
+
+const setFolderHydrationState = (
+  runtimeKey: string,
+  state: SessionFolderHydrationState,
+): void => {
+  if (runtimeKey !== activeFolderRuntimeKey || runtimeKey !== getRuntimeKey()) return;
+  useSessionFoldersStore.setState((current) => {
+    const next = new Map(current.folderHydrationByRuntime);
+    next.set(runtimeKey, state);
+    return { folderHydrationByRuntime: next };
+  });
+};
 
 type FolderStorageIndex = {
   version: 2;
@@ -331,6 +351,9 @@ export const useSessionFoldersStore = create<SessionFoldersStore>()(
     (set, get) => ({
       foldersMap: readPersistedFolders(),
       collapsedFolderIds: readPersistedCollapsed(),
+      folderHydrationByRuntime: new Map([
+        [activeFolderRuntimeKey, { status: 'loading', generation: folderRuntimeGeneration }],
+      ]),
 
       resetForRuntimeSwitch: (runtimeKey: string): void => {
         try { flushPendingBrowserPersistence(); } catch { /* deferred storage retains failed writes */ }
@@ -344,6 +367,9 @@ export const useSessionFoldersStore = create<SessionFoldersStore>()(
         set({
           foldersMap: readPersistedFolders(runtimeKey),
           collapsedFolderIds: readPersistedCollapsed(runtimeKey),
+          folderHydrationByRuntime: new Map([
+            [runtimeKey, { status: 'loading', generation: folderRuntimeGeneration }],
+          ]),
         });
         queueMicrotask(() => void hydrateSessionFoldersFromDisk());
       },
@@ -616,20 +642,27 @@ const hydrateSessionFoldersFromDisk = async (): Promise<void> => {
     return;
   }
 
+  const runtimeKey = activeFolderRuntimeKey;
+  const generation = folderRuntimeGeneration;
+
   if (isVSCodeWebview()) {
     diskHydrated = true;
+    setFolderHydrationState(runtimeKey, { status: 'ready', generation });
     return;
   }
 
   diskHydrationInFlight = true;
-  const runtimeKey = activeFolderRuntimeKey;
-  const generation = folderRuntimeGeneration;
   const baselineMutationRevision = folderMutationRevision;
   let completed = false;
 
   try {
     const response = await runtimeFetch(SESSION_FOLDERS_API_PATH).catch(() => null);
     if (!response || !response.ok) {
+      setFolderHydrationState(runtimeKey, {
+        status: 'failed',
+        generation,
+        error: 'folder hydration request failed',
+      });
       return;
     }
 
@@ -641,11 +674,17 @@ const hydrateSessionFoldersFromDisk = async (): Promise<void> => {
     } | null;
 
     if (!parsed) {
+      setFolderHydrationState(runtimeKey, {
+        status: 'failed',
+        generation,
+        error: 'folder hydration response was invalid',
+      });
       return;
     }
 
     if (parsed.exists === false) {
       completed = true;
+      setFolderHydrationState(runtimeKey, { status: 'ready', generation });
       return;
     }
 
@@ -669,8 +708,13 @@ const hydrateSessionFoldersFromDisk = async (): Promise<void> => {
       persistCollapsed(diskCollapsed);
     }
     completed = true;
+    setFolderHydrationState(runtimeKey, { status: 'ready', generation });
   } catch {
-    // ignored
+    setFolderHydrationState(runtimeKey, {
+      status: 'failed',
+      generation,
+      error: 'folder hydration failed',
+    });
   } finally {
     if (generation === folderRuntimeGeneration && runtimeKey === getRuntimeKey()) {
       diskHydrationInFlight = false;

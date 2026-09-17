@@ -2,6 +2,7 @@ import React from 'react';
 import { ChatContainer } from '@/components/chat/ChatContainer';
 import { ChatErrorBoundary } from '@/components/chat/ChatErrorBoundary';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import type { RenderMobileHeader } from '@/apps/MobileHeader';
 
 type ChatViewProps = {
     active?: boolean;
@@ -13,6 +14,7 @@ type ChatViewProps = {
     messagesEnabled?: boolean;
     readOnly?: boolean;
     initialAllowPromptingSubagentSessions?: boolean;
+    renderMobileHeader?: RenderMobileHeader;
 };
 
 export const ChatView: React.FC<ChatViewProps> = ({
@@ -20,6 +22,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
     messagesEnabled,
     readOnly = false,
     initialAllowPromptingSubagentSessions,
+    renderMobileHeader,
 }) => {
     const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
 
@@ -30,6 +33,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
                 messagesEnabled={messagesEnabled}
                 readOnly={readOnly}
                 initialAllowPromptingSubagentSessions={initialAllowPromptingSubagentSessions}
+                renderMobileHeader={renderMobileHeader}
             />
         </ChatErrorBoundary>
     );

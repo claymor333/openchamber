@@ -43,9 +43,11 @@ interface ScrollToBottomButtonProps {
         while the floating status row is hidden away from the live edge. */
     working?: boolean;
     onClick: () => void;
+    /** Extra room for the mobile status/header stack above the composer. */
+    bottomOffset?: number;
 }
 
-const ScrollToBottomButton: React.FC<ScrollToBottomButtonProps> = ({ visible, working = false, onClick }) => {
+const ScrollToBottomButton: React.FC<ScrollToBottomButtonProps> = ({ visible, working = false, onClick, bottomOffset = 0 }) => {
     const { t } = useI18n();
     return (
         <div
@@ -53,6 +55,7 @@ const ScrollToBottomButton: React.FC<ScrollToBottomButtonProps> = ({ visible, wo
                 'pointer-events-none absolute bottom-full inset-x-0 mb-2 transition-opacity duration-100',
                 visible ? 'opacity-100' : 'opacity-0',
             )}
+            style={bottomOffset > 0 ? { bottom: `calc(100% + ${bottomOffset}px)` } : undefined}
         >
             {/* The same column that centres the composer, so the pill's left
                 edge lines up exactly with the input frame. */}

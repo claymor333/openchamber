@@ -44,7 +44,7 @@ import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { getProjectLabel, normalizePath } from './mobilePaths';
 import { CHAT_DRAFT_PROJECT_ID, isChatDirectoryPath } from '@/lib/chatDirectories';
 import { partitionSidebarSessions } from '@/components/session/sidebar/list/sessionCollection';
-import { sortProjectsByOrder } from '@/components/session/sidebar/list/projectSort';
+import { orderSessionScopeProjects } from '@/components/session/sidebar/projects/sessionScopeOrder';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useI18n } from '@/lib/i18n';
 import { matchesRankQuery, rankByQuery } from '@/lib/search/fuzzySearch';
@@ -54,6 +54,7 @@ import { cn } from '@/lib/utils';
 import {
   listProjectWorktrees,
   partitionWorktreesByRegisteredProject,
+  worktreeMapsEqual,
 } from '@/lib/worktrees/worktreeManager';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { mergeLiveSessionWithGlobalSession, refreshGlobalSessions, useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
@@ -62,7 +63,7 @@ import { useMobileSessionTreeStore } from '@/stores/useMobileSessionTreeStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSessionDisplayStore, type ProjectSortOrder } from '@/stores/useSessionDisplayStore';
 import { useSessionPinnedStore } from '@/stores/useSessionPinnedStore';
-import { orderWorktrees, useWorktreeOrderStore } from '@/stores/useWorktreeOrderStore';
+import { useWorktreeOrderStore } from '@/stores/useWorktreeOrderStore';
 import {
   EMPTY_SESSION_ORDER_RANKS,
   orderSessionsByLifecycleScopes,
@@ -120,6 +121,7 @@ type ProjectMeta = {
   iconImage?: { mime: string; updatedAt: number; source: 'custom' | 'auto' } | null;
   iconBackground?: string | null;
   isGitRepo: boolean;
+  rootBranch?: string | null;
   worktrees: WorktreeMetadata[];
   /** Read by the 'date-added' / 'recent' project orders. */
   addedAt?: number;
@@ -968,9 +970,9 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
   // availableWorktreesByProject on connect) so the FIRST open already shows
   // worktrees; the per-open refresh below keeps them fresh without ever
   // blanking the list.
-  const [worktreesByProject, setWorktreesByProject] = React.useState<Map<string, WorktreeMetadata[]>>(
-    () => new Map(useSessionUIStore.getState().availableWorktreesByProject),
-  );
+  const worktreesByProject = useSessionUIStore((state) => state.availableWorktreesByProject);
+  const projectRootBranches = useSessionUIStore((state) => state.projectRootBranches);
+  const setWorktreeTopologyAuthority = useSessionUIStore((state) => state.setWorktreeTopologyAuthority);
   const [gitProjectPaths, setGitProjectPaths] = React.useState<Set<string>>(() => {
     const seeded = new Set<string>();
     for (const [path, worktrees] of useSessionUIStore.getState().availableWorktreesByProject) {
@@ -1014,16 +1016,36 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
   React.useEffect(() => {
     if (!open || projects.length === 0) return;
     let cancelled = false;
+    const topologyGeneration = Date.now();
+    for (const project of projects) {
+      const path = normalizePath(project.path);
+      if (path) setWorktreeTopologyAuthority(path, { status: 'loading', generation: topologyGeneration });
+    }
     const run = async () => {
       const entries = await Promise.all(
         projects.map(async (project) => {
           const path = normalizePath(project.path);
           if (!path) return null;
-          const isGitRepo = await git.checkIsGitRepository(path).catch(() => false);
-          const worktrees = isGitRepo
-            ? await listProjectWorktrees({ id: project.id, path }).catch(() => [])
-            : [];
-          return [path, worktrees, isGitRepo] as const;
+          try {
+            const isGitRepo = await git.checkIsGitRepository(path);
+            const worktrees = isGitRepo ? await listProjectWorktrees({ id: project.id, path }) : [];
+            if (!cancelled) {
+              setWorktreeTopologyAuthority(path, { status: 'ready', generation: topologyGeneration });
+              for (const worktree of worktrees) {
+                setWorktreeTopologyAuthority(worktree.path, { status: 'ready', generation: topologyGeneration });
+              }
+            }
+            return [path, worktrees, isGitRepo] as const;
+          } catch {
+            if (!cancelled) {
+              setWorktreeTopologyAuthority(path, {
+                status: 'failed',
+                generation: topologyGeneration,
+                error: 'worktree topology refresh failed',
+              });
+            }
+            return null;
+          }
         }),
       );
       if (cancelled) return;
@@ -1035,18 +1057,24 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
           if (entry[2]) nextGitProjectPaths.add(entry[0]);
         }
       }
-      setWorktreesByProject(partitionWorktreesByRegisteredProject(projects, discoveredWorktreesByProject));
+      const partitioned = partitionWorktreesByRegisteredProject(projects, discoveredWorktreesByProject);
+      const currentByProject = useSessionUIStore.getState().availableWorktreesByProject;
+      if (!worktreeMapsEqual(partitioned, currentByProject)) {
+        useSessionUIStore.setState({
+          availableWorktrees: [...partitioned.values()].flat(),
+          availableWorktreesByProject: partitioned,
+        });
+      }
       setGitProjectPaths(nextGitProjectPaths);
     };
     void run();
     return () => {
       cancelled = true;
     };
-  }, [git, open, projects, worktreeRefreshKey]);
+  }, [git, open, projects, setWorktreeTopologyAuthority, worktreeRefreshKey]);
 
   const projectsMeta = React.useMemo<ProjectMeta[]>(
-    () =>
-      sortProjectsByOrder(
+    () => orderSessionScopeProjects(
         projects.map((project) => ({
           id: project.id,
           label: project.label?.trim() || getProjectLabel(project.path),
@@ -1054,19 +1082,31 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
           icon: project.icon,
           color: project.color,
           iconImage: project.iconImage,
-          iconBackground: project.iconBackground,
-          isGitRepo: gitProjectPaths.has(normalizePath(project.path)),
-          worktrees: orderWorktrees(
-            worktreeOrderByProject[project.id],
-            worktreesByProject.get(normalizePath(project.path)) ?? [],
-          ),
-          addedAt: project.addedAt,
+           iconBackground: project.iconBackground,
+           isGitRepo: gitProjectPaths.has(normalizePath(project.path)),
+           rootBranch: projectRootBranches.get(project.id) ?? null,
+           addedAt: project.addedAt,
           lastOpenedAt: project.lastOpenedAt,
         })),
         projectSortOrder,
         manualProjectOrder,
-      ),
-    [gitProjectPaths, manualProjectOrder, projectSortOrder, projects, worktreeOrderByProject, worktreesByProject],
+        worktreesByProject,
+        worktreeOrderByProject,
+      ).map((project) => ({
+        id: project.id,
+        label: project.label,
+        path: project.normalizedPath,
+        icon: project.icon,
+        color: project.color,
+        iconImage: project.iconImage,
+        iconBackground: project.iconBackground,
+        isGitRepo: project.isGitRepo,
+        rootBranch: project.rootBranch,
+        worktrees: project.worktrees,
+        addedAt: project.addedAt,
+        lastOpenedAt: project.lastOpenedAt,
+      })),
+    [gitProjectPaths, manualProjectOrder, projectRootBranches, projectSortOrder, projects, worktreeOrderByProject, worktreesByProject],
   );
 
   /**
@@ -1144,7 +1184,9 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
       if (!bucket) {
         bucket = {
           key,
-          label: worktree?.branch || getProjectLabel(normalizedBucketPath),
+          label: worktree?.branch || (normalizedBucketPath === node.project.path
+            ? node.project.rootBranch || getProjectLabel(normalizedBucketPath)
+            : getProjectLabel(normalizedBucketPath)),
           path: normalizedBucketPath,
           worktree,
           sessions: [],

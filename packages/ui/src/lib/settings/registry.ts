@@ -105,6 +105,8 @@ export type SettingsUiBinding<T> = {
 
 export type SettingsFieldSpec<T> = {
   scope: SettingsScope;
+  /** Device-local field with an explicit bridge/server rejection marker. */
+  local?: true;
   parse(value: unknown, raw: SettingsRawDocument): T | undefined;
   ui?: SettingsUiBinding<T>;
   /** Profile fields the owner chose to store per surface kind (change on a phone stays on phones). */
@@ -501,6 +503,13 @@ export const SETTINGS_REGISTRY = {
     ui: uiStore('desktopWindowControlsStyle', (v) => useUIStore.getState().setDesktopWindowControlsStyle(v)),
   }),
   inputBarOffset: field({ scope: 'device', surfaces: ['mobile', 'web'], parse: parseFiniteNumber, ui: uiStore('inputBarOffset', (v) => useUIStore.getState().setInputBarOffset(v)) }),
+  mobileSessionSwipeLimit: field({
+    scope: 'device',
+    local: true,
+    surfaces: ['mobile'],
+    parse: parseIntegerInRange(1, 5),
+    ui: uiStore('mobileSessionSwipeLimit', (v) => useUIStore.getState().setMobileSessionSwipeLimit(v), { autoSave: false }),
+  }),
 } as const;
 
 export type SettingsKey = keyof typeof SETTINGS_REGISTRY;
@@ -681,6 +690,7 @@ export const buildSettingsRegistrySnapshot = (): SettingsRegistrySnapshot => {
     if (spec.derived) entry.derived = true;
     if (spec.secret) entry.secret = true;
     if (spec.computed) entry.computed = true;
+    if (spec.local) entry.local = true;
     fields[key] = entry;
   }
   for (const key of LOCAL_DEVICE_KEYS) {

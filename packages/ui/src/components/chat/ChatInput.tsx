@@ -183,6 +183,7 @@ import {
     mergeSessionInputHistory,
 } from './inputHistory';
 import { useUserMessageHistory } from '@/sync/sync-context';
+import type { MobileHeaderHostOptions } from '@/apps/MobileHeader';
 
 // Lazy like in ChatMessage: a static import would pull the @pierre/diffs and
 // Shiki stacks into the eager startup graph for a dialog opened on demand.
@@ -332,6 +333,7 @@ interface ChatInputProps {
     scrollToLatest?: () => void;
     active?: boolean;
     draftPresentationExiting?: boolean;
+    mobileHeader?: (options: MobileHeaderHostOptions) => React.ReactNode;
 }
 
 const resolveChatDraftIdentity = (sessionId: string | null): ChatDraftIdentity | null => {
@@ -351,6 +353,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     scrollToLatest,
     active = true,
     draftPresentationExiting = false,
+    mobileHeader,
 }) => {
     const { t } = useI18n();
     // Track if we restored a draft on mount (for text selection)
@@ -372,6 +375,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const [storedInputMode, setInputMode] = React.useState<'normal' | 'shell'>('normal');
     const inputModeParentRef = React.useRef<string | null>(null);
     const [isDragging, setIsDragging] = React.useState(false);
+    const [mobileHeaderPopoverOpen, setMobileHeaderPopoverOpen] = React.useState(false);
     const [isInternalDrag, setIsInternalDrag] = React.useState(false);
     // At most one picker is open at a time; the prompt language decides which.
     const [openAutocomplete, setOpenAutocomplete] = React.useState<AutocompleteKind | null>(null);
@@ -3089,10 +3093,67 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             prPickerOpen,
             linearPickerOpen,
             isDragging,
+            headerPopoverOpen: mobileHeaderPopoverOpen,
         },
     });
     const mobileComposerExpanded = mobileShell.expanded;
     const mobileTextareaFocused = mobileShell.focused;
+    const [mobileSwipePreview, setMobileSwipePreview] = React.useState(false);
+    const mobileSwipePreviewHideTimerRef = React.useRef<number | null>(null);
+    const handleMobileSwipePreviewChange = React.useCallback((visible: boolean) => {
+        if (mobileSwipePreviewHideTimerRef.current !== null) {
+            window.clearTimeout(mobileSwipePreviewHideTimerRef.current);
+            mobileSwipePreviewHideTimerRef.current = null;
+        }
+        if (visible) {
+            setMobileSwipePreview(true);
+            return;
+        }
+        // Let the header metadata finish its fade before releasing the
+        // composer offset. This also survives the header remount caused by a
+        // session selection, which otherwise flashes the composer at rest.
+        mobileSwipePreviewHideTimerRef.current = window.setTimeout(() => {
+            mobileSwipePreviewHideTimerRef.current = null;
+            setMobileSwipePreview(false);
+        }, 220);
+    }, []);
+    const { cancelOverlayCloseRestore, setExternalHold, setSwipeGestureActive } = mobileShell;
+
+    const handleMobileHeaderPopoverOpenChange = React.useCallback((open: boolean) => {
+        if (!isMobile) return;
+        if (open) {
+            cancelOverlayCloseRestore();
+            setExternalHold(true);
+            setMobileHeaderPopoverOpen(true);
+            // The header owns the popover, but the composer owns keyboard
+            // focus. Close the keyboard before measuring the body-level panel.
+            composerRef.current?.blur();
+            return;
+        }
+
+        setExternalHold(false, true);
+        setMobileHeaderPopoverOpen(false);
+    }, [cancelOverlayCloseRestore, isMobile, setExternalHold]);
+    const handleMobileHeaderPopoverOpenIntent = React.useCallback(() => {
+        if (!isMobile) return;
+        cancelOverlayCloseRestore();
+        setExternalHold(true);
+    }, [cancelOverlayCloseRestore, isMobile, setExternalHold]);
+
+    React.useEffect(() => {
+        if (mobileHeader || !mobileHeaderPopoverOpen) return;
+        setExternalHold(false, false);
+        setSwipeGestureActive(false);
+        setMobileHeaderPopoverOpen(false);
+    }, [mobileHeader, mobileHeaderPopoverOpen, setExternalHold, setSwipeGestureActive]);
+
+    React.useEffect(() => () => {
+        if (mobileSwipePreviewHideTimerRef.current !== null) {
+            window.clearTimeout(mobileSwipePreviewHideTimerRef.current);
+        }
+        setExternalHold(false, false);
+        setSwipeGestureActive(false);
+    }, [setExternalHold, setSwipeGestureActive]);
 
 
     const applyAssistSuggestion = React.useCallback((text: string) => {
@@ -3223,6 +3284,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                 isMobileExpanded && 'flex h-full min-h-0 flex-col pt-2',
                 isMobile && 'bottom-safe-area oc-mobile-composer'
             )}
+            data-mobile-swipe-preview={mobileSwipePreview ? 'true' : undefined}
             style={isMobile && inputBarOffset > 0 ? { marginBottom: `${inputBarOffset}px` } : undefined}
         >
             {showDesktopDraftPresentation ? (
@@ -3605,6 +3667,15 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                 />
             ) : null}
             {currentSessionId ? <BtwPanel parentSessionId={currentSessionId} panel={btwPanel} onExit={handleExitBtw} /> : null}
+            {isMobile && mobileHeader && currentSessionId && !newSessionDraftOpen
+                ? mobileHeader({
+                    mobileTextareaFocused,
+                    onSwipeGestureActive: setSwipeGestureActive,
+                    onSwipePreviewChange: handleMobileSwipePreviewChange,
+                    onPopoverOpenIntent: handleMobileHeaderPopoverOpenIntent,
+                    onPopoverOpenChange: handleMobileHeaderPopoverOpenChange,
+                })
+                : null}
         </form>
 
         {/* Issue Picker Dialog */}

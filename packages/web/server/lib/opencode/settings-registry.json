@@ -574,6 +574,13 @@
         "web"
       ]
     },
+    "mobileSessionSwipeLimit": {
+      "scope": "device",
+      "surfaces": [
+        "mobile"
+      ],
+      "local": true
+    },
     "theme": {
       "scope": "device",
       "local": true

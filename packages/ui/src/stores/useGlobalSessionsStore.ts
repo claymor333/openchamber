@@ -22,7 +22,13 @@ import {
 
 export { mergeSessionDirectoryMetadata, resolveGlobalSessionDirectory } from './globalSessionStructure';
 
-type GlobalSessionsStatus = 'idle' | 'loading' | 'ready' | 'error';
+export type GlobalSessionsStatus = 'idle' | 'loading' | 'ready' | 'error';
+
+export type GlobalSessionDirectoryAuthority = {
+  status: 'loading' | 'ready' | 'failed' | 'partial';
+  generation: number;
+  error?: string;
+};
 
 type LoadResult = {
   activeSessions: Session[];
@@ -39,6 +45,8 @@ type GlobalSessionsState = {
   entityById: ReadonlyMap<string, Session>;
   structure: GlobalSessionStructure;
   sessionsByDirectory: Map<string, Session[]>;
+  /** Completeness for each directory; aggregate status is not sufficient for swipe targets. */
+  directoryAuthority: Map<string, GlobalSessionDirectoryAuthority>;
   reviewTransferBySessionId: Map<string, ReviewTransferDirection>;
   mutationRevision: number;
   mutationRevisionBySessionId: Map<string, number>;
@@ -85,6 +93,7 @@ let inflightLoad: Promise<LoadResult> | null = null;
 // Bumped on runtime switch: an in-flight load from the previous instance must
 // not apply its (stale) snapshot after the reset.
 let loadGeneration = 0;
+let authorityGeneration = 0;
 
 export const mergeLiveSessionWithGlobalSession = (
   liveSession: Session,
@@ -220,6 +229,7 @@ const replaceSessionsForDirectories = (
 
 type DirectoryPageResult = {
   directories: Set<string>;
+  failedDirectories: Set<string>;
   sessions: Session[];
   errors: unknown[];
 };
@@ -249,11 +259,12 @@ const fetchDirectoryPages = async (
         },
       };
     } catch (reason) {
-      return { status: 'rejected' as const, reason };
+        return { status: 'rejected' as const, directory, reason };
     }
   });
 
   const fulfilledDirectories = new Set<string>();
+  const failedDirectories = new Set<string>();
   const sessions: Session[] = [];
   const errors: unknown[] = [];
 
@@ -262,11 +273,32 @@ const fetchDirectoryPages = async (
       fulfilledDirectories.add(result.value.directory);
       sessions.push(...result.value.sessions);
     } else {
+      failedDirectories.add(result.directory);
       errors.push(result.reason);
     }
   }
 
-  return { directories: fulfilledDirectories, sessions, errors };
+  return { directories: fulfilledDirectories, failedDirectories, sessions, errors };
+};
+
+const authorityPatch = (
+  current: ReadonlyMap<string, GlobalSessionDirectoryAuthority>,
+  directories: Iterable<string>,
+  status: GlobalSessionDirectoryAuthority['status'],
+  generation: number,
+  error?: string,
+): Map<string, GlobalSessionDirectoryAuthority> => {
+  const next = new Map(current);
+  for (const directory of directories) {
+    const normalized = normalizePath(directory);
+    if (!normalized) continue;
+    const existing = next.get(normalized);
+    if (existing && existing.generation > generation) continue;
+    const value: GlobalSessionDirectoryAuthority = { status, generation };
+    if (error) value.error = error;
+    next.set(normalized, value);
+  }
+  return next;
 };
 
 const upsertSessionIntoList = (sessions: Session[], session: Session): Session[] => {
@@ -605,6 +637,7 @@ const initialState = buildManagedChatSessionsState(initialManagedChatSessions);
 
 export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => ({
   ...initialState,
+  directoryAuthority: new Map(),
   mutationRevision: 0,
   mutationRevisionBySessionId: new Map(),
   hasLoaded: false,
@@ -640,9 +673,11 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
 
   resetForRuntimeSwitch: () => {
     loadGeneration += 1;
+    authorityGeneration += 1;
     inflightLoad = null;
     set({
       ...buildManagedChatSessionsState(readManagedChatSessions()),
+      directoryAuthority: new Map(),
       mutationRevision: 0,
       mutationRevisionBySessionId: new Map(),
       hasLoaded: false,
@@ -656,16 +691,24 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
       return inflightLoad;
     }
 
-    const generation = loadGeneration;
+    const runtimeGeneration = loadGeneration;
+    const generation = ++authorityGeneration;
     const baselineRevision = get().mutationRevision;
+    const knownDirectories = new Set<string>([
+      ...get().sessionsByDirectory.keys(),
+      ...get().directoryAuthority.keys(),
+    ]);
     const loadPromise = (async () => {
       let rootsReady = false;
       try {
         await ensureChatsRootDirectory();
-        if (generation !== loadGeneration) return { activeSessions: [], archivedSessions: [] };
+        if (runtimeGeneration !== loadGeneration) return { activeSessions: [], archivedSessions: [] };
         rootsReady = true;
         get().rehydrateManagedChatSessions();
-        set((state) => (state.status === 'loading' ? state : { status: 'loading' }));
+        set((state) => ({
+          status: 'loading',
+          directoryAuthority: authorityPatch(state.directoryAuthority, knownDirectories, 'loading', generation),
+        }));
         const sdk = opencodeClient.getSdkClient();
         // One inclusive fetch, split client-side. The server's
         // `time_archived IS NULL` active filter would exclude restored
@@ -677,7 +720,7 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
           pageSize: PAGE_SIZE,
         });
 
-        if (generation !== loadGeneration) {
+        if (runtimeGeneration !== loadGeneration) {
           // Runtime switched mid-load: this snapshot belongs to the previous
           // instance — drop it.
           return { activeSessions: [], archivedSessions: [] };
@@ -685,19 +728,31 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
         const { active, archived } = splitGlobalSessionsByArchived(allSessions);
         set((state) => {
           const reconciled = overlayMutationsSince(state, active, archived, baselineRevision);
-          return applySnapshot(state, reconciled.activeSessions, reconciled.archivedSessions, 'ready');
+          const next = applySnapshot(state, reconciled.activeSessions, reconciled.archivedSessions, 'ready');
+          const snapshotDirectories = new Set<string>([
+            ...knownDirectories,
+            ...reconciled.activeSessions.map(resolveGlobalSessionDirectory).filter((value): value is string => Boolean(value)),
+            ...reconciled.archivedSessions.map(resolveGlobalSessionDirectory).filter((value): value is string => Boolean(value)),
+          ]);
+          return {
+            ...next,
+            directoryAuthority: authorityPatch(state.directoryAuthority, snapshotDirectories, 'ready', generation),
+          };
         });
         const committed = get();
         raiseSessionOrderingBaselines(committed.activeSessions);
         return { activeSessions: committed.activeSessions, archivedSessions: committed.archivedSessions };
       } catch (error) {
-        if (generation !== loadGeneration) {
+        if (runtimeGeneration !== loadGeneration) {
           return { activeSessions: [], archivedSessions: [] };
         }
         if (!rootsReady) {
           // No classification authority arrived. Preserve both memory and the
           // persisted snapshot so a retry can hydrate it after root recovery.
-          set({ status: 'error' });
+          set((state) => ({
+            status: 'error',
+            directoryAuthority: authorityPatch(state.directoryAuthority, knownDirectories, 'failed', generation, 'global session load failed'),
+          }));
           const state = get();
           return { activeSessions: state.activeSessions, archivedSessions: state.archivedSessions };
         }
@@ -709,7 +764,11 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
             state.archivedSessions,
             baselineRevision,
           );
-          return applySnapshot(state, reconciled.activeSessions, reconciled.archivedSessions, 'error');
+          const next = applySnapshot(state, reconciled.activeSessions, reconciled.archivedSessions, 'error');
+          return {
+            ...next,
+            directoryAuthority: authorityPatch(state.directoryAuthority, knownDirectories, 'failed', generation, 'global session load failed'),
+          };
         });
         const committed = get();
         return { activeSessions: committed.activeSessions, archivedSessions: committed.archivedSessions };
@@ -733,15 +792,23 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
       return { activeSessions: state.activeSessions, archivedSessions: state.archivedSessions };
     }
 
-    const generation = loadGeneration;
+    const runtimeGeneration = loadGeneration;
+    const generation = ++authorityGeneration;
     const baselineRevision = get().mutationRevision;
+    const directorySetList = [...directorySet];
+    set((state) => ({
+      directoryAuthority: authorityPatch(state.directoryAuthority, directorySetList, 'loading', generation),
+    }));
     try {
       await ensureChatsRootDirectory();
     } catch {
+      set((state) => ({
+        directoryAuthority: authorityPatch(state.directoryAuthority, directorySetList, 'failed', generation, 'session directory root unavailable'),
+      }));
       const state = get();
       return { activeSessions: state.activeSessions, archivedSessions: state.archivedSessions };
     }
-    if (generation !== loadGeneration) {
+    if (runtimeGeneration !== loadGeneration) {
       const state = get();
       return { activeSessions: state.activeSessions, archivedSessions: state.archivedSessions };
     }
@@ -749,7 +816,7 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
     const sdk = opencodeClient.getSdkClient();
     const fetched = await fetchDirectoryPages(sdk, directorySet);
 
-    if (generation !== loadGeneration) {
+    if (runtimeGeneration !== loadGeneration) {
       const state = get();
       return { activeSessions: state.activeSessions, archivedSessions: state.archivedSessions };
     }
@@ -782,11 +849,23 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
         : buildSessionsByDirectory(nextActiveSessions);
       const activeChanged = nextActiveSessions !== state.activeSessions;
       const archivedChanged = nextArchivedSessions !== state.archivedSessions;
+      const nextDirectoryAuthority = authorityPatch(
+        authorityPatch(state.directoryAuthority, fetched.directories, 'ready', generation),
+        fetched.failedDirectories,
+        'failed',
+        generation,
+        'directory session refresh failed',
+      );
 
       if (
         !activeChanged
         && !archivedChanged
         && nextSessionsByDirectory === state.sessionsByDirectory
+        && nextDirectoryAuthority.size === state.directoryAuthority.size
+        && [...nextDirectoryAuthority].every(([directory, authority]) => {
+          const previous = state.directoryAuthority.get(directory);
+          return previous?.status === authority.status && previous.generation === authority.generation;
+        })
       ) {
         return state;
       }
@@ -800,6 +879,7 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
         reviewTransferBySessionId: nextActiveSessions === state.activeSessions
           ? state.reviewTransferBySessionId
           : buildReviewTransferMap(nextActiveSessions),
+        directoryAuthority: nextDirectoryAuthority,
       };
     });
 
