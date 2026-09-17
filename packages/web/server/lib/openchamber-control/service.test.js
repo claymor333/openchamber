@@ -141,6 +141,35 @@ describe('OpenChamber control service', () => {
     });
   });
 
+  it('creates an independent root session without the calling session as parent', async () => {
+    const { service, sessionService } = createService();
+    await service.execute('session.create', {
+      directory: '/repo',
+      title: 'Top-level review',
+      independent: true,
+      contextSessionId: 'ses_root',
+    }, '/repo');
+
+    expect(sessionService.create).toHaveBeenCalledWith({
+      directory: '/repo',
+      title: 'Top-level review',
+    });
+  });
+
+  it.each([
+    [{ independent: 'true' }, 'independent must be a boolean'],
+    [{ independent: true, roleKey: 'review:tests', contextSessionId: 'ses_root' }, 'independent cannot be combined with roleKey'],
+  ])('rejects invalid independent session options', async (options, error) => {
+    const { service, sessionService } = createService();
+
+    await expect(service.execute('session.create', {
+      directory: '/repo',
+      ...options,
+    }, '/repo')).rejects.toThrow(error);
+
+    expect(sessionService.create).not.toHaveBeenCalled();
+  });
+
   it('rejects an invalid role key before creating a managed child', async () => {
     const { service, sessionService } = createService();
 

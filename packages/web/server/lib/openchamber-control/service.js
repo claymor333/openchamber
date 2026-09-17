@@ -266,8 +266,18 @@ export const createOpenChamberControlService = (dependencies) => {
     if (input.lastAssistant === true && input.wait !== true) throw new OpenChamberControlError('lastAssistant requires wait', 400);
     const sessionID = asNonEmptyString(input.sessionId);
     const roleKey = asNonEmptyString(input.roleKey);
+    const independent = input.independent === true;
+    if (action === 'session.create'
+      && input.independent !== undefined
+      && input.independent !== true
+      && input.independent !== false) {
+      throw new OpenChamberControlError('independent must be a boolean', 400);
+    }
     if (action === 'session.create' && input.roleKey !== undefined && input.roleKey !== null && !roleKey) {
       throw new OpenChamberControlError('roleKey must be a non-empty string', 400);
+    }
+    if (action === 'session.create' && independent && roleKey) {
+      throw new OpenChamberControlError('independent cannot be combined with roleKey', 400);
     }
     let directory = asNonEmptyString(input.directory) || (!input.projectId ? asNonEmptyString(contextDirectory) : null);
     if (sessionID && action !== 'session.create' && !asNonEmptyString(input.directory) && !input.projectId) {
@@ -294,7 +304,7 @@ export const createOpenChamberControlService = (dependencies) => {
       ...(action === 'session.create' && roleKey
         ? { roleKey: roleKey.trim() }
         : {}),
-      ...(action === 'session.create' && asNonEmptyString(input.contextSessionId)
+      ...(action === 'session.create' && !independent && asNonEmptyString(input.contextSessionId)
         ? { parentSessionId: input.contextSessionId.trim() }
         : {}),
     };

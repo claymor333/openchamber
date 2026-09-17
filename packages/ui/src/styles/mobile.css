@@ -496,6 +496,13 @@
   top: calc(var(--oc-safe-area-top) + 16px) !important;
 }
 
+/* The composer owns the usable bottom edge while editing. Hide only the chat
+   column's bottom header; the session sidebar and context rail are siblings and
+   keep their own fixed controls and safe-area insets. */
+.oc-mobile-chat-column:has([data-chat-input="true"]:focus-within) > .oc-mobile-header {
+  display: none;
+}
+
 /* Paint the document canvas with the theme background in the native app — the same
    thing .desktop-runtime does for body/#root, which the Capacitor shell never got.
    The status bar is overlaid (transparent), and in dark mode `color-scheme: dark`

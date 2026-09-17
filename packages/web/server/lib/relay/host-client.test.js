@@ -107,7 +107,8 @@ const startFakeRelay = () => {
           // A socket a failed test left open would hold server.close() until
           // the hook timeout; drop them so a failure is reported once.
           for (const client of wss.clients) client.terminate();
-          server.closeAllConnections();
+          server.closeAllConnections?.();
+          server.closeIdleConnections?.();
           wss.close();
           server.close(() => r());
         }),

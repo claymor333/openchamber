@@ -889,10 +889,15 @@ describe('createRelayTunnelClient', () => {
         return networkState.onLine;
       },
     };
-    const g = globalThis as unknown as Record<string, unknown>;
-    g.window = win;
-    g.document = doc;
-    g.navigator = nav;
+    const globalNames = [
+      ['window', win],
+      ['document', doc],
+      ['navigator', nav],
+    ] as const;
+    const previousDescriptors = globalNames.map(([name]) => [name, Object.getOwnPropertyDescriptor(globalThis, name)] as const);
+    for (const [name, value] of globalNames) {
+      Object.defineProperty(globalThis, name, { configurable: true, value, writable: true });
+    }
     return {
       dispatchVisibilityWake: (): void => {
         documentState.visibilityState = 'visible';
@@ -905,9 +910,10 @@ describe('createRelayTunnelClient', () => {
         networkState.onLine = !offline;
       },
       restore: (): void => {
-        delete g.window;
-        delete g.document;
-        delete g.navigator;
+        for (const [name, descriptor] of previousDescriptors) {
+          if (descriptor) Object.defineProperty(globalThis, name, descriptor);
+          else Reflect.deleteProperty(globalThis, name);
+        }
       },
     };
   };

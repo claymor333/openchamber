@@ -676,6 +676,15 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
         failAttemptLocal(toError(error));
         return;
       }
+      if (frame.frameType === TunnelFrameType.DeliveryAck) {
+        failAttemptLocal(new Error('unexpected downstream delivery acknowledgement'));
+        return;
+      }
+      if (flowControlNegotiated && frame.streamId !== 0) {
+        // Count even late/cancelled streams: they still consumed sender credit.
+        receivedBytes += plaintext.length;
+        if (ackTimer === null) ackTimer = setTimeout(acknowledgeDelivery, 10);
+      }
       // Any received frame proves the peer and tunnel are alive, including
       // keepalive frames handled below.
       lastInboundActivityAt = Date.now();

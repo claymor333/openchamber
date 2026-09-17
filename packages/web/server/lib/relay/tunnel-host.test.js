@@ -117,6 +117,26 @@ describe('tunnel-host HTTP body forwarding', () => {
     await loopback.stop();
   });
 
+  test('does not invoke fetch abort when cancelling a request', async () => {
+    const { host, loopback } = await createHarness();
+    const originalAbort = AbortController.prototype.abort;
+    let abortCalled = false;
+    AbortController.prototype.abort = function abort(...args) {
+      abortCalled = true;
+      return originalAbort.apply(this, args);
+    };
+
+    try {
+      await host.handleFrame(httpHead());
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      await host.handleFrame(encodeTunnelFrame(TunnelFrameType.StreamAbort, 1, new Uint8Array(0)));
+      expect(abortCalled).toBe(false);
+    } finally {
+      AbortController.prototype.abort = originalAbort;
+      await loopback.stop();
+    }
+  });
+
   test('forwards an empty body when the client delivered an explicit empty frame', async () => {
     const { host, loopback } = await createHarness();
     await host.handleFrame(httpHead({ hasBody: true }));
@@ -130,7 +150,7 @@ describe('tunnel-host HTTP body forwarding', () => {
   });
 
   test('GET forwards immediately with no body wait', async () => {
-    const { host, loopback } = await createHarness();
+    const { host, loopback, sentFrames } = await createHarness();
     await host.handleFrame(encodeTunnelFrame(TunnelFrameType.HttpRequest, 1, encodeJsonPayload({
       method: 'GET',
       path: '/api/health',
@@ -142,6 +162,8 @@ describe('tunnel-host HTTP body forwarding', () => {
     const received = await waitFor(() => loopback.requests.length === 1);
     expect(received).toBe(true);
     expect(loopback.requests[0].method).toBe('GET');
+    await waitFor(() => sentFrames.some((f) => f.frameType === TunnelFrameType.HttpResponse));
+    expect(sentFrames.filter((f) => f.frameType === TunnelFrameType.HttpResponse).length).toBe(1);
     await loopback.stop();
   });
 });

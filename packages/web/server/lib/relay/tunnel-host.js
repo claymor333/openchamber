@@ -154,12 +154,9 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
     dropStream(streamId);
     cancelPendingFrames(streamId);
     if (stream.kind === 'http') {
-      try {
-        stream.body?.error(new Error(String(reason ?? 'aborted')));
-      } catch {
-        // body already closed
-      }
-      stream.abort.abort();
+      // The stream ownership check below stops forwarding and cancels the
+      // response body once available. Aborting the fetch signal can surface its
+      // reason as an uncaught exception in Bun.
     } else {
       try {
         stream.socket.terminate();
@@ -169,8 +166,8 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
     }
   };
 
-  const waitForBackpressure = async (signal) => {
-    while (!closed && getBufferedAmount() > BACKPRESSURE_LIMIT_BYTES) {
+  const waitForBackpressure = async (signal, isCancelled = () => false) => {
+    while (!closed && !isCancelled() && getBufferedAmount() > BACKPRESSURE_LIMIT_BYTES) {
       if (signal?.aborted) return;
       await sleep(BACKPRESSURE_POLL_MS);
     }
@@ -208,6 +205,7 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
   };
 
   const forwardRequest = async (streamId, stream, url, method, request, body, loopbackOrigin) => {
+    const isCancelled = () => closed || streams.get(streamId) !== stream;
     let response;
     try {
       response = await fetch(url, {
@@ -218,7 +216,7 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
         signal: stream.abort.signal,
       });
     } catch (error) {
-      if (streams.get(streamId) === stream) {
+      if (!isCancelled()) {
         dropStream(streamId);
         await sendAbort(streamId, error?.message ?? 'loopback request failed');
       }
@@ -236,7 +234,6 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
       && typeof createGzip === 'function'
       && isCompressibleContentType(response.headers.get('content-type'));
     if (shouldCompress) responseHeaders['content-encoding'] = 'gzip';
-    await sendJson(TunnelFrameType.HttpResponse, streamId, { status: response.status, headers: responseHeaders });
 
     try {
       await sendJson(TunnelFrameType.HttpResponse, streamId, { status: response.status, headers: responseHeaders });
@@ -244,21 +241,33 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
         if (shouldCompress) {
           const gz = Readable.fromWeb(response.body).pipe(createGzip());
           for await (const chunk of gz) {
-            if (closed || stream.abort.signal.aborted) return;
+            if (isCancelled()) {
+              await response.body?.cancel();
+              return;
+            }
             const bytes = chunk instanceof Uint8Array ? chunk : new Uint8Array(chunk);
             for (const piece of chunkPayload(bytes, MAX_TUNNEL_PAYLOAD_BYTES)) {
-              await waitForBackpressure(stream.abort.signal);
-              if (closed || stream.abort.signal.aborted) return;
+              await waitForBackpressure(stream.abort.signal, isCancelled);
+              if (isCancelled()) {
+                await response.body?.cancel();
+                return;
+              }
               await send(encodeTunnelFrame(TunnelFrameType.HttpBody, streamId, piece));
             }
           }
         } else {
           for await (const chunk of response.body) {
-            if (closed || stream.abort.signal.aborted) return;
+            if (isCancelled()) {
+              await response.body?.cancel();
+              return;
+            }
             const bytes = chunk instanceof Uint8Array ? chunk : new Uint8Array(chunk);
             for (const piece of chunkPayload(bytes, MAX_TUNNEL_PAYLOAD_BYTES)) {
-              await waitForBackpressure(stream.abort.signal);
-              if (closed || stream.abort.signal.aborted) return;
+              await waitForBackpressure(stream.abort.signal, isCancelled);
+              if (isCancelled()) {
+                await response.body?.cancel();
+                return;
+              }
               await send(encodeTunnelFrame(TunnelFrameType.HttpBody, streamId, piece));
             }
           }
@@ -346,7 +355,11 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
       // this stream from here (abort/StreamEnd close the controller).
       if (deliveryDeadline) clearTimeout(deliveryDeadline);
       resolveBodyEnd();
-      void forwardRequest(streamId, stream, url, method, request, liveStream, loopbackOrigin);
+      void forwardRequest(streamId, stream, url, method, request, liveStream, loopbackOrigin).catch((error) => {
+        if (streams.get(streamId) !== stream) return;
+        dropStream(streamId);
+        void sendAbort(streamId, error?.message ?? 'loopback request failed').catch(() => {});
+      });
     };
 
     stream.body = {
@@ -428,7 +441,11 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
     }
     const stream = { kind: 'http', abort: new AbortController(), body: null, noBody: false };
     streams.set(streamId, stream);
-    void runHttpStream(streamId, request);
+    void runHttpStream(streamId, request).catch((error) => {
+      if (streams.get(streamId) !== stream) return;
+      dropStream(streamId);
+      void sendAbort(streamId, error?.message ?? 'loopback request failed').catch(() => {});
+    });
   };
 
   const handleHttpBody = (streamId, payload) => {

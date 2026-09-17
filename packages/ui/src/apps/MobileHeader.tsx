@@ -21,7 +21,9 @@ export const MobileHeader: React.FC<{
   /** Tablet: size the title trigger to its text instead of the free width, so
       a wide header doesn't turn the switcher into a full-width tap target. */
   compactTitle?: boolean;
-}> = ({ onOpenSessions, onOpenWorkspace, compactTitle = false }) => {
+  /** Safe-area edge occupied by the header. */
+  safeAreaEdge?: 'top' | 'bottom';
+}> = ({ onOpenSessions, onOpenWorkspace, compactTitle = false, safeAreaEdge = 'top' }) => {
   const { t } = useI18n();
   const [metadataOpen, setMetadataOpen] = React.useState(false);
   const [switcherOpen, setSwitcherOpen] = React.useState(false);
@@ -95,7 +97,10 @@ export const MobileHeader: React.FC<{
     <>
       <header
         className="oc-mobile-header relative z-30 flex shrink-0 items-center gap-1 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80"
-        style={{ paddingTop: 'var(--oc-safe-area-top, 0px)' }}
+        style={{
+          paddingTop: safeAreaEdge === 'top' ? 'var(--oc-safe-area-top, 0px)' : undefined,
+          paddingBottom: safeAreaEdge === 'bottom' ? 'var(--oc-safe-area-bottom, 0px)' : undefined,
+        }}
       >
         <div className="flex h-[var(--oc-header-height,56px)] w-full items-center gap-1 px-2">
           <button

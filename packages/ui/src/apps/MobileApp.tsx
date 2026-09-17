@@ -594,38 +594,40 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
         <div className="flex h-full min-w-0 flex-1" data-chat-area="true">
           <div
             className={cn(
-              'flex h-full min-w-0 flex-1 flex-col',
+              'oc-mobile-chat-column flex h-full min-w-0 flex-1 flex-col',
               // Fully covered by the expanded panel — hide the header + chat so
               // nothing (title, donut, toolbar) shows through on top of it.
               isExpandedHybridPanel && 'hidden',
             )}
             data-page-scroll-lock="true"
+            style={{ paddingTop: 'var(--oc-safe-area-top, 0px)' }}
           >
-            <MobileHeader
-              onOpenSessions={() => (isTabletLayout ? toggleSidebar() : setSessionsSheetOpen(true))}
-              onOpenWorkspace={() => {
-                if (isHybridTablet) {
-                  if (panelIsOpen) return; // already visible; never toggle-close
-                  if (directoryKey) {
-                    const tabs = contextPanelState?.tabs ?? [];
-                    const lastMode = tabs.length > 0 ? (contextPanelState?.activeTabId
-                      ? tabs.find((t) => t.id === contextPanelState.activeTabId)?.mode
-                      : tabs[tabs.length - 1]?.mode) : undefined;
-                    openContextSurface(directoryKey, lastMode ?? 'git');
-                  }
-                  return;
-                }
-                setWorkspaceOpen(true);
-              }}
-              compactTitle={isTabletLayout}
-            />
-            <main ref={chatMainRef} className="relative min-h-0 flex-1 overflow-hidden" data-page-scroll-lock="true">
-              <div className="h-full w-full">
-                <ErrorBoundary>
-                  <ChatView />
-                </ErrorBoundary>
-              </div>
-            </main>
+             <main ref={chatMainRef} className="relative min-h-0 flex-1 overflow-hidden" data-page-scroll-lock="true">
+               <div className="h-full w-full">
+                 <ErrorBoundary>
+                   <ChatView />
+                 </ErrorBoundary>
+               </div>
+             </main>
+             <MobileHeader
+               onOpenSessions={() => (isTabletLayout ? toggleSidebar() : setSessionsSheetOpen(true))}
+               onOpenWorkspace={() => {
+                 if (isHybridTablet) {
+                   if (panelIsOpen) return; // already visible; never toggle-close
+                   if (directoryKey) {
+                     const tabs = contextPanelState?.tabs ?? [];
+                     const lastMode = tabs.length > 0 ? (contextPanelState?.activeTabId
+                       ? tabs.find((t) => t.id === contextPanelState.activeTabId)?.mode
+                       : tabs[tabs.length - 1]?.mode) : undefined;
+                     openContextSurface(directoryKey, lastMode ?? 'git');
+                   }
+                   return;
+                 }
+                 setWorkspaceOpen(true);
+               }}
+               compactTitle={isTabletLayout}
+               safeAreaEdge="bottom"
+             />
           </div>
 
           {/* Mounted permanently on phones (parked off-screen while closed) so

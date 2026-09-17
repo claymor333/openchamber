@@ -51,6 +51,7 @@ const ALL_PARAMETER_PROPERTIES = {
   directory: { type: 'string', description: 'Absolute checkout or session directory; defaults to the current session directory' },
   sessionId: { type: 'string' },
   roleKey: { type: 'string', description: 'Stable logical role key for child-session reuse, such as review:tests; use the same key for corrections or re-reviews' },
+  independent: { type: 'boolean', description: 'Create a top-level session instead of a child of the current session; cannot be combined with roleKey' },
   messageId: { type: 'string', description: 'Optional fork boundary message ID' },
   taskId: { type: 'string' },
   title: { type: 'string' },
