@@ -16,6 +16,7 @@ import React from 'react';
 import { SessionGoalButton, SessionGoalObjectiveCounter } from '@/components/chat/SessionGoalButton';
 import { ComposerDictation } from '@/components/dictation/ComposerDictation';
 import { Icon } from '@/components/icon/Icon';
+import type { GuestAttachItem } from '@/hooks/useGuestSurfaces';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { ModelControls } from '../../ModelControls';
@@ -60,6 +61,8 @@ export interface ComposerFooterProps {
     onOpenPrPicker: () => void;
     showLinearPicker?: boolean;
     onOpenLinearPicker?: () => void;
+    attachGuests?: readonly GuestAttachItem[];
+    onOpenGuestAttach?: (guestId: string) => void;
     onOpenAttachSheet: () => void;
     onToggleExpandedInput: () => void;
     onTogglePermissionAutoAccept: () => void;
@@ -106,6 +109,8 @@ export function ComposerFooter(props: ComposerFooterProps) {
         onOpenPrPicker,
         showLinearPicker,
         onOpenLinearPicker,
+        attachGuests,
+        onOpenGuestAttach,
         onOpenAttachSheet,
         onToggleExpandedInput,
         onTogglePermissionAutoAccept,
@@ -150,6 +155,8 @@ export function ComposerFooter(props: ComposerFooterProps) {
                                 openLinearPicker={onOpenLinearPicker}
                                 onOpenSettings={onOpenSettings}
                                 onOpenMobileSheet={onOpenAttachSheet}
+                                attachGuests={attachGuests}
+                                onOpenGuestAttach={onOpenGuestAttach}
                             /> : null}
                             <PermissionAutoAcceptButton
                                 footerIconButtonClass={footerIconButtonClass}
@@ -226,6 +233,8 @@ export function ComposerFooter(props: ComposerFooterProps) {
                             showLinearPicker={showLinearPicker}
                             openLinearPicker={onOpenLinearPicker}
                             onOpenSettings={onOpenSettings}
+                            attachGuests={attachGuests}
+                            onOpenGuestAttach={onOpenGuestAttach}
                         /> : null}
                         {!isBtw ? <FocusModeButton
                             footerIconButtonClass={footerIconButtonClass}
