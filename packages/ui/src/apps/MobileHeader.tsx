@@ -13,6 +13,7 @@ import { useSessionFoldersStore } from '@/stores/useSessionFoldersStore';
 import { useSessionPinnedStore } from '@/stores/useSessionPinnedStore';
 import { useWorktreeOrderStore } from '@/stores/useWorktreeOrderStore';
 import { useUIStore } from '@/stores/useUIStore';
+import { useGitStore, useIsGitRepo } from '@/stores/useGitStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useAllLiveSessions, useSession } from '@/sync/sync-context';
 import { useSessionOrderingStore } from '@/sync/session-ordering';
@@ -82,6 +83,14 @@ export const MobileHeader: React.FC<{
   const effectiveDirectory = currentSessionDirectory || currentDirectory;
   const currentSession = useSession(currentSessionId, effectiveDirectory || undefined);
   const isNewSessionDraftOpen = useSessionUIStore((state) => Boolean(state.newSessionDraft?.open));
+  // Uncommitted changes in the active project or worktree: the workspace
+  // button gets a dot instead of a changed-files bar above the composer.
+  const isGitRepo = useIsGitRepo(effectiveDirectory || null);
+  const hasUncommittedChanges = useGitStore((state) => {
+    if (!effectiveDirectory || isGitRepo !== true) return false;
+    const status = state.directories.get(effectiveDirectory)?.status;
+    return Boolean(status && !status.isClean);
+  });
   const selectionTransition = useSessionUIStore((state) => state.selectionTransition);
   const activeSessions = useGlobalSessionsStore((state) => state.activeSessions);
   const globalLoadStatus = useGlobalSessionsStore((state) => state.status);
@@ -390,10 +399,10 @@ export const MobileHeader: React.FC<{
         <div className="pointer-events-none relative z-10 flex h-[var(--oc-mobile-header-layout-height)] w-full items-center gap-1 px-2">
           <button
             type="button"
-              className={cn(
-                'pointer-events-auto flex shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
-                'size-10',
-              )}
+            className={cn(
+              'pointer-events-auto flex shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
+              'size-10',
+            )}
             aria-label={t('mobile.sessions.openSheetAria')}
             onPointerDown={(event) => {
               if (mobileTextareaFocused) event.preventDefault();
@@ -469,10 +478,11 @@ export const MobileHeader: React.FC<{
           <button
             type="button"
             className={cn(
-              'pointer-events-auto flex shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
-              'size-10',
+              'relative pointer-events-auto flex size-10 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
             )}
-            aria-label={t('mobile.header.openWorkspaceAria')}
+            aria-label={hasUncommittedChanges
+              ? t('mobile.header.openWorkspaceWithChangesAria')
+              : t('mobile.header.openWorkspaceAria')}
             onPointerDown={(event) => {
               if (mobileTextareaFocused) event.preventDefault();
             }}
@@ -485,6 +495,12 @@ export const MobileHeader: React.FC<{
             style={{ touchAction: 'manipulation' }}
           >
             <Icon name="pencil-ruler-2" className="size-5" />
+            {hasUncommittedChanges ? (
+              <span
+                className="absolute right-1.5 top-1.5 size-2.5 rounded-full border-2 border-[var(--background)] bg-[var(--status-warning)]"
+                aria-hidden
+              />
+            ) : null}
           </button>
         </div>
         {showPreviewMeta ? (
