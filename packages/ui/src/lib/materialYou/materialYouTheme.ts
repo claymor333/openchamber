@@ -62,7 +62,6 @@ const buildPrimary = (
     active: hex(theme.palettes.primary.tone(dark ? 95 : 30)),
     foreground: hex(theme.schemes[variant].onPrimary),
     muted: hex(theme.palettes.primary.tone(dark ? 30 : 90)),
-    emphasis: hex(theme.palettes.primary.tone(dark ? 80 : 45)),
   };
 };
 
