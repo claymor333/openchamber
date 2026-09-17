@@ -80,6 +80,16 @@ describe('resolveRealContentEndOffset', () => {
         expect(resolveRealContentEndOffset({ state, composerOverlayHeight: 180, footerSize: 120 })).toBe(800);
     });
 
+    test('lets the mobile footer own the complete chrome reserve once', () => {
+        const state = buildState({
+            positions: [0, 1000],
+            sizes: [1000, 200],
+            scrollLength: 700,
+        });
+
+        expect(resolveRealContentEndOffset({ state, composerOverlayHeight: 0, footerSize: 84 })).toBe(584);
+    });
+
     test('returns null for an empty timeline and for unmeasured last rows', () => {
         expect(resolveRealContentEndOffset({
             state: buildState({ positions: [], sizes: [] }),

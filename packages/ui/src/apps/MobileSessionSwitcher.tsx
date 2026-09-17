@@ -1,4 +1,5 @@
 import React from 'react';
+import { createPortal } from 'react-dom';
 import type { Session } from '@opencode-ai/sdk/v2';
 
 import { SessionActivityDuration } from '@/components/session/SessionActivityDuration';
@@ -89,7 +90,8 @@ export const MobileSessionSwitcher: React.FC<{
   open: boolean;
   onClose: () => void;
   anchorRef: React.RefObject<HTMLElement | null>;
-}> = ({ open, onClose, anchorRef }) => {
+  placement?: 'top' | 'bottom';
+}> = ({ open, onClose, anchorRef, placement = 'top' }) => {
   const { t } = useI18n();
   const panelRef = React.useRef<HTMLDivElement>(null);
   const [shouldRender, setShouldRender] = React.useState(open);
@@ -98,38 +100,34 @@ export const MobileSessionSwitcher: React.FC<{
   // broken — anchor a popover under the title instead. Mirror image of the
   // metadata/usage popover, which anchors to the ring on the right.
   const { enabled: isTabletLayout } = useTabletLayout();
-  const wrapperRef = React.useRef<HTMLDivElement>(null);
-  const [anchorLeft, setAnchorLeft] = React.useState<number | null>(null);
+  const [anchorRect, setAnchorRect] = React.useState<DOMRect | null>(null);
+  const [visualViewportHeight, setVisualViewportHeight] = React.useState<number | null>(null);
 
-  // The shell has transformed ancestors, so the fixed wrapper's containing
-  // block is the chat column, NOT the viewport — anchor in the wrapper's own
-  // coordinate space (see SessionMetadataOverlay for the same reasoning).
   React.useLayoutEffect(() => {
-    if (!open || !isTabletLayout || !shouldRender) return;
+    if (!open || !shouldRender) return;
     const compute = () => {
       const anchorRect = anchorRef.current?.getBoundingClientRect();
-      const wrapperRect = wrapperRef.current?.getBoundingClientRect();
-      if (!anchorRect || !wrapperRect) {
-        setAnchorLeft(null);
-        return;
-      }
-      const relativeLeft = anchorRect.left - wrapperRect.left;
-      setAnchorLeft(Math.min(
-        Math.max(relativeLeft, 8),
-        Math.max(8, wrapperRect.width - TABLET_POPOVER_WIDTH - 8),
-      ));
+      setAnchorRect(anchorRect ?? null);
+      setVisualViewportHeight(window.visualViewport?.height ?? window.innerHeight);
     };
     compute();
-    // Re-anchor if the chat column shifts while the popover is open (sidebar
-    // toggle/resize, orientation change) — the header buttons move with it.
-    const wrapper = wrapperRef.current;
-    if (typeof ResizeObserver === 'undefined' || !wrapper) return;
-    const observer = new ResizeObserver(compute);
-    observer.observe(wrapper);
-    return () => observer.disconnect();
-  }, [anchorRef, isTabletLayout, open, shouldRender]);
+    const visualViewport = window.visualViewport;
+    visualViewport?.addEventListener('resize', compute);
+    visualViewport?.addEventListener('scroll', compute);
+    window.addEventListener('resize', compute);
+    window.addEventListener('orientationchange', compute);
+    const observer = globalThis.ResizeObserver ? new globalThis.ResizeObserver(compute) : null;
+    if (observer && anchorRef.current) observer.observe(anchorRef.current);
+    return () => {
+      visualViewport?.removeEventListener('resize', compute);
+      visualViewport?.removeEventListener('scroll', compute);
+      window.removeEventListener('resize', compute);
+      window.removeEventListener('orientationchange', compute);
+      observer?.disconnect();
+    };
+  }, [anchorRef, open, shouldRender]);
 
-  const isPopover = isTabletLayout && anchorLeft !== null;
+  const isPopover = isTabletLayout && anchorRect !== null;
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
   const setCurrentSession = useSessionUIStore((state) => state.setCurrentSession);
   const setActiveProjectIdOnly = useProjectsStore((state) => state.setActiveProjectIdOnly);
@@ -183,30 +181,38 @@ export const MobileSessionSwitcher: React.FC<{
     onClose();
   }, [onClose, setCurrentSession]);
 
-  if (!shouldRender) return null;
+  if (!shouldRender || !globalThis.document) return null;
 
-  return (
-    <div ref={wrapperRef} className="fixed inset-x-0 bottom-0 top-[calc(var(--oc-safe-area-top,0px)+var(--oc-header-height,56px))] z-20 pointer-events-none">
+  return createPortal((
+      <div className="fixed inset-0 z-50 pointer-events-none">
       <div
         ref={panelRef}
         role="dialog"
         aria-label={t('sessions.switcher.openAria')}
-        className={cn(
-          'flex flex-col overflow-hidden rounded-[20px] border border-border/70 bg-[var(--surface-elevated)] p-2 shadow-[0_12px_32px_rgb(0_0_0_/_0.2)] will-change-transform',
-          isPopover ? 'absolute origin-top-left' : 'mx-3 mt-2',
-          isExiting ? 'pointer-events-none' : 'pointer-events-auto',
-        )}
-        style={{
-          animation: `${isExiting ? 'session-switcher-out' : 'session-switcher-in'} ${isExiting ? 140 : 170}ms cubic-bezier(0.32, 0.72, 0, 1) forwards`,
-          maxHeight: 'min(72dvh, calc(100dvh - var(--oc-safe-area-top, 0px) - var(--oc-header-height, 56px) - 1rem))',
-          ...(isPopover
-            ? {
-                top: 8,
-                left: anchorLeft ?? 8,
-                width: `min(${TABLET_POPOVER_WIDTH}px, calc(100% - 16px))`,
+          className={cn(
+            'flex flex-col overflow-hidden rounded-[20px] border border-border/70 bg-[var(--surface-elevated)] p-2 shadow-[0_12px_32px_rgb(0_0_0_/_0.2)] will-change-transform',
+            isPopover ? 'absolute origin-top-left' : 'absolute inset-x-3',
+            isExiting ? 'pointer-events-none' : 'pointer-events-auto',
+          )}
+          style={{
+            animation: `${isExiting ? 'session-switcher-out' : 'session-switcher-in'} ${isExiting ? 140 : 170}ms cubic-bezier(0.32, 0.72, 0, 1) forwards`,
+            maxHeight: `min(72dvh, ${Math.max(0, (visualViewportHeight ?? window.innerHeight) - 16)}px)`,
+            ...(isPopover
+              ? {
+                left: Math.max(8, Math.min(anchorRect.left, window.innerWidth - TABLET_POPOVER_WIDTH - 8)),
+                width: `min(${TABLET_POPOVER_WIDTH}px, calc(100vw - 16px))`,
+                ...(placement === 'bottom'
+                  ? { bottom: Math.max(8, window.innerHeight - anchorRect.top + 8) }
+                  : { top: anchorRect.bottom + 8 }),
               }
-            : null),
-        }}
+              : placement === 'bottom' && anchorRect
+                ? {
+                  bottom: Math.max(8, window.innerHeight - anchorRect.top + 8),
+                }
+                : {
+                  top: anchorRect ? anchorRect.bottom + 8 : 'calc(var(--oc-safe-area-top, 0px) + var(--oc-header-height, 56px) + 8px)',
+                }),
+          }}
       >
         <div className="oc-hide-scrollbar min-h-0 flex-1 space-y-0.5 overflow-y-auto overscroll-contain">
           {items.length === 0 ? (
@@ -245,6 +251,6 @@ export const MobileSessionSwitcher: React.FC<{
           to { opacity: 0; transform: translateY(-6px) scale(0.985); }
         }
       `}</style>
-    </div>
-  );
+      </div>
+  ), document.body);
 };

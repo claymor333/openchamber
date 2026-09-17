@@ -459,6 +459,14 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['archive', 'delete', 'expire'],
   },
   {
+    id: 'sessions.mobile-swipe-limit',
+    page: 'sessions',
+    titleKey: 'settings.openchamber.mobileSessionSwipe.field.limit',
+    descriptionKey: 'settings.openchamber.mobileSessionSwipe.field.limitHint',
+    keywords: ['mobile', 'session', 'swipe', 'nearby', 'limit', 'navigation'],
+    isAvailable: (ctx) => ctx.isMobile,
+  },
+  {
     id: 'sessions.desktop-launch-at-login',
     page: 'general',
     titleKey: 'settings.openchamber.desktopNetwork.field.launchAtLogin',

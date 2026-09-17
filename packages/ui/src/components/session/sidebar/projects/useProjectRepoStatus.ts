@@ -4,6 +4,7 @@ import { mapWithConcurrency } from '@/lib/concurrency';
 import { useGitStore } from '@/stores/useGitStore';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { runBackgroundNetworkTask } from '@/lib/background-network';
+import { useSessionUIStore, type SessionRootBranchState } from '@/sync/session-ui-store';
 
 type Project = { id: string; path: string; normalizedPath: string };
 const ROOT_BRANCH_TTL_MS = 5 * 60_000;
@@ -13,7 +14,7 @@ type Args = {
   normalizedProjects: Project[];
   gitRepoStatus: Map<string, { isGitRepo: boolean | null; branch: string | null }>;
   setProjectRepoStatus: React.Dispatch<React.SetStateAction<Map<string, boolean | null>>>;
-  setProjectRootBranches: React.Dispatch<React.SetStateAction<Map<string, string>>>;
+  setProjectRootBranchState?: (projectId: string, state: SessionRootBranchState) => void;
 };
 
 export const useProjectRepoStatus = (args: Args): void => {
@@ -22,7 +23,7 @@ export const useProjectRepoStatus = (args: Args): void => {
     enabled = true,
     gitRepoStatus,
     setProjectRepoStatus,
-    setProjectRootBranches,
+    setProjectRootBranchState = useSessionUIStore.getState().setProjectRootBranchState,
   } = args;
 
   const { git } = useRuntimeAPIs();
@@ -98,6 +99,7 @@ export const useProjectRepoStatus = (args: Args): void => {
           if (status?.isGitRepo === false) {
             resolvedInputKeyByProjectId.current.delete(project.id);
             rootBranchCacheRef.current.delete(project.id);
+            setProjectRootBranchState(project.id, { status: 'ready', branch: null });
             return false;
           }
           if (status?.isGitRepo !== true || status.branch === null) {
@@ -127,6 +129,11 @@ export const useProjectRepoStatus = (args: Args): void => {
           return;
         }
 
+        pending.forEach((project) => {
+          const cached = rootBranchCacheRef.current.get(project.id)?.branch ?? null;
+          setProjectRootBranchState(project.id, { status: 'loading', branch: cached });
+        });
+
         const entries = await mapWithConcurrency(pending, 2, async (project) => {
           const inputBranch = gitRepoStatus.get(project.normalizedPath)?.branch?.trim() ?? '';
           const inputKey = `${project.normalizedPath}\0${inputBranch}`;
@@ -142,26 +149,15 @@ export const useProjectRepoStatus = (args: Args): void => {
           return;
         }
 
-        const resolved = entries.filter((entry) => entry.branch);
-        if (resolved.length === 0) {
-          return;
-        }
-
         const nowAfter = Date.now();
-        setProjectRootBranches((prev) => {
-          const next = new Map(prev);
-          resolved.forEach(({ id, branch }) => {
-            if (branch) {
-              next.set(id, branch);
-            }
-          });
-          return next;
-        });
-        resolved.forEach(({ id, inputKey, branch }) => {
+        entries.forEach(({ id, inputKey, branch }) => {
           resolvedInputKeyByProjectId.current.set(id, inputKey);
           if (branch) {
             rootBranchCacheRef.current.set(id, { branch, at: nowAfter });
           }
+          setProjectRootBranchState(id, branch
+            ? { status: 'ready', branch }
+            : { status: 'failed', branch: null, error: 'project root branch unavailable' });
         });
       };
       void run();
@@ -171,5 +167,5 @@ export const useProjectRepoStatus = (args: Args): void => {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [enabled, normalizedProjects, projectGitBranchesKey, gitRepoStatus, setProjectRootBranches]);
+  }, [enabled, normalizedProjects, projectGitBranchesKey, gitRepoStatus, setProjectRootBranchState]);
 };

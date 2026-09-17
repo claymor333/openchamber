@@ -273,6 +273,23 @@ frame where nothing is open.
 none of them is verifiable outside a real device.** Change them only against
 hardware.
 
+The mobile chat places one `MobileHeader` after the composer controls for an
+editable session. `ChatContainer` chooses the bottom placement only for that
+branch and uses the top placement for empty, draft, and read-only branches. The
+bottom header owns a transparent drag surface covering the header itself while
+title and workspace buttons retain ordinary tap behavior through pointer-event
+layering. The composer shell holds focus and blur
+choreography during that gesture or while a header popover is open, so the
+keyboard does not collapse the editor underneath it. The timeline reserves the
+whole resting header/status stack through its one list-footer spacer; neither
+the list nor the scroll hook adds that reserve a second time.
+During sideways travel only, the header publishes preview metadata above the
+header and the composer moves up to make room. Its return is delayed until the
+metadata fade completes, including when session selection replaces the header.
+The selected session title and branch remain stable during that preview; the
+candidate title is carried by the metadata line and is committed only on
+release.
+
 ## Testing
 
 The package has no DOM test environment, so coverage stops at the state and

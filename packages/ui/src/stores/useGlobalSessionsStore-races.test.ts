@@ -104,6 +104,30 @@ describe("global session mutation reconciliation", () => {
     expect(useGlobalSessionsStore.getState().activeSessions[0]?.title).toBe("New")
   })
 
+  test("tracks per-directory loading and ready authority across a full refresh", async () => {
+    const existing = { ...session("existing"), directory: "/repo/ready" } as Session
+    useGlobalSessionsStore.getState().applySnapshot([existing], [])
+    const loading = useGlobalSessionsStore.getState().loadSessions()
+
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    expect(useGlobalSessionsStore.getState().directoryAuthority.get("/repo/ready")?.status).toBe("loading")
+    listRequest.resolve([existing])
+    await loading
+
+    expect(useGlobalSessionsStore.getState().directoryAuthority.get("/repo/ready")?.status).toBe("ready")
+  })
+
+  test("marks a failed directory without erasing its last known session", async () => {
+    const existing = { ...session("existing"), directory: "/repo/failed" } as Session
+    useGlobalSessionsStore.getState().applySnapshot([existing], [])
+    const loading = useGlobalSessionsStore.getState().loadSessions()
+    listRequest.reject(new Error("offline"))
+    await loading
+
+    expect(useGlobalSessionsStore.getState().directoryAuthority.get("/repo/failed")?.status).toBe("failed")
+    expect(useGlobalSessionsStore.getState().activeSessions.map((item) => item.id)).toEqual(["existing"])
+  })
+
   test("uses commit-time state when the load fails", async () => {
     const created = session("created")
     const loading = useGlobalSessionsStore.getState().loadSessions()

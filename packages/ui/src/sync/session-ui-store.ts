@@ -336,6 +336,30 @@ export type ViewportAnchor = {
   value: number
 }
 
+export type SessionTopologyAuthorityStatus = 'loading' | 'ready' | 'failed' | 'partial';
+
+export type SessionTopologyAuthority = {
+  status: SessionTopologyAuthorityStatus;
+  generation: number;
+  error?: string;
+};
+
+export type SessionRootBranchState = {
+  status: 'loading' | 'ready' | 'failed';
+  branch: string | null;
+  error?: string;
+};
+
+export type SessionSelectionTransition = 'idle' | 'pending' | 'committed' | 'aborted';
+
+export type SessionSelectionToken = {
+  generation: number;
+  runtimeKey: string;
+  targetId: string;
+  rootId: string;
+  directory: string | null;
+};
+
 export type SessionHistoryMeta = {
   limit: number
   hasMore: boolean
@@ -356,6 +380,12 @@ export type SessionUIState = {
   worktreeMetadata: Map<string, WorktreeMetadata>
   availableWorktrees: WorktreeMetadata[]
   availableWorktreesByProject: Map<string, WorktreeMetadata[]>
+  worktreeTopologyAuthority: Map<string, SessionTopologyAuthority>
+  projectRootBranches: Map<string, string>
+  projectRootBranchStates: Map<string, SessionRootBranchState>
+  selectionGeneration: number
+  selectionTransition: SessionSelectionTransition
+  selectionToken: SessionSelectionToken | null
   webUICreatedSessions: Set<string>
   sessionAbortFlags: Map<string, { timestamp: number; acknowledged: boolean }>
   abortControllers: Map<string, AbortController>
@@ -395,6 +425,8 @@ export type SessionUIState = {
   getContextUsage: (contextLimit: number, outputLimit: number) => SessionContextUsage | null
   initializeNewOpenChamberSession: (sessionId: string, agents: unknown[]) => void
   setWorktreeMetadata: (sessionId: string, metadata: WorktreeMetadata | null) => void
+  setWorktreeTopologyAuthority: (directory: string, authority: SessionTopologyAuthority) => void
+  setProjectRootBranchState: (projectId: string, state: SessionRootBranchState) => void
   overrideNewSessionDraftTarget: (options: Record<string, unknown>) => void
   resolvePendingDraftWorktreeTarget: (requestId: string, directory: string | null, options?: Record<string, unknown>) => void
   setDraftBootstrapPendingDirectory: (directory: string | null) => void
@@ -654,6 +686,32 @@ const runtimeSessionMemory = new Map<string, RuntimeSessionMemory>()
 const runtimeMemoryKey = (value?: string | null): string => {
   const key = (value ?? getRuntimeKey()).trim()
   return key || "default"
+}
+
+// SAFETY: session parent links are optional fields present on the upstream
+// session payload but not included in the narrow SDK Session declaration.
+const sessionParentId = (session: Session): string | null => {
+  const record = session as Session & { parentID?: string | null }
+  return record.parentID?.trim() || null
+}
+
+const resolveSelectionRootId = (sessionId: string | null): string | null => {
+  if (!sessionId) return null
+  const sessions = new Map<string, Session>()
+  for (const session of getAllSyncSessions()) sessions.set(session.id, session)
+  for (const session of useGlobalSessionsStore.getState().activeSessions) sessions.set(session.id, session)
+  let current = sessions.get(sessionId)
+  if (!current) return sessionId
+  const visited = new Set<string>()
+  while (current) {
+    if (visited.has(current.id)) return sessionId
+    visited.add(current.id)
+    const parentId = sessionParentId(current)
+    if (!parentId) return current.id
+    current = sessions.get(parentId)
+    if (!current) return sessionId
+  }
+  return sessionId
 }
 
 const cloneDraft = (draft: NewSessionDraftState): NewSessionDraftState => ({ ...draft })
@@ -994,6 +1052,12 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
   worktreeMetadata: new Map(),
   availableWorktrees: flattenWorktreeMap(PERSISTED_WORKTREE_MAP),
   availableWorktreesByProject: PERSISTED_WORKTREE_MAP,
+  worktreeTopologyAuthority: new Map(),
+  projectRootBranches: new Map(),
+  projectRootBranchStates: new Map(),
+  selectionGeneration: 0,
+  selectionTransition: 'idle',
+  selectionToken: null,
   webUICreatedSessions: new Set(),
   sessionAbortFlags: new Map(),
   abortControllers: new Map(),
@@ -1006,6 +1070,10 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
   // setCurrentSession
   // ---------------------------------------------------------------------------
   setCurrentSession: (id, directoryHint?: string | null, transition?: "submitted-draft") => {
+    const selectionGeneration = get().selectionGeneration + 1
+    const selectionRuntimeKey = runtimeMemoryKey()
+    const key = selectionRuntimeKey
+    set({ selectionGeneration, selectionTransition: 'pending' })
     const materializedDraftSessionId = id && transition === "submitted-draft" ? id : null
     // Publish the transition identity before closing the draft. Those are two
     // separate store updates, and ChatContainer must never observe a closed
@@ -1017,7 +1085,6 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       get().closeNewSessionDraft()
     }
 
-    const key = runtimeMemoryKey()
     activeSessionByRuntime.set(key, id)
 
     const previousSessionId = get().currentSessionId
@@ -1030,6 +1097,29 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     const fallbackDir = opencodeClient.getDirectory() ?? directoryState.currentDirectory ?? null
     const knownDir = (directoryHint ? normalizePath(directoryHint) : null) ?? sessionDir
     const resolvedDir = knownDir ?? fallbackDir
+    const selectionRootId = resolveSelectionRootId(id) ?? id ?? ''
+    const selectionToken: SessionSelectionToken | null = id ? {
+      generation: selectionGeneration,
+      runtimeKey: key,
+      targetId: id,
+      rootId: selectionRootId,
+      directory: resolvedDir,
+    } : null
+    set({ selectionToken })
+    const isCurrentSelection = (): boolean => {
+      const state = get()
+      const token = state.selectionToken
+      if (!id) return state.selectionGeneration === selectionGeneration
+        && token === null
+        && runtimeMemoryKey() === key
+      return state.selectionGeneration === selectionGeneration
+        && token?.generation === selectionGeneration
+        && token.runtimeKey === key
+        && token.targetId === id
+        && token.rootId === selectionRootId
+        && token.directory === resolvedDir
+        && runtimeMemoryKey() === key
+    }
     // `fallbackDir` is the active directory, not this session's directory. It
     // keeps routing usable while the owning directory store bootstraps, but it
     // must never be remembered: a persisted guess outlives the race that
@@ -1051,22 +1141,28 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     // runs. Fire-and-forget: any transient failure is retried by the reactive
     // path in ChatContainer.
     if (id) {
-      void fetchMessagesForSession(id, resolvedDir)
+      void fetchMessagesForSession(id, resolvedDir, {
+        generation: selectionGeneration,
+        runtimeKey: key,
+        isCurrent: isCurrentSelection,
+      })
     }
 
     // Set the directory together with the session id so chat hooks read the
     // same child store that send/SSE events will update during startup races.
+    if (!isCurrentSelection()) return
     set({
       currentSessionId: id,
       currentSessionDirectory: id ? resolvedDir ?? null : null,
+      selectionTransition: 'committed',
     })
     guessedSelectionSessionId = isGuessedDir && id ? id : null
     const rememberedDir = isGuessedDir ? null : resolvedDir ?? null
-    writeRuntimeSessionMemory(key, { sessionId: id, directory: rememberedDir })
+    if (isCurrentSelection()) writeRuntimeSessionMemory(key, { sessionId: id, directory: rememberedDir })
     // Keep the last NON-null session per runtime across app restarts (cold
     // mobile launches reopen it after the instance reconnects). Going back to
     // a draft intentionally does not erase it.
-    if (id) {
+    if (id && isCurrentSelection()) {
       persistLastActiveSession(key, { sessionId: id, directory: rememberedDir })
     }
 
@@ -1083,6 +1179,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       opencodeClient.setDirectory(resolvedDir ?? undefined)
     } catch (e) {
       console.warn("Failed to set OpenCode directory for session switch:", e)
+      if (isCurrentSelection()) set({ selectionTransition: 'aborted' })
     }
 
     // Defer viewport anchor save for previous session — not needed for the
@@ -1098,7 +1195,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       queueMicrotask(() => {
         // Bail if the user already switched again — save is now stale.
         const current = get().currentSessionId
-        if (current !== newId) return
+        if (current !== newId || !isCurrentSelection()) return
         const memState = getViewportSessionMemory(prevId)
         if (!memState?.isStreaming) {
           const prevMessages = getSyncMessages(prevId)
@@ -1110,7 +1207,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     }
 
     // Mark session viewed in notification store + update active session ref
-    if (id) {
+    if (id && isCurrentSelection()) {
       markSessionViewed(id)
       setActiveSession(resolvedDir ?? "", id)
     }
@@ -1123,6 +1220,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
 
   prepareForRuntimeSwitch: (apiBaseUrl?: string | null) => {
     const key = runtimeMemoryKey(apiBaseUrl)
+    set({ selectionGeneration: get().selectionGeneration + 1, selectionTransition: 'aborted', selectionToken: null })
     const directory = useDirectoryStore.getState().currentDirectory || null
     const currentSessionId = get().currentSessionId
     const directorySnapshot = directory ? getDirectoryState(directory) : null
@@ -1163,6 +1261,12 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       worktreeMetadata: memory?.worktreeMetadata ?? new Map(),
       availableWorktrees: flattenWorktreeMap(availableWorktreesByProject),
       availableWorktreesByProject,
+      worktreeTopologyAuthority: new Map(),
+      projectRootBranches: new Map(),
+      projectRootBranchStates: new Map(),
+      selectionGeneration: get().selectionGeneration + 1,
+      selectionTransition: 'aborted',
+      selectionToken: null,
       sessionAbortFlags: new Map(),
       pendingChangesBarDismissed: new Map(),
     })
@@ -1564,6 +1668,35 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       if (metadata) map.set(sessionId, metadata)
       else map.delete(sessionId)
       return { worktreeMetadata: map }
+    })
+  },
+
+  setWorktreeTopologyAuthority: (directory, authority) => {
+    const normalized = normalizePath(directory)
+    if (!normalized) return
+    set((state) => {
+      const current = state.worktreeTopologyAuthority.get(normalized)
+      if (current && current.generation > authority.generation) return state
+      if (current?.status === authority.status && current.generation === authority.generation && current.error === authority.error) return state
+      const next = new Map(state.worktreeTopologyAuthority)
+      next.set(normalized, authority)
+      return { worktreeTopologyAuthority: next }
+    })
+  },
+
+  setProjectRootBranchState: (projectId, branchState) => {
+    if (!projectId) return
+    set((state) => {
+      const current = state.projectRootBranchStates.get(projectId)
+      const nextStates = new Map(state.projectRootBranchStates)
+      nextStates.set(projectId, branchState)
+      const nextBranches = new Map(state.projectRootBranches)
+      if (branchState.branch) nextBranches.set(projectId, branchState.branch)
+      else nextBranches.delete(projectId)
+      if (current?.status === branchState.status
+        && current.branch === branchState.branch
+        && current.error === branchState.error) return state
+      return { projectRootBranches: nextBranches, projectRootBranchStates: nextStates }
     })
   },
 

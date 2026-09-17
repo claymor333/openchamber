@@ -291,6 +291,11 @@ These rules are important. Breaking them tends to reintroduce idle CPU churn, st
 
 ### Configuration stores and the Settings directory
 
+`useUIStore.mobileSessionSwipeLimit` is a device-local setting. It is persisted
+with the UI store, sanitized on rehydration, and clamped to 1 through 5 by the
+setter. The settings registry marks it `local: true` so server and VS Code
+bridge writes reject it; mobile Settings updates the local store directly.
+
 `useAgentsStore`, `useCommandsStore`, `useSkillsStore`, `useMcpConfigStore` and
 the provider half of `useConfigStore` describe **one project's configuration**.
 Two surfaces read them at once: the app (chat, autocompletes, pickers), which

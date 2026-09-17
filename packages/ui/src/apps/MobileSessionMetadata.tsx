@@ -1,4 +1,5 @@
 import React from 'react';
+import { createPortal } from 'react-dom';
 
 import { Icon } from '@/components/icon/Icon';
 import type { IconName } from '@/components/icon/icons';
@@ -111,7 +112,8 @@ const SessionMetadataOverlay: React.FC<{
   usageDisplayMode: 'usage' | 'remaining';
   isUsageLoading: boolean;
   timeFormatPreference: TimeFormatPreference;
-}> = ({ open, onClose, anchorRef, contextDisplay, usageGroups, usageDisplayMode, isUsageLoading, timeFormatPreference }) => {
+  placement: 'top' | 'bottom';
+}> = ({ open, onClose, anchorRef, contextDisplay, usageGroups, usageDisplayMode, isUsageLoading, timeFormatPreference, placement }) => {
   const { t } = useI18n();
   const panelRef = React.useRef<HTMLDivElement>(null);
   const [shouldRender, setShouldRender] = React.useState(open);
@@ -119,40 +121,34 @@ const SessionMetadataOverlay: React.FC<{
   // Tablet: a phone-width sheet stretched across the whole chat column looks
   // broken — render a popover anchored to the metadata button instead.
   const { enabled: isTabletLayout } = useTabletLayout();
-  const wrapperRef = React.useRef<HTMLDivElement>(null);
-  const [anchorLeft, setIpadAnchorLeft] = React.useState<number | null>(null);
+  const [anchorRect, setAnchorRect] = React.useState<DOMRect | null>(null);
+  const [visualViewportHeight, setVisualViewportHeight] = React.useState<number | null>(null);
 
-  // The shell has transformed ancestors, so the fixed wrapper's containing
-  // block is the chat column, NOT the viewport. Anchor the popover in the
-  // wrapper's own coordinate space — viewport-based lefts would double-count
-  // the sidebar offset.
   React.useLayoutEffect(() => {
-    if (!open || !isTabletLayout || !shouldRender) return;
+    if (!open || !shouldRender) return;
     const compute = () => {
       const anchorRect = anchorRef.current?.getBoundingClientRect();
-      const wrapperRect = wrapperRef.current?.getBoundingClientRect();
-      if (!anchorRect || !wrapperRect) {
-        setIpadAnchorLeft(null);
-        return;
-      }
-      const relativeLeft = anchorRect.left - wrapperRect.left;
-      const left = Math.min(
-        Math.max(relativeLeft, 8),
-        Math.max(8, wrapperRect.width - TABLET_METADATA_POPOVER_WIDTH - 8),
-      );
-      setIpadAnchorLeft(left);
+      setAnchorRect(anchorRect ?? null);
+      setVisualViewportHeight(window.visualViewport?.height ?? window.innerHeight);
     };
     compute();
-    // Re-anchor if the chat column shifts while the popover is open (sidebar
-    // toggle/resize, orientation change) — the header buttons move with it.
-    const wrapper = wrapperRef.current;
-    if (typeof ResizeObserver === 'undefined' || !wrapper) return;
-    const observer = new ResizeObserver(compute);
-    observer.observe(wrapper);
-    return () => observer.disconnect();
-  }, [anchorRef, isTabletLayout, open, shouldRender]);
+    const visualViewport = window.visualViewport;
+    visualViewport?.addEventListener('resize', compute);
+    visualViewport?.addEventListener('scroll', compute);
+    window.addEventListener('resize', compute);
+    window.addEventListener('orientationchange', compute);
+    const observer = globalThis.ResizeObserver ? new globalThis.ResizeObserver(compute) : null;
+    if (observer && anchorRef.current) observer.observe(anchorRef.current);
+    return () => {
+      visualViewport?.removeEventListener('resize', compute);
+      visualViewport?.removeEventListener('scroll', compute);
+      window.removeEventListener('resize', compute);
+      window.removeEventListener('orientationchange', compute);
+      observer?.disconnect();
+    };
+  }, [anchorRef, open, shouldRender]);
 
-  const isPopover = isTabletLayout && anchorLeft !== null;
+  const isPopover = isTabletLayout && anchorRect !== null;
 
   React.useEffect(() => {
     if (open) {
@@ -200,10 +196,10 @@ const SessionMetadataOverlay: React.FC<{
     };
   }, [anchorRef, onClose, open]);
 
-  if (!shouldRender) return null;
+  if (!shouldRender || !globalThis.document) return null;
 
-  return (
-    <div ref={wrapperRef} className="fixed inset-x-0 bottom-0 top-[calc(var(--oc-safe-area-top,0px)+var(--oc-header-height,56px))] z-20 pointer-events-none">
+  return createPortal((
+    <div className="fixed inset-0 z-50 pointer-events-none">
       <div
         ref={panelRef}
         role="dialog"
@@ -215,14 +211,18 @@ const SessionMetadataOverlay: React.FC<{
         )}
         style={{
           animation: `${isExiting ? 'session-metadata-out' : 'session-metadata-in'} ${isExiting ? 140 : 170}ms cubic-bezier(0.32, 0.72, 0, 1) forwards`,
-          maxHeight: 'min(72dvh, calc(100dvh - var(--oc-safe-area-top, 0px) - var(--oc-header-height, 56px) - 1rem))',
+          maxHeight: `min(72dvh, ${Math.max(0, (visualViewportHeight ?? window.innerHeight) - 16)}px)`,
           ...(isPopover
             ? {
-                top: 8,
-                left: anchorLeft ?? 8,
-                width: `min(${TABLET_METADATA_POPOVER_WIDTH}px, calc(100% - 16px))`,
+                left: Math.max(8, Math.min(anchorRect.left, window.innerWidth - TABLET_METADATA_POPOVER_WIDTH - 8)),
+                width: `min(${TABLET_METADATA_POPOVER_WIDTH}px, calc(100vw - 16px))`,
+                ...(placement === 'bottom'
+                  ? { bottom: Math.max(8, window.innerHeight - anchorRect.top + 8) }
+                  : { top: anchorRect.bottom + 8 }),
               }
-            : null),
+            : placement === 'bottom' && anchorRect
+              ? { bottom: Math.max(8, window.innerHeight - anchorRect.top + 8) }
+              : { top: anchorRect ? anchorRect.bottom + 8 : 'calc(var(--oc-safe-area-top, 0px) + var(--oc-header-height, 56px) + 8px)' }),
         }}
       >
         <div className="space-y-1">
@@ -256,7 +256,7 @@ const SessionMetadataOverlay: React.FC<{
         }
       `}</style>
     </div>
-  );
+  ), document.body);
 };
 
 const MobileUsageLimits: React.FC<{
@@ -307,15 +307,21 @@ const MobileUsageLimits: React.FC<{
 export const MobileSessionMetadataButton = React.memo(function MobileSessionMetadataButton({
   open,
   onOpenChange,
+  onOpenIntent,
   currentSessionId,
   effectiveDirectory,
   isNewSessionDraftOpen,
+  placement,
+  preventFocusOnPointerDown = false,
 }: {
   open: boolean;
   onOpenChange: (open: boolean | ((open: boolean) => boolean)) => void;
+  onOpenIntent?: () => void;
   currentSessionId: string | null;
   effectiveDirectory: string | null;
   isNewSessionDraftOpen: boolean;
+  placement?: 'top' | 'bottom';
+  preventFocusOnPointerDown?: boolean;
 }) {
   const { t } = useI18n();
   const metadataTriggerRef = React.useRef<HTMLButtonElement>(null);
@@ -451,9 +457,16 @@ export const MobileSessionMetadataButton = React.memo(function MobileSessionMeta
       <button
         ref={metadataTriggerRef}
         type="button"
-        className="flex size-10 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+      className={cn(
+        'pointer-events-auto flex shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
+        'size-10',
+      )}
         aria-label={t('mobile.header.openMetadataAria')}
         aria-expanded={open}
+        onPointerDown={(event) => {
+          if (preventFocusOnPointerDown) event.preventDefault();
+          if (!open) onOpenIntent?.();
+        }}
         onClick={() => onOpenChange((currentOpen) => !currentOpen)}
         style={{ touchAction: 'manipulation' }}
       >
@@ -465,6 +478,7 @@ export const MobileSessionMetadataButton = React.memo(function MobileSessionMeta
         open={open}
         onClose={() => onOpenChange(false)}
         anchorRef={metadataTriggerRef}
+        placement={placement ?? 'top'}
         contextDisplay={contextDisplay}
         usageGroups={usageGroups}
         usageDisplayMode={quotaDisplayMode}

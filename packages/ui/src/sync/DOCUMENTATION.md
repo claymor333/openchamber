@@ -132,6 +132,15 @@ Current consumers:
 
 - `useSessionAutoCleanup.ts`
 
+Mobile session swiping reads the global cache and live initialized-directory
+gaps together. `useGlobalSessionsStore.directoryAuthority` records loading,
+ready, partial, and failed completeness per normalized directory, so one failed
+directory cannot become a false empty boundary for its siblings. Worktree
+topology and project-root branch state live in `session-ui-store.ts` and are
+published by the existing sidebar/mobile discovery paths. The swipe model
+resolves parent chains before grouping and selects only eligible root sessions.
+Its target cap is a local mobile preference, not the sidebar retention limit.
+
 ### Live cross-directory session/status view
 
 Use the sync hooks backed by aggregated child stores when the UI needs **live truth** for sessions or statuses across all initialized directories.
@@ -186,6 +195,12 @@ Live activity/status indicators must not depend on this cache. They must use the
 ## Session message loading
 
 `SessionMessageLoader` is the shared authority for session message requests. Navigation, reactive chat loading, sidebar prefetch, pagination, reconnect/recovery, and optimistic reconciliation must delegate to it rather than issuing parallel initial requests.
+
+`setCurrentSession` increments a monotonic selection generation before starting
+navigation loading. Loader, viewport, persistence, and viewed-state
+continuations capture that generation and must not publish into a newer runtime
+or selection. `ChatContainer` includes the generation in its deferred session
+key before restoring a viewport.
 
 Rules:
 

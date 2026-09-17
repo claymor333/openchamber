@@ -2499,11 +2499,23 @@ export async function forkFromMessage(sessionId: string, messageId: string): Pro
   restoreContextPartsToInput(parts, { directory: target.directory, sessionKey: forkedSession.id })
 }
 
-export async function fetchMessagesForSession(sessionID: string, directory?: string | null): Promise<void> {
+export type SessionSelectionLoadGuard = {
+  generation: number;
+  runtimeKey: string;
+  isCurrent: () => boolean;
+};
+
+export async function fetchMessagesForSession(
+  sessionID: string,
+  directory?: string | null,
+  guard?: SessionSelectionLoadGuard,
+): Promise<void> {
+  if (guard && !guard.isCurrent()) return;
   const resolvedDir = directory ?? dir()
   if (!resolvedDir) return
   await getImperativeSessionMessageLoader()?.ensure(
     { directory: resolvedDir, sessionID },
     { reason: "navigation" },
   )
+  if (guard && !guard.isCurrent()) return
 }
