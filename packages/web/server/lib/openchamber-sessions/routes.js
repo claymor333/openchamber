@@ -932,6 +932,7 @@ export const createOpenChamberSessionService = (dependencies) => {
           authHeaders,
           sessionID,
           directory: sessionDirectory,
+          projectId: resolvedDirectory.projectId,
           prompt,
           goalInput,
           requestedModel: model,
