@@ -124,6 +124,54 @@ describe('OpenChamber control service', () => {
     expect(sessionService.create).toHaveBeenCalledWith({ directory: '/repo', title: 'From tool' });
   });
 
+  it('creates a child role in the requested worktree and branch', async () => {
+    const { service, sessionService } = createService();
+    await service.execute('session.create', {
+      title: 'Review tests',
+      roleKey: 'review:tests',
+      worktree: 'review-tests',
+      branch: 'openchamber/review-tests',
+      startRef: 'main',
+      setUpstream: true,
+    }, '/repo', { contextSessionId: 'ses_parent' });
+
+    expect(sessionService.create).toHaveBeenCalledWith({
+      directory: '/repo',
+      title: 'Review tests',
+      parentID: 'ses_parent',
+      roleKey: 'review:tests',
+      worktree: {
+        name: 'review-tests',
+        branchName: 'openchamber/review-tests',
+        startRef: 'main',
+      },
+      setUpstream: true,
+    });
+  });
+
+  it('creates a top-level session only when independent is true', async () => {
+    const { service, sessionService } = createService();
+    await service.execute('session.create', { title: 'Top level', independent: true }, '/repo', {
+      contextSessionId: 'ses_parent',
+    });
+
+    expect(sessionService.create).toHaveBeenCalledWith({ directory: '/repo', title: 'Top level' });
+  });
+
+  it('rejects role keys without a caller session and independent role keys', async () => {
+    const { service, sessionService } = createService();
+    await expect(service.execute('session.create', { roleKey: 'review:tests' }, '/repo')).rejects.toThrow(
+      'roleKey requires the current session context',
+    );
+    await expect(service.execute('session.create', {
+      roleKey: 'review:tests',
+      independent: true,
+    }, '/repo', { contextSessionId: 'ses_parent' })).rejects.toThrow(
+      'roleKey cannot be combined with independent',
+    );
+    expect(sessionService.create).not.toHaveBeenCalled();
+  });
+
   it.each([
     ['session.send', 'send'],
     ['session.fork', 'fork'],

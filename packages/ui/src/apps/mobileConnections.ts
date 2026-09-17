@@ -1008,7 +1008,7 @@ export type AutoConnectOutcome =
   /** The saved token was rejected (expired/revoked) — the user must sign in again. */
   | { status: 'needs-login'; label: string };
 
-export const autoConnectLastInstance = async (options?: { fast?: boolean; skipIfConnected?: boolean }): Promise<AutoConnectOutcome> => {
+const autoConnectLastInstanceImpl = async (options?: { fast?: boolean; skipIfConnected?: boolean }): Promise<AutoConnectOutcome> => {
   const fast = options?.fast !== false;
   await migrateLegacyInlineTokens();
   const candidate = readConnections()[0]; // sorted most-recent-first
@@ -1052,6 +1052,24 @@ export const autoConnectLastInstance = async (options?: { fast?: boolean; skipIf
   await upsertMobileConnection({ id: candidate.id, label: candidate.label, candidates: candidate.candidates }); // bump lastUsedAt (keeps token)
   switchToTransport(result.transport, token ?? null, { runtimeKey: secureTokenKeyOf(candidate) });
   return { status: 'connected' };
+};
+
+let autoConnectInFlight: Promise<AutoConnectOutcome> | null = null;
+
+export const autoConnectLastInstance = (options?: { fast?: boolean; skipIfConnected?: boolean }): Promise<AutoConnectOutcome> => {
+  if (autoConnectInFlight) return autoConnectInFlight;
+
+  const operation = autoConnectLastInstanceImpl(options);
+  autoConnectInFlight = operation;
+  void operation.then(
+    () => {
+      if (autoConnectInFlight === operation) autoConnectInFlight = null;
+    },
+    () => {
+      if (autoConnectInFlight === operation) autoConnectInFlight = null;
+    },
+  );
+  return operation;
 };
 
 export const validateMobileConnectionSession = async (input: {

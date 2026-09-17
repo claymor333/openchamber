@@ -1,6 +1,6 @@
 import { describe, expect, mock, test } from 'bun:test';
 
-import { createMobilePasswordOperationTracker, loadMobileConnections, migrateLegacyInlineTokenRecords, upsertMobileConnection, validateMobileConnectionSession, type MobileRelayConfig } from './mobileConnections';
+import { autoConnectLastInstance, createMobilePasswordOperationTracker, loadMobileConnections, migrateLegacyInlineTokenRecords, upsertMobileConnection, validateMobileConnectionSession, type MobileRelayConfig } from './mobileConnections';
 
 const originalFetch = globalThis.fetch;
 const originalWindow = globalThis.window;
@@ -40,6 +40,14 @@ const testRelay: MobileRelayConfig = {
 };
 
 describe('mobile connection storage', () => {
+  test('coalesces concurrent cold-launch auto-connect attempts', async () => {
+    const first = autoConnectLastInstance();
+    const second = autoConnectLastInstance({ fast: false, skipIfConnected: true });
+
+    expect(second).toBe(first);
+    await first;
+  });
+
   test('cancellation invalidates an in-flight password completion', async () => {
     const tracker = createMobilePasswordOperationTracker();
     const operation = tracker.begin();

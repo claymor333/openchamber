@@ -16,6 +16,8 @@ const getWorktreeBootstrapStatusMock = vi.fn(async () => ({
 }));
 const sessionCreateMock = vi.fn(async () => ({ data: { id: 'ses_123' } }));
 const sessionForkMock = vi.fn(async () => ({ data: { id: 'ses_fork', title: 'Forked session' } }));
+const sessionListMock = vi.fn(async () => ({ data: [] }));
+const sessionStatusMock = vi.fn(async () => ({ data: {} }));
 const sessionMessagesMock = vi.fn(async () => ({ data: [] }));
 const sessionUpdateMock = vi.fn(async ({ sessionID }) => ({ data: { id: sessionID, time: { archived: 1 } } }));
 
@@ -77,6 +79,8 @@ vi.mock('@opencode-ai/sdk/v2', () => ({
     session: {
       create: sessionCreateMock,
       fork: sessionForkMock,
+      list: sessionListMock,
+      status: sessionStatusMock,
       messages: sessionMessagesMock,
       command: sessionCommandMock,
       update: sessionUpdateMock,
@@ -127,6 +131,10 @@ describe('openchamber session routes', () => {
     }));
     sessionCreateMock.mockClear();
     sessionForkMock.mockClear();
+    sessionListMock.mockReset();
+    sessionListMock.mockResolvedValue({ data: [] });
+    sessionStatusMock.mockReset();
+    sessionStatusMock.mockResolvedValue({ data: {} });
     existingSessionMessages = [];
     dispatchedUserMessageSeq = 0;
     sessionMessagesMock.mockReset();
@@ -245,6 +253,85 @@ describe('openchamber session routes', () => {
         }),
       );
       expect(sessionCreateMock).not.toHaveBeenCalled();
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('creates a child session with its parent and role metadata', async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(async () => ({ ok: true, json: async () => ({ id: 'ses_child' }) }));
+    try {
+      const { app } = createApp();
+      await request(app)
+        .post('/api/openchamber/sessions')
+        .send({ directory: '/repo/app', title: 'Review tests', parentID: 'ses_parent', roleKey: 'review:tests' })
+        .expect(200);
+
+      expect(globalThis.fetch).toHaveBeenCalledWith(
+        'http://opencode.test/session?directory=%2Frepo%2Fapp',
+        expect.objectContaining({
+          method: 'POST',
+          body: JSON.stringify({
+            directory: '/repo/app',
+            parentID: 'ses_parent',
+            title: 'Review tests',
+            metadata: { openchamber: { roleKey: 'review:tests' } },
+          }),
+        }),
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('reuses an idle role child and its existing worktree', async () => {
+    const originalFetch = globalThis.fetch;
+    sessionListMock.mockResolvedValue({ data: [{
+      id: 'ses_existing',
+      directory: '/repo/worktrees/review-tests',
+      parentID: 'ses_parent',
+      metadata: {
+        openchamber: {
+          roleKey: 'review:tests',
+          worktree: { name: 'review-tests', branch: 'openchamber/review-tests', path: '/repo/worktrees/review-tests' },
+        },
+      },
+      time: { updated: 20 },
+    }] });
+    sessionStatusMock.mockResolvedValue({ data: { ses_existing: { type: 'idle' } } });
+    const fetchMock = vi.fn(async (url) => {
+      const text = String(url);
+      if (text.includes('/prompt_async')) return { ok: true, text: async () => '' };
+      return selectionInputResponse(url) || { ok: true, json: async () => ({}) };
+    });
+    globalThis.fetch = fetchMock;
+    try {
+      const { app } = createApp();
+      const response = await request(app)
+        .post('/api/openchamber/sessions')
+        .send({
+          directory: '/repo/app',
+          parentID: 'ses_parent',
+          roleKey: 'review:tests',
+          prompt: 'Continue the review',
+          model: 'openai/gpt-5.5',
+        })
+        .expect(200);
+
+      expect(response.body).toMatchObject({
+        sessionId: 'ses_existing',
+        directory: '/repo/worktrees/review-tests',
+        roleKey: 'review:tests',
+        reused: true,
+        worktree: { branch: 'openchamber/review-tests' },
+        promptDispatched: true,
+      });
+      expect(sessionListMock).toHaveBeenCalledWith({});
+      expect(sessionStatusMock).toHaveBeenCalledWith({ directory: '/repo/worktrees/review-tests' });
+      expect(createWorktreeMock).not.toHaveBeenCalled();
+      expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/session?directory'))).toBe(false);
+      expect(fetchMock.mock.calls.some(([url]) => String(url).includes('%2Frepo%2Fworktrees%2Freview-tests'))).toBe(true);
     } finally {
       globalThis.fetch = originalFetch;
     }

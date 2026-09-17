@@ -261,9 +261,28 @@ export const createOpenChamberControlService = (dependencies) => {
     }
   };
 
-  const executeSessionAction = async (action, input, contextDirectory, signal) => {
+  const executeSessionAction = async (action, input, contextDirectory, { signal, contextSessionId } = {}) => {
     if (input.timeout !== undefined && input.wait !== true) throw new OpenChamberControlError('timeout requires wait', 400);
     if (input.lastAssistant === true && input.wait !== true) throw new OpenChamberControlError('lastAssistant requires wait', 400);
+    const isCreate = action === 'session.create';
+    const roleKey = isCreate ? asNonEmptyString(input.roleKey) : null;
+    const callerSessionId = isCreate ? asNonEmptyString(contextSessionId) : null;
+    if (!isCreate && (input.roleKey !== undefined || input.independent !== undefined)) {
+      throw new OpenChamberControlError('roleKey and independent are only valid with session.create', 400);
+    }
+    if (isCreate && input.independent !== undefined
+      && input.independent !== true && input.independent !== false) {
+      throw new OpenChamberControlError('independent must be a boolean', 400);
+    }
+    if (isCreate && input.independent === true && roleKey) {
+      throw new OpenChamberControlError('roleKey cannot be combined with independent', 400);
+    }
+    if (isCreate && input.independent === false && !callerSessionId) {
+      throw new OpenChamberControlError('independent:false requires the current session context', 400);
+    }
+    if (roleKey && !callerSessionId) {
+      throw new OpenChamberControlError('roleKey requires the current session context', 400);
+    }
     const sessionID = asNonEmptyString(input.sessionId);
     let directory = asNonEmptyString(input.directory) || (!input.projectId ? asNonEmptyString(contextDirectory) : null);
     if (sessionID && action !== 'session.create' && !asNonEmptyString(input.directory) && !input.projectId) {
@@ -288,6 +307,8 @@ export const createOpenChamberControlService = (dependencies) => {
       ...(typeof input.setUpstream === 'boolean' ? { setUpstream: input.setUpstream } : {}),
       ...(asNonEmptyString(input.messageId) ? { messageId: input.messageId.trim() } : {}),
     };
+    if (callerSessionId && input.independent !== true) payload.parentID = callerSessionId;
+    if (roleKey) payload.roleKey = roleKey;
     const startedAt = now();
     let result;
     if (action === 'session.create') {
@@ -509,7 +530,7 @@ export const createOpenChamberControlService = (dependencies) => {
         }
       }
       if (action === 'session.create' || action === 'session.send' || action === 'session.fork') {
-        return executeSessionAction(action, input, contextDirectory, options.signal);
+        return executeSessionAction(action, input, contextDirectory, options);
       }
       if (action.startsWith('session.')) {
         const directory = asNonEmptyString(input.directory) || asNonEmptyString(contextDirectory);

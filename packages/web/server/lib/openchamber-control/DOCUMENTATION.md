@@ -55,6 +55,11 @@ other.
 - Explicit `projectId` or `directory` scope takes precedence over the managed
   tool's current-session directory fallback; the fallback never creates a
   conflicting second scope.
+- Managed-tool session creation uses the invoking session as `parentID` by
+  default. `independent: true` omits that parent and creates a top-level
+  session. `roleKey` is child-only, requires the caller session, and is reused
+  only for an idle, non-archived child; a reused role keeps its existing
+  worktree and branch.
 - One failed directory status lookup produces `unknown` for only that
   directory and does not erase other session results.
 - Destructive session/worktree deletion and project-path registration are not

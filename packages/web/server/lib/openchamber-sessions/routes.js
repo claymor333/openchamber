@@ -217,7 +217,7 @@ const runPromptAsync = async ({ baseUrl, authHeaders, sessionID, directory, payl
   }
 };
 
-const createSession = async ({ baseUrl, authHeaders, directory, title }) => {
+const createSession = async ({ baseUrl, authHeaders, directory, title, parentID, metadata }) => {
   const sessionUrl = new URL(`${baseUrl}/session`);
   sessionUrl.searchParams.set('directory', directory);
   const response = await fetch(sessionUrl.toString(), {
@@ -228,7 +228,12 @@ const createSession = async ({ baseUrl, authHeaders, directory, title }) => {
       'content-type': 'application/json',
       accept: 'application/json',
     },
-    body: JSON.stringify({ directory, ...(title ? { title } : {}) }),
+    body: JSON.stringify({
+      directory,
+      ...(parentID ? { parentID } : {}),
+      ...(title ? { title } : {}),
+      ...(metadata ? { metadata } : {}),
+    }),
   });
 
   if (!response.ok) {
@@ -242,6 +247,56 @@ const createSession = async ({ baseUrl, authHeaders, directory, title }) => {
     throw new Error('failed to create session');
   }
   return sessionID;
+};
+
+const getOpenChamberMetadata = (session) => {
+  const metadata = session?.metadata;
+  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) return null;
+  const openchamber = metadata.openchamber;
+  return openchamber && typeof openchamber === 'object' && !Array.isArray(openchamber)
+    ? openchamber
+    : null;
+};
+
+const getSessionRoleKey = (session) => asNonEmptyString(getOpenChamberMetadata(session)?.roleKey);
+
+const listAllSessions = async (client) => {
+  const experimentalList = client?.experimental?.session?.list;
+  const regularList = client?.session?.list;
+  const list = typeof experimentalList === 'function' ? experimentalList : regularList;
+  if (typeof list !== 'function') return [];
+  try {
+    const response = await list.call(typeof experimentalList === 'function' ? client.experimental.session : client.session, {});
+    return Array.isArray(response?.data) ? response.data : [];
+  } catch {
+    return [];
+  }
+};
+
+const findReusableRoleSession = async ({ client, roleKey, parentID }) => {
+  if (!roleKey || !parentID) return null;
+  const sessions = (await listAllSessions(client))
+    .filter((session) => !session?.time?.archived)
+    .filter((session) => getSessionRoleKey(session) === roleKey)
+    .filter((session) => asNonEmptyString(session?.parentID) === parentID)
+    .filter((session) => asNonEmptyString(session?.directory))
+    .sort((left, right) => (
+      (right?.time?.updated || right?.time?.created || 0)
+      - (left?.time?.updated || left?.time?.created || 0)
+    ));
+
+  for (const session of sessions) {
+    try {
+      const response = await client.session.status({ directory: session.directory });
+      const status = response?.data?.[session.id];
+      if (status?.type === 'busy' || status?.type === 'retry') continue;
+      return session;
+    } catch {
+      // A failed status lookup is not evidence that a child is idle. Let the
+      // caller create a fresh session rather than dispatching into an unknown one.
+    }
+  }
+  return null;
 };
 
 const forkSession = async ({ client, sessionID, directory, messageID }) => {
@@ -705,6 +760,11 @@ export const createOpenChamberSessionService = (dependencies) => {
   const create = async (payload = {}) => {
     const title = asNonEmptyString(payload.title);
     const prompt = asNonEmptyString(payload.prompt);
+    const roleKey = asNonEmptyString(payload.roleKey);
+    const parentID = asNonEmptyString(payload.parentID);
+    if (roleKey && !parentID) {
+      throw new OpenChamberControlError('roleKey requires parentID', 400);
+    }
     const goalInput = resolveGoalInput(payload, prompt);
     if (!goalInput.ok) {
       throw new OpenChamberControlError(goalInput.error, 400);
@@ -731,31 +791,54 @@ export const createOpenChamberSessionService = (dependencies) => {
     }
 
     if (typeof waitForOpenCodeReady === 'function') await waitForOpenCodeReady(10_000, 250);
+    const baseUrl = buildOpenCodeUrl('/', '').replace(/\/$/, '');
+    const authHeaders = getOpenCodeAuthHeaders();
+    const client = createOpencodeClient({ baseUrl, headers: authHeaders });
+    const reusedSession = await findReusableRoleSession({ client, roleKey, parentID });
+    if (reusedSession) {
+      sessionDirectory = reusedSession.directory;
+      worktree = getOpenChamberMetadata(reusedSession)?.worktree || null;
+    } else {
+      if (prompt) {
+        await validateRequestedSelection({
+          directory: resolvedDirectory.directory,
+          requestedModel: model,
+          requestedAgent: agent,
+          requestedVariant: variant,
+        });
+      }
 
-    if (prompt) {
+      if (worktreeInput) {
+        worktree = await createWorktree(resolvedDirectory.directory, worktreeInput);
+        sessionDirectory = worktree.path;
+        await waitForWorktreeBootstrapReady({ directory: sessionDirectory });
+      }
+    }
+
+    if (reusedSession && prompt) {
       await validateRequestedSelection({
-        directory: resolvedDirectory.directory,
+        directory: sessionDirectory,
         requestedModel: model,
         requestedAgent: agent,
         requestedVariant: variant,
       });
     }
 
-    if (worktreeInput) {
-      worktree = await createWorktree(resolvedDirectory.directory, worktreeInput);
-      sessionDirectory = worktree.path;
-      await waitForWorktreeBootstrapReady({ directory: sessionDirectory });
-    }
-
-    const baseUrl = buildOpenCodeUrl('/', '').replace(/\/$/, '');
-    const authHeaders = getOpenCodeAuthHeaders();
-    const client = createOpencodeClient({ baseUrl, headers: authHeaders });
-    const sessionID = await createSession({
+    const sessionID = reusedSession?.id || await createSession({
       client,
       baseUrl,
       authHeaders,
       directory: sessionDirectory,
+      ...(parentID ? { parentID } : {}),
       ...(title ? { title } : {}),
+      ...(roleKey ? {
+        metadata: {
+          openchamber: {
+            roleKey,
+            ...(worktree ? { worktree } : {}),
+          },
+        },
+      } : {}),
     });
 
     let dispatch = { model, agent, variant, promptDispatched: false, dispatchedAsCommand: false };
@@ -781,6 +864,9 @@ export const createOpenChamberSessionService = (dependencies) => {
       ...(resolvedDirectory.projectId ? { projectId: resolvedDirectory.projectId } : {}),
       ...(title ? { title } : {}),
       ...(worktree ? { worktree } : {}),
+      ...(parentID ? { parentID } : {}),
+      ...(roleKey ? { roleKey } : {}),
+      ...(reusedSession ? { reused: true } : {}),
       ...(prompt && dispatch.model ? { model: dispatch.model } : {}),
       ...(prompt && dispatch.agent ? { agent: dispatch.agent } : {}),
       ...(prompt && dispatch.variant ? { variant: dispatch.variant } : {}),
@@ -798,6 +884,9 @@ export const createOpenChamberSessionService = (dependencies) => {
         ...(resolvedDirectory.projectId ? { projectID: resolvedDirectory.projectId } : {}),
         ...(title ? { title } : {}),
         ...(worktree ? { worktree } : {}),
+        ...(parentID ? { parentID } : {}),
+        ...(roleKey ? { roleKey } : {}),
+        ...(reusedSession ? { reused: true } : {}),
         ...(prompt && dispatch.model ? { model: dispatch.model } : {}),
         ...(prompt && dispatch.agent ? { agent: dispatch.agent } : {}),
         ...(prompt && dispatch.variant ? { variant: dispatch.variant } : {}),

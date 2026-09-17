@@ -50,6 +50,8 @@ const ALL_PARAMETER_PROPERTIES = {
   projectId: { type: 'string', description: 'Configured project ID; do not combine with directory' },
   directory: { type: 'string', description: 'Absolute checkout or session directory; defaults to the current session directory' },
   sessionId: { type: 'string' },
+  roleKey: { type: 'string', description: 'Stable logical role key for child-session reuse, such as review:tests; use the same key for corrections or re-reviews' },
+  independent: { type: 'boolean', description: 'Create a top-level session instead of a child of the current session; cannot be combined with roleKey' },
   messageId: { type: 'string', description: 'Optional fork boundary message ID' },
   taskId: { type: 'string' },
   title: { type: 'string' },
@@ -187,7 +189,7 @@ const createToolEntry = ({ name, description, actions, definitions, parameters }
               authorization: "Bearer " + token,
               "content-type": "application/json",
             },
-            body: JSON.stringify({ input: args, contextDirectory: context.directory, tool: ${JSON.stringify(name)} }),
+            body: JSON.stringify({ input: args, contextDirectory: context.directory, contextSessionId: context.sessionID, tool: ${JSON.stringify(name)} }),
             signal: context.abort,
           })
           const output = await response.text()
@@ -311,7 +313,11 @@ export const createAgentToolRuntime = (dependencies) => {
       return createResult({ ok: false, action, error: { message: 'OpenChamber control service is unavailable', kind: 'runtime' } });
     }
     try {
-      const data = await executeAction(action, { ...payload.input, action }, payload.contextDirectory, options);
+      const contextSessionId = asNonEmptyString(payload.contextSessionId);
+      const executionOptions = contextSessionId
+        ? { ...options, contextSessionId }
+        : options;
+      const data = await executeAction(action, { ...payload.input, action }, payload.contextDirectory, executionOptions);
       return createResult({ ok: true, action, data });
     } catch (error) {
       return createResult({

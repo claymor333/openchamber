@@ -109,6 +109,11 @@ describe('managed agent tool runtime', () => {
       'Wait for current session activity to become idle. Omit by default; use only when the user asks or the next step requires the completed result',
     );
     expect(hooks.tool.openchamber.args.parameters.properties.sessionId).toEqual({ type: 'string' });
+    expect(hooks.tool.openchamber.args.parameters.properties.roleKey).toEqual(expect.objectContaining({ type: 'string' }));
+    expect(hooks.tool.openchamber.args.parameters.properties.independent).toEqual({
+      type: 'boolean',
+      description: 'Create a top-level session instead of a child of the current session; cannot be combined with roleKey',
+    });
     expect(source).not.toContain('title: "OpenChamber"');
     expect(source).not.toContain('@opencode-ai/plugin');
     expect(source).not.toContain(preparedEnv.OPENCHAMBER_AGENT_TOOL_TOKEN);
@@ -150,7 +155,12 @@ describe('managed agent tool runtime', () => {
       sent.push(JSON.parse(init.body));
       return new Response(JSON.stringify({ schemaVersion: 1, ok: true, action: 'browser.open', data: {} }));
     };
-    const context = { directory: '/work/project', abort: new AbortController().signal, metadata: () => {} };
+    const context = {
+      directory: '/work/project',
+      sessionID: 'ses_parent',
+      abort: new AbortController().signal,
+      metadata: () => {},
+    };
 
     try {
       // The shape a model actually produced: url and viewport next to action.
@@ -177,6 +187,23 @@ describe('managed agent tool runtime', () => {
     expect(sent[0].input).toEqual({ action: 'browser.open', url: 'https://example.test', viewport: 'mobile' });
     expect(sent[1].input.url).toBe('https://example.test/nested');
     expect(sent[2].input).toEqual({ action: 'session.messages', sessionId: 'ses_1', limit: 3 });
+    expect(sent[2].contextSessionId).toBe('ses_parent');
+  });
+
+  it('passes the invoking session ID to the control service', async () => {
+    const { runtime, executeAction } = await createRuntime();
+    await runtime.execute({
+      input: { action: 'session.create', roleKey: 'review:tests' },
+      contextDirectory: '/work/project',
+      contextSessionId: 'ses_parent',
+    });
+
+    expect(executeAction).toHaveBeenCalledWith(
+      'session.create',
+      { action: 'session.create', roleKey: 'review:tests' },
+      '/work/project',
+      { contextSessionId: 'ses_parent' },
+    );
   });
 
   it('omits a tool the user turned off', async () => {

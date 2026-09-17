@@ -117,6 +117,27 @@ describe('tunnel-host HTTP body forwarding', () => {
     await loopback.stop();
   });
 
+  test('does not invoke fetch abort when cancelling a request', async () => {
+    const { host, loopback } = await createHarness();
+    const originalAbort = AbortController.prototype.abort;
+    let abortCalled = false;
+    AbortController.prototype.abort = function abort(...args) {
+      abortCalled = true;
+      originalAbort.apply(this, args);
+      throw new DOMException('This operation was aborted.', 'AbortError');
+    };
+
+    try {
+      await host.handleFrame(httpHead());
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      await expect(host.handleFrame(encodeTunnelFrame(TunnelFrameType.StreamAbort, 1, new Uint8Array(0)))).resolves.toBeUndefined();
+      expect(abortCalled).toBe(false);
+    } finally {
+      AbortController.prototype.abort = originalAbort;
+      await loopback.stop();
+    }
+  });
+
   test('forwards an empty body when the client delivered an explicit empty frame', async () => {
     const { host, loopback } = await createHarness();
     await host.handleFrame(httpHead({ hasBody: true }));
