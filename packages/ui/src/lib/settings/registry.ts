@@ -510,6 +510,13 @@ export const SETTINGS_REGISTRY = {
     parse: parseIntegerInRange(1, 5),
     ui: uiStore('mobileSessionSwipeLimit', (v) => useUIStore.getState().setMobileSessionSwipeLimit(v), { autoSave: false }),
   }),
+  mobileUseBottomNavigation: field({
+    scope: 'device',
+    local: true,
+    surfaces: ['mobile'],
+    parse: parseBoolean,
+    ui: uiStore('mobileUseBottomNavigation', (v) => useUIStore.getState().setMobileUseBottomNavigation(v), { autoSave: false }),
+  }),
 } as const;
 
 export type SettingsKey = keyof typeof SETTINGS_REGISTRY;

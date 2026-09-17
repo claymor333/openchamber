@@ -3,6 +3,7 @@ import React from 'react';
 import { Button } from '@/components/ui/button';
 import { Icon } from '@/components/icon/Icon';
 import { NumberInput } from '@/components/ui/number-input';
+import { Switch } from '@/components/ui/switch';
 import {
   SETTINGS_ICON_BUTTON_CLASS,
   SETTINGS_NUMBER_INPUT_CLASS,
@@ -19,15 +20,18 @@ import {
 
 const MIN_LIMIT = 1;
 const MAX_LIMIT = 5;
+const MOBILE_SETTINGS_MAX_WIDTH = 768;
 
 /** The install-local session navigation preference for phone and PWA surfaces. */
 export const MobileSessionSwipeSettings: React.FC = () => {
   const { t } = useI18n();
-  const { isMobile } = useDeviceInfo();
+  const { isMobile, screenWidth } = useDeviceInfo();
   const limit = useUIStore((state) => state.mobileSessionSwipeLimit);
   const setLimit = useUIStore((state) => state.setMobileSessionSwipeLimit);
+  const useBottomNavigation = useUIStore((state) => state.mobileUseBottomNavigation);
+  const setUseBottomNavigation = useUIStore((state) => state.setMobileUseBottomNavigation);
 
-  if (!isMobile) return null;
+  if (!isMobile && screenWidth > MOBILE_SETTINGS_MAX_WIDTH) return null;
 
   return (
     <SettingsSection
@@ -60,6 +64,17 @@ export const MobileSessionSwipeSettings: React.FC = () => {
         >
           <Icon name="restart" className="size-3.5" />
         </Button>
+      </SettingsFieldRow>
+      <SettingsFieldRow
+        settingsItem="sessions.mobile-bottom-navigation"
+        label={t('settings.openchamber.mobileSessionSwipe.field.bottomNavigation')}
+        info={t('settings.openchamber.mobileSessionSwipe.field.bottomNavigationHint')}
+      >
+        <Switch
+          checked={useBottomNavigation}
+          onCheckedChange={setUseBottomNavigation}
+          aria-label={t('settings.openchamber.mobileSessionSwipe.field.bottomNavigationAria')}
+        />
       </SettingsFieldRow>
     </SettingsSection>
   );

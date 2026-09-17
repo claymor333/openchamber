@@ -878,6 +878,7 @@ interface UIStore {
   inputBarOffset: number;
   mobileKeyboardMode: MobileKeyboardMode;
   mobileSessionSwipeLimit: number;
+  mobileUseBottomNavigation: boolean;
 
   favoriteModels: Array<{ providerID: string; modelID: string }>;
   hiddenModels: Array<{ providerID: string; modelID: string }>;
@@ -1084,6 +1085,7 @@ interface UIStore {
   setInputBarOffset: (offset: number) => void;
   setMobileKeyboardMode: (mode: MobileKeyboardMode) => void;
   setMobileSessionSwipeLimit: (limit: number) => void;
+  setMobileUseBottomNavigation: (enabled: boolean) => void;
   applyTypography: () => void;
   applyPadding: () => void;
   toggleFavoriteModel: (providerID: string, modelID: string) => void;
@@ -1267,6 +1269,7 @@ export const useUIStore = create<UIStore>()(
         inputBarOffset: 0,
         mobileKeyboardMode: getStoredMobileKeyboardMode(),
         mobileSessionSwipeLimit: DEFAULT_MOBILE_SESSION_SWIPE_LIMIT,
+        mobileUseBottomNavigation: true,
         favoriteModels: [],
         hiddenModels: [],
         providerOrder: [],
@@ -2269,6 +2272,9 @@ export const useUIStore = create<UIStore>()(
           const normalized = normalizeMobileSessionSwipeLimit(limit);
           set((state) => state.mobileSessionSwipeLimit === normalized ? state : { mobileSessionSwipeLimit: normalized });
         },
+        setMobileUseBottomNavigation: (enabled) => {
+          set((state) => state.mobileUseBottomNavigation === enabled ? state : { mobileUseBottomNavigation: enabled });
+        },
 
         toggleFavoriteModel: (providerID, modelID) => {
           set((state) => {
@@ -2950,6 +2956,10 @@ export const useUIStore = create<UIStore>()(
           state.mobileSessionSwipeLimit = persistedMobileSessionSwipeLimit == null
             ? DEFAULT_MOBILE_SESSION_SWIPE_LIMIT
             : normalizeMobileSessionSwipeLimit(Number(persistedMobileSessionSwipeLimit));
+          const persistedMobileUseBottomNavigation = state.mobileUseBottomNavigation;
+          state.mobileUseBottomNavigation = persistedMobileUseBottomNavigation == null
+            ? true
+            : persistedMobileUseBottomNavigation === true;
 
           if (state.toolJsonViewMode !== 'summary'
             && state.toolJsonViewMode !== 'formatted'
@@ -3075,6 +3085,7 @@ export const useUIStore = create<UIStore>()(
           desktopWindowControlsStyle: state.desktopWindowControlsStyle,
           inputBarOffset: state.inputBarOffset,
           mobileSessionSwipeLimit: state.mobileSessionSwipeLimit,
+          mobileUseBottomNavigation: state.mobileUseBottomNavigation,
           mermaidRenderingMode: state.mermaidRenderingMode,
           userMessageRenderingMode: state.userMessageRenderingMode,
           collapsibleUserMessages: state.collapsibleUserMessages,

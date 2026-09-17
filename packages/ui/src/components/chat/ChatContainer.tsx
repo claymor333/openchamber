@@ -780,6 +780,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
 
     // UI store
     const isExpandedInput = useUIStore((state) => state.isExpandedInput);
+    const useBottomNavigation = useUIStore((state) => state.mobileUseBottomNavigation);
     const stickyUserHeader = useUIStore((state) => state.stickyUserHeader);
     const promptNavigatorEnabled = useUIStore((state) => state.promptNavigatorEnabled);
     const allowPromptingSubagentSessions = useUIStore((state) => state.allowPromptingSubagentSessions);
@@ -1030,7 +1031,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
     );
     // ChatContainer knows which branch owns the bottom of the column. Empty,
     // draft, and read-only branches keep one top header instead.
-    const mobileTopHeader = isMobile && renderMobileHeader && (draftOpen || promptReadOnly || !currentSessionId)
+    const mobileTopHeader = isMobile && renderMobileHeader && (!useBottomNavigation || draftOpen || promptReadOnly || !currentSessionId)
         ? renderMobileHeader('top')
         : null;
 
@@ -1654,7 +1655,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
                         scrollToBottom={scrollToBottomOnSend}
                         scrollToLatest={resumeToLatestInstant}
                         draftPresentationExiting={draftPresentationExiting}
-                         mobileHeader={isMobile && !draftOpen && !promptReadOnly && currentSessionId && renderMobileHeader
+                         mobileHeader={isMobile && useBottomNavigation && !draftOpen && !promptReadOnly && currentSessionId && renderMobileHeader
                             ? (options) => renderMobileHeader('bottom', options)
                             : undefined}
                     />
