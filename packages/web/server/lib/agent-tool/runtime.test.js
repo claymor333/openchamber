@@ -132,6 +132,7 @@ describe('managed agent tool runtime', () => {
     expect(Object.keys(tool.openchamber.args.parameters.properties)).not.toContain('url');
     expect(Object.keys(tool.openchamber.args.parameters.properties)).toContain('sessionId');
     expect(tool.openchamber.args.parameters.properties.roleKey).toEqual(expect.objectContaining({ type: 'string' }));
+    expect(tool.openchamber.args.parameters.properties.independent).toEqual(expect.objectContaining({ type: 'boolean' }));
   });
 
   it('accepts inputs passed beside the action, not only inside parameters', async () => {

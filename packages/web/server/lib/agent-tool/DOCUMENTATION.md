@@ -32,8 +32,8 @@ both settings are `false`.
    `OPENCODE_CONFIG_CONTENT` without replacing existing plugin entries.
 3. A random per-child token and loopback callback URL are added only to the
    managed OpenCode child environment.
-4. The plugin calls `POST /api/openchamber/agent-tool` with its typed input and
-   OpenCode's authoritative session directory.
+4. The plugin calls `POST /api/openchamber/agent-tool` with its typed input,
+   OpenCode's authoritative session directory, and the calling session ID.
 5. The route delegates the fixed action allowlist directly to the shared
    OpenChamber control service. The CLI uses the same service through its
    authenticated HTTP adapter, so Goal Mode ordering, wait behavior,
@@ -60,6 +60,9 @@ both settings are `false`.
 - The tool description frames intent: created sessions and scheduled tasks are
   user-facing work the user follows up with, never a channel for the agent to
   delegate parts of its own current task.
+- `session.create` keeps the calling-session parent for reusable child sessions.
+  Set `independent: true` when the user wants a top-level sidebar session;
+  `independent` cannot be combined with `roleKey`.
 - Optional behavior switches (`worktree`, `goal`, `agent`, `variant`, `wait`)
   state their default and an explicit "only when the user asks" rule so agents
   do not invent worktrees, goal mode, or waits the user never requested.

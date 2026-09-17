@@ -55,6 +55,9 @@ other.
 - Explicit `projectId` or `directory` scope takes precedence over the managed
   tool's current-session directory fallback; the fallback never creates a
   conflicting second scope.
+- Managed-tool `session.create` carries the calling session for role-keyed child
+  reuse. `independent: true` suppresses that parent linkage and creates a root
+  session; it cannot be combined with `roleKey`.
 - One failed directory status lookup produces `unknown` for only that
   directory and does not erase other session results.
 - Destructive session/worktree deletion and project-path registration are not
