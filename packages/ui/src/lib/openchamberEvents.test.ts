@@ -6,6 +6,9 @@ let pendingControllers: Array<ReadableStreamDefaultController<Uint8Array>> = [];
 mock.module('./runtime-fetch', () => ({
   runtimeFetch: (url: string, init: RequestInit = {}) => {
     requests.push({ url, init });
+    if (url === '/api/message-queue') {
+      return Promise.resolve(Response.json({ revision: 1, sessions: [] }));
+    }
     const stream = new ReadableStream<Uint8Array>({
       start(controller) {
         pendingControllers.push(controller);
@@ -16,10 +19,6 @@ mock.module('./runtime-fetch', () => ({
       headers: { 'content-type': 'text/event-stream' },
     }));
   },
-}));
-
-mock.module('./runtime-switch', () => ({
-  subscribeRuntimeEndpointChanged: () => () => undefined,
 }));
 
 const writeFrame = (payload: unknown): void => {
@@ -40,7 +39,7 @@ describe('openchamber events', () => {
   beforeEach(() => {
     requests.length = 0;
     pendingControllers = [];
-    globalThis.window = {} as Window & typeof globalThis;
+    globalThis.window = Object.assign(new EventTarget(), { location: new URL('http://runtime.test') }) as Window & typeof globalThis;
   });
 
   afterEach(() => {
@@ -103,18 +102,10 @@ describe('openchamber events', () => {
     if (!target) throw new Error('Missing queue target');
     useMessageQueueStore.getState().resetForRuntimeSwitch(runtimeKey);
     useMessageQueueStore.setState({ queuedMessages: {}, sendingIds: {} });
-    const originalFetch = globalThis.fetch;
-    let reads = 0;
-    globalThis.fetch = Object.assign(async (input: RequestInfo | URL) => {
-      const url = new URL(input instanceof Request ? input.url : String(input), 'http://runtime.test');
-      if (url.pathname === '/api/message-queue') reads += 1;
-      return Response.json({ revision: 1, sessions: [] });
-    }, originalFetch);
-    const unsubscribe = subscribeMessageQueueSync(runtimeKey);
+     const unsubscribe = subscribeMessageQueueSync(runtimeKey);
      try {
-       await dispatchFrame({ type: 'openchamber:event-stream-ready', properties: {} });
-      await useMessageQueueStore.getState().hydrate();
-      expect(reads).toBe(1);
+       await useMessageQueueStore.getState().hydrate();
+       expect(requests.filter((request) => request.url === '/api/message-queue')).toHaveLength(1);
       const session = { sessionId: target.sessionId, directory: target.directory, sendingId: 'q1', items: [{ id: 'q1', content: 'queued', text: 'queued', createdAt: 1, attachments: [], sendConfig: { providerID: 'p', modelID: 'm' } }] };
        await dispatchFrame({ type: 'openchamber:message-queue.updated', properties: { revision: 2, session } });
       const key = getMessageQueueKey(target);
@@ -122,13 +113,12 @@ describe('openchamber events', () => {
        await dispatchFrame({ type: 'openchamber:message-queue.updated', properties: { revision: 3, session: { ...session, items: [], sendingId: null } } });
       expect(useMessageQueueStore.getState().queuedMessages[key]).toBeUndefined();
       expect(useMessageQueueStore.getState().sendingIds[key]).toBeUndefined();
-      expect(reads).toBe(1);
+       expect(requests.filter((request) => request.url === '/api/message-queue')).toHaveLength(1);
        unsubscribe();
        writeFrame({ type: 'openchamber:message-queue.updated', properties: { revision: 4, session } });
       expect(useMessageQueueStore.getState().queuedMessages[key]).toBeUndefined();
     } finally {
       unsubscribe();
-      globalThis.fetch = originalFetch;
     }
   });
 
