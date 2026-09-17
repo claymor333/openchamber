@@ -39,7 +39,11 @@ describe('openchamber events', () => {
   beforeEach(() => {
     requests.length = 0;
     pendingControllers = [];
-    globalThis.window = Object.assign(new EventTarget(), { location: new URL('http://runtime.test') }) as Window & typeof globalThis;
+    Object.defineProperty(globalThis, 'window', {
+      value: Object.assign(new EventTarget(), { location: new URL('http://runtime.test') }),
+      configurable: true,
+      writable: true,
+    });
   });
 
   afterEach(() => {
