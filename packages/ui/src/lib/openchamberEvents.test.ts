@@ -27,6 +27,11 @@ const writeFrame = (payload: unknown, lineEnding = '\n'): void => {
   controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(payload)}${lineEnding}${lineEnding}`));
 };
 
+const dispatchFrame = async (payload: unknown): Promise<void> => {
+  writeFrame(payload);
+  await new Promise((resolve) => setTimeout(resolve, 10));
+};
+
 const closeStream = (): void => {
   pendingControllers[pendingControllers.length - 1]?.close();
 };
@@ -123,22 +128,20 @@ describe('openchamber events', () => {
       return Response.json({ revision: 1, sessions: [] });
     }, originalFetch);
     const unsubscribe = subscribeMessageQueueSync(runtimeKey);
-    const source = MockEventSource.instances[0];
-    try {
-      source.onmessage?.({ data: JSON.stringify({ type: 'openchamber:event-stream-ready', properties: {} }) });
+     try {
+       await dispatchFrame({ type: 'openchamber:event-stream-ready', properties: {} });
       await useMessageQueueStore.getState().hydrate();
       expect(reads).toBe(1);
       const session = { sessionId: target.sessionId, directory: target.directory, sendingId: 'q1', items: [{ id: 'q1', content: 'queued', text: 'queued', createdAt: 1, attachments: [], sendConfig: { providerID: 'p', modelID: 'm' } }] };
-      source.onmessage?.({ data: JSON.stringify({ type: 'openchamber:message-queue.updated', properties: { revision: 2, session } }) });
+       await dispatchFrame({ type: 'openchamber:message-queue.updated', properties: { revision: 2, session } });
       const key = getMessageQueueKey(target);
       expect(useMessageQueueStore.getState().queuedMessages[key]).toHaveLength(1);
-      source.onmessage?.({ data: JSON.stringify({ type: 'openchamber:message-queue.updated', properties: { revision: 3, session: { ...session, items: [], sendingId: null } } }) });
+       await dispatchFrame({ type: 'openchamber:message-queue.updated', properties: { revision: 3, session: { ...session, items: [], sendingId: null } } });
       expect(useMessageQueueStore.getState().queuedMessages[key]).toBeUndefined();
       expect(useMessageQueueStore.getState().sendingIds[key]).toBeUndefined();
       expect(reads).toBe(1);
-      expect(MockEventSource.instances).toHaveLength(1);
-      unsubscribe();
-      source.onmessage?.({ data: JSON.stringify({ type: 'openchamber:message-queue.updated', properties: { revision: 4, session } }) });
+       unsubscribe();
+       writeFrame({ type: 'openchamber:message-queue.updated', properties: { revision: 4, session } });
       expect(useMessageQueueStore.getState().queuedMessages[key]).toBeUndefined();
     } finally {
       unsubscribe();
@@ -150,20 +153,15 @@ describe('openchamber events', () => {
     const { subscribeOpenchamberEvents } = await import('./openchamberEvents');
     const events: unknown[] = [];
     const unsubscribe = subscribeOpenchamberEvents((event) => events.push(event));
-    const source = MockEventSource.instances[0];
 
-    source.onmessage?.({
-      data: JSON.stringify({
-        type: 'openchamber:worktree-changed',
-        properties: { directories: ['/repo', '/repo-linked'], at: 456 },
-      }),
-    });
-    source.onmessage?.({
-      data: JSON.stringify({
-        type: 'openchamber:worktree-changed',
-        properties: { directories: [], at: 789 },
-      }),
-    });
+     await dispatchFrame({
+       type: 'openchamber:worktree-changed',
+       properties: { directories: ['/repo', '/repo-linked'], at: 456 },
+     });
+     await dispatchFrame({
+       type: 'openchamber:worktree-changed',
+       properties: { directories: [], at: 789 },
+     });
 
     expect(events).toEqual([
       { type: 'worktree-changed', directories: ['/repo', '/repo-linked'], changedAt: 456 },
