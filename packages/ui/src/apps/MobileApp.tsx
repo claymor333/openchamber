@@ -1459,6 +1459,7 @@ export function MobileApp({ apis }: MobileAppProps) {
   usePushVisibilityBeacon({ enabled: true });
   useUpdatePolling();
   useWindowTitle();
+  useRoutingSync();
   useRouter();
   // APNs is the only notification channel on the native app (background-capable,
   // focus-suppressed server-side via the visibility beacon). Local notifications are
