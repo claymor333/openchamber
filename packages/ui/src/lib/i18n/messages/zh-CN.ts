@@ -2,7 +2,9 @@ import type { I18nKey } from './en';
 import { settingsDict } from './zh-CN.settings';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { linearPanelI18n } from './linear-panel.i18n';
+import { routingI18n } from './routing.i18n';
 import { pluginPanelI18n } from './plugin-panel.i18n';
+import { surfacePanelI18n } from './surface-panel.i18n';
 
 export const dict: Record<I18nKey, string> = {
   'sessions.aiRename.action': '使用 AI 重命名',
@@ -31,7 +33,9 @@ export const dict: Record<I18nKey, string> = {
   ...settingsDict,
   ...linearIssuePickerI18n['zh-CN'],
   ...linearPanelI18n['zh-CN'],
+  ...routingI18n['zh-CN'],
   ...pluginPanelI18n['zh-CN'],
+  ...surfacePanelI18n['zh-CN'],
   'terminalView.actions.attachSelection': '附加所选输出',
   'terminalView.actions.copySelection': '复制所选输出',
   'terminalView.toast.selectionCopied': '已复制输出',
@@ -429,6 +433,7 @@ export const dict: Record<I18nKey, string> = {
   'multirun.launcher.models.info': '选择 2 个或更多模型。同一模型可重复添加。',
   'multirun.launcher.toast.fileTooLarge': '文件“{fileName}”过大（最大 10MB）',
   'multirun.launcher.toast.attachFailed': '附加“{fileName}”失败',
+  'multirun.launcher.toast.partialFailure': '部分会话未能创建。失败数量：{failed}。',
   'multirun.launcher.toast.attachedSingle': '已附加 {count} 个文件',
   'multirun.launcher.toast.attachedPlural': '已附加 {count} 个文件',
   'multirun.modelMultiSelect.actions.addModel': '添加模型',
@@ -631,6 +636,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.session.status.permissionRequired': '需要权限',
   'sessions.sidebar.session.status.questionPendingSingle': '1 个待回答问题',
   'sessions.sidebar.session.status.questionPendingMany': '{count} 个待回答问题',
+  'sessions.sidebar.session.status.questionPending': '待回答问题',
   'sessions.sidebar.session.status.activeFor': '已活动 {duration}',
   'sessions.sidebar.session.status.lastTurnDuration': '上一轮耗时 {duration}',
   'sessions.sidebar.session.subsessions.collapse': '折叠子会话',
@@ -1597,6 +1603,8 @@ export const dict: Record<I18nKey, string> = {
   'diffView.unavailable.missingDescription': '它在变更列表加载后被删除。列表正在刷新。',
   'diffView.unavailable.nestedRepositoryTitle': '独立的 Git 仓库',
   'diffView.unavailable.nestedRepositoryDescription': '此文件夹有自己的 Git 历史。将其作为项目打开以查看变更。',
+  'diffView.unavailable.untrackedDirectoryTitle': '新文件文件夹',
+  'diffView.unavailable.untrackedDirectoryDescription': '此文件夹中的新文件太多，无法逐个列出。请暂存该文件夹，或者如果它不属于仓库，将其添加到 .gitignore。',
   'diffView.submodule.title': '子模块',
   'diffView.submodule.commitChanged': '提交 {from} → {to}',
   'diffView.submodule.commitUnchanged': '仍在提交 {commit}',
@@ -1627,8 +1635,6 @@ export const dict: Record<I18nKey, string> = {
   'diffView.actions.renderAnyway': '仍然渲染',
   'diffView.actions.expandAll': '全部展开',
   'diffView.actions.collapseAll': '全部折叠',
-  'diffView.actions.loadFullFiles': '加载完整文件',
-  'diffView.actions.disableFullFiles': '停止加载完整文件',
   'diffView.actions.disableLineWrap': '关闭自动换行',
   'diffView.actions.enableLineWrap': '开启自动换行',
   'diffView.actions.openFileInEditorAtChange': '在编辑器中打开此文件并定位变更',
@@ -2303,6 +2309,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.textSelection.title.commentOnSelection': '评论所选内容',
   'chat.textSelection.comment.placeholder': '添加可选评论...',
   'chat.textSelection.comment.attach': '附加',
+  'chat.textSelection.comment.attachFailed': '无法附加评论。请缩短评论或移除其他已附加的上下文，然后重试。',
   'chat.textSelection.actions.addToNotes': '添加到笔记',
   'chat.textSelection.title.addToCurrentChat': '添加到当前聊天',
   'chat.textSelection.title.saveInsightToNotes': '将选中文本保存到笔记',
@@ -2415,6 +2422,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.chatInput.toast.someFilesSkipped': '部分文件被跳过：\n{summary}',
   'chat.chatInput.toast.vscodePickFailed': '在 VS Code 中选择文件失败',
   'chat.chatInput.toast.openSessionFirst': '请先打开一个会话',
+  'chat.chatInput.toast.dictationKeptForOriginalSession': '语音输入内容已保存为草稿，位于你开始语音输入的会话中',
   'chat.chatInput.toast.togglePermissionAutoAcceptFailed': '切换权限自动接受失败',
   'chat.chatInput.reviewComments': '审查评论：',
   'chat.chatInput.reviewCommentsRemove': '移除审查评论',
