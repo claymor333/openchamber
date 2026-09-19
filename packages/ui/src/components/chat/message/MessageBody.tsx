@@ -64,6 +64,7 @@ import { isCapacitorMobileApp } from '@/apps/mobileNativeChrome';
 import { useHybridTabletLayout } from '@/hooks/useHybridTabletLayout';
 import { shouldNavigateSubtaskInPlace } from './subtaskNavigation';
 import { WorktreeRequiresGitRepositoryError } from '@/lib/worktrees/worktreeCreate';
+import { cloneMessageImageExportSource } from './imageExport';
 
 
 const CONTAIN_LAYOUT_STYLE = { contain: 'layout' as const, transform: 'translateZ(0)' };
@@ -518,9 +519,8 @@ const writeRevealedToolIds = (messageId: string, value: Set<string>): void => {
     revealedToolIdsByMessage.set(messageId, new Set(value));
 };
 
-/** Extension actions as icon buttons, after the built-in row. Same chrome as the copy button next to them. */
 /**
- * Extension actions on desktop live behind one "more" button, the same way the
+ * Extension actions on desktop live behind one apps button, the same way the
  * touch sheets already fold every action away, so several extensions never
  * stretch the hover row.
  */
@@ -541,7 +541,7 @@ const MessageExtraActionButtons: React.FC<{ actions?: MessageExtraAction[] }> = 
                             onPointerDown={(event) => event.stopPropagation()}
                             onClick={(event) => event.stopPropagation()}
                         >
-                            <Icon name="more" className="h-3.5 w-3.5" />
+                            <Icon name="apps" className="h-3.5 w-3.5" />
                         </Button>
                     </DropdownMenuTrigger>
                 </TooltipTrigger>
@@ -1717,7 +1717,7 @@ const AssistantMessageBody = React.memo(({
                     display: inline-block;
                 `;
 
-                const clone = originalElement.cloneNode(true) as HTMLElement;
+                const clone = cloneMessageImageExportSource(originalElement);
                 clone.style.cssText = `
                     ${computedStyle.cssText}
                     transform: none;
