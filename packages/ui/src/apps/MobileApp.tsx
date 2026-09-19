@@ -27,6 +27,7 @@ import { useUpdatePolling } from '@/hooks/useUpdatePolling';
 import { useWindowTitle } from '@/hooks/useWindowTitle';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useHybridTabletLayout } from '@/hooks/useHybridTabletLayout';
+import { useRoutingSync } from '@/hooks/useRoutingSync';
 import { opencodeClient } from '@/lib/opencode/client';
 import type { RuntimeAPIs } from '@/lib/api/types';
 import type { ProjectRef } from '@/lib/projectContextApi';
