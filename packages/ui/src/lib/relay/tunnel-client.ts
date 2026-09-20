@@ -10,6 +10,7 @@ import {
   RELAY_PROTOCOL_VERSION,
   RelayCloseCode,
   TunnelFrameType,
+  type TunnelFrameTypeValue,
   type TunnelHttpRequestPayload,
   type TunnelWsOpenPayload,
 } from './protocol';
@@ -228,7 +229,7 @@ type ActiveChannel = {
   streams: Map<number, StreamHandler>;
   assembler: ReturnType<typeof createFragmentAssembler>;
   nextStreamId(): number;
-  send(frame: Uint8Array): void;
+  send(frame: Uint8Array, frameType: TunnelFrameTypeValue): void;
   dead: boolean;
 };
 
@@ -593,7 +594,7 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
         assembler,
         nextStreamId: () => allocator.next(),
         dead: false,
-        send(frame: Uint8Array): void {
+        send(frame: Uint8Array, _frameType: TunnelFrameTypeValue): void {
           if (channelObj.dead) return;
           if (localBatcher) localBatcher.enqueue(frame);
           else sendEncryptedPlaintext(frame);
@@ -622,7 +623,7 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
         // Only the first waiter sends the ping; concurrent requests piggyback on
         // the same in-flight probe.
         if (probeWaiters.length === 0) {
-          channelObj.send(encodeTunnelFrame(TunnelFrameType.Ping, 0, EMPTY_PAYLOAD));
+          channelObj.send(encodeTunnelFrame(TunnelFrameType.Ping, 0, EMPTY_PAYLOAD), TunnelFrameType.Ping);
         }
         // Re-arm on the short probe window (not the 15s keepalive pong wait), so
         // a request that lands during an unanswered keepalive ping also fails
@@ -649,7 +650,7 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
         // Only ping when the peer has been quiet. Outbound traffic alone must
         // not suppress this check on a one-way-dead tunnel.
         if (now - lastInboundActivityAt < pingIntervalMs) return;
-        channelObj.send(encodeTunnelFrame(TunnelFrameType.Ping, 0, EMPTY_PAYLOAD));
+        channelObj.send(encodeTunnelFrame(TunnelFrameType.Ping, 0, EMPTY_PAYLOAD), TunnelFrameType.Ping);
         // Expect a Pong (or any frame) before the deadline; otherwise it's dead.
         if (pongDeadline === null) {
           pongDeadline = setTimeout(() => {
@@ -665,7 +666,7 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
       ackTimer = null;
       if (!channel || channel.dead || receivedBytes === acknowledgedBytes) return;
       acknowledgedBytes = receivedBytes;
-      channel.send(encodeTunnelFrame(TunnelFrameType.DeliveryAck, 0, encodeDeliveryAck(receivedBytes)));
+      channel.send(encodeTunnelFrame(TunnelFrameType.DeliveryAck, 0, encodeDeliveryAck(receivedBytes)), TunnelFrameType.DeliveryAck);
     };
 
     const handleTunnelFrame = (channelObj: ActiveChannel, plaintext: Uint8Array): void => {
@@ -697,7 +698,7 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
       // probe dispatch on this now-confirmed-live channel.
       settleProbeWaiters();
       if (frame.frameType === TunnelFrameType.Ping) {
-        channelObj.send(encodeTunnelFrame(TunnelFrameType.Pong, frame.streamId, EMPTY_PAYLOAD));
+        channelObj.send(encodeTunnelFrame(TunnelFrameType.Pong, frame.streamId, EMPTY_PAYLOAD), TunnelFrameType.Pong);
         return;
       }
       if (frame.frameType === TunnelFrameType.Pong) return;
@@ -898,7 +899,7 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
 
       const sendAbort = (reason: string): void => {
         if (!channel.dead) {
-          channel.send(encodeTunnelFrame(TunnelFrameType.StreamAbort, streamId, encodeJsonPayload({ reason })));
+          channel.send(encodeTunnelFrame(TunnelFrameType.StreamAbort, streamId, encodeJsonPayload({ reason })), TunnelFrameType.StreamAbort);
         }
       };
 
@@ -1020,7 +1021,7 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
         headers: request.headers,
         hasBody: request.body !== null,
       };
-      channel.send(encodeTunnelFrame(TunnelFrameType.HttpRequest, streamId, encodeJsonPayload(head)));
+      channel.send(encodeTunnelFrame(TunnelFrameType.HttpRequest, streamId, encodeJsonPayload(head)), TunnelFrameType.HttpRequest);
       // Bound a silently-lost response: if the head never arrives, fail as an
       // ambiguous transport failure (dispatched, outcome unknown) rather than
       // hanging the caller forever. Cleared on head receipt or any failure.
@@ -1042,7 +1043,7 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
             for await (const chunk of request.body) {
               if (finished || channel.dead) return;
               for (const piece of chunkPayload(chunk)) {
-                channel.send(encodeTunnelFrame(TunnelFrameType.HttpBody, streamId, piece));
+                channel.send(encodeTunnelFrame(TunnelFrameType.HttpBody, streamId, piece), TunnelFrameType.HttpBody);
                 sentBodyFrame = true;
               }
             }
@@ -1053,9 +1054,9 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
             // host can tell this apart from body frames lost in transit, which
             // it aborts as an ambiguous transport failure.
             if (request.body && !sentBodyFrame) {
-              channel.send(encodeTunnelFrame(TunnelFrameType.HttpBody, streamId, EMPTY_PAYLOAD));
+              channel.send(encodeTunnelFrame(TunnelFrameType.HttpBody, streamId, EMPTY_PAYLOAD), TunnelFrameType.HttpBody);
             }
-            channel.send(encodeTunnelFrame(TunnelFrameType.StreamEnd, streamId, EMPTY_PAYLOAD));
+            channel.send(encodeTunnelFrame(TunnelFrameType.StreamEnd, streamId, EMPTY_PAYLOAD), TunnelFrameType.StreamEnd);
           }
         } catch (error) {
           sendAbort('request body failed');
@@ -1091,7 +1092,7 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
         }
         if (typeof data === 'string') {
           for (const frame of encodeFragmentedMessage(TunnelFrameType.WsText, streamId, textEncoder.encode(data))) {
-            channelRef.send(frame);
+            channelRef.send(frame, TunnelFrameType.WsText);
           }
           return;
         }
@@ -1104,14 +1105,14 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
                 return copy;
               })();
         for (const frame of encodeFragmentedMessage(TunnelFrameType.WsBinary, streamId, bytes)) {
-          channelRef.send(frame);
+          channelRef.send(frame, TunnelFrameType.WsBinary);
         }
       },
       close(code = 1000, reason = '') {
         if (readyState === WS_CLOSED || readyState === WS_CLOSING) return;
         if (readyState === WS_OPEN && channelRef && !channelRef.dead) {
           readyState = WS_CLOSING;
-          channelRef.send(encodeTunnelFrame(TunnelFrameType.WsClose, streamId, encodeJsonPayload({ code, reason })));
+          channelRef.send(encodeTunnelFrame(TunnelFrameType.WsClose, streamId, encodeJsonPayload({ code, reason })), TunnelFrameType.WsClose);
         }
         settleClose(code, reason);
       },
@@ -1214,7 +1215,7 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
       // The host sets the WS Origin itself (to the loopback origin it dials); the
       // client's window.location.origin is unreliable in WKWebView, so we don't send it.
       const openPayload: TunnelWsOpenPayload = protocols && protocols.length > 0 ? { path, query, protocols } : { path, query };
-      channel.send(encodeTunnelFrame(TunnelFrameType.WsOpen, streamId, encodeJsonPayload(openPayload)));
+      channel.send(encodeTunnelFrame(TunnelFrameType.WsOpen, streamId, encodeJsonPayload(openPayload)), TunnelFrameType.WsOpen);
     })();
 
     return socket;
