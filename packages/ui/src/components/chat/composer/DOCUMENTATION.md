@@ -360,11 +360,11 @@ none of them is verifiable outside a real device.** Change them only against
 hardware.
 
 The mobile chat places one `MobileHeader` after the composer controls for an
-editable session. `ChatContainer` chooses the bottom placement only for that
-branch and uses the top placement for empty, draft, and read-only branches. The
-bottom header owns a transparent drag surface covering the header itself while
-title and workspace buttons retain ordinary tap behavior through pointer-event
-layering. The composer shell holds focus and blur
+editable session or new-session draft when bottom navigation is enabled.
+`ChatContainer` uses the top placement for empty and read-only branches, and for
+drafts when bottom navigation is disabled. The top header owns a transparent
+session-swipe surface; the bottom header is fixed navigation, while its title
+and workspace buttons retain ordinary tap behavior. The composer shell holds focus and blur
 choreography during that gesture or while a header popover is open, so the
 keyboard does not collapse the editor underneath it. The timeline reserves the
 whole resting header/status stack through its one list-footer spacer; neither

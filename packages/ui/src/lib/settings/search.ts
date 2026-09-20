@@ -483,6 +483,14 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     isAvailable: (ctx) => ctx.isMobile,
   },
   {
+    id: 'sessions.mobile-bottom-navigation',
+    page: 'sessions',
+    titleKey: 'settings.openchamber.mobileSessionSwipe.field.bottomNavigation',
+    descriptionKey: 'settings.openchamber.mobileSessionSwipe.field.bottomNavigationHint',
+    keywords: ['mobile', 'session', 'bottom navigation', 'header', 'navigation'],
+    isAvailable: (ctx) => ctx.isMobile,
+  },
+  {
     id: 'sessions.desktop-launch-at-login',
     page: 'general',
     titleKey: 'settings.openchamber.desktopNetwork.field.launchAtLogin',

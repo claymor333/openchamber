@@ -4036,7 +4036,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                 onSendMessage={handleQueuedMessageSend}
             />
             {currentSessionId ? <BtwPanel parentSessionId={currentSessionId} panel={btwPanel} onExit={handleExitBtw} /> : null}
-            {isMobile && mobileHeader && currentSessionId && !newSessionDraftOpen
+            {isMobile && mobileHeader && (currentSessionId || newSessionDraftOpen)
                 ? mobileHeader({
                     mobileTextareaFocused,
                     onSwipeGestureActive: setSwipeGestureActive,

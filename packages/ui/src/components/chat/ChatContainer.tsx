@@ -1060,9 +1060,12 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
         embeddedAllowPrompting ?? allowPromptingSubagentSessions,
         readOnly,
     );
-    // ChatContainer knows which branch owns the bottom of the column. Empty,
-    // draft, and read-only branches keep one top header instead.
-    const mobileTopHeader = isMobile && renderMobileHeader && (!useBottomNavigation || draftOpen || promptReadOnly || !currentSessionId)
+    // ChatContainer knows which branch owns the bottom of the column. Empty
+    // and read-only branches keep one top header instead. A draft uses the
+    // bottom header when that navigation mode is enabled, just like a session.
+    const mobileTopHeader = isMobile && renderMobileHeader && (
+        !useBottomNavigation || promptReadOnly || (!draftOpen && !currentSessionId)
+    )
         ? renderMobileHeader('top')
         : null;
 
@@ -1759,7 +1762,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
                         scrollToBottom={scrollToBottomOnSend}
                         scrollToLatest={resumeToLatestInstant}
                         draftPresentationExiting={draftPresentationExiting}
-                         mobileHeader={isMobile && useBottomNavigation && !draftOpen && !promptReadOnly && currentSessionId && renderMobileHeader
+                        mobileHeader={isMobile && useBottomNavigation && !promptReadOnly && (currentSessionId || draftOpen) && renderMobileHeader
                             ? (options) => renderMobileHeader('bottom', options)
                             : undefined}
                     />

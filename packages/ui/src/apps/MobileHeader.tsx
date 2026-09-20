@@ -171,7 +171,9 @@ export const MobileHeader: React.FC<{
   const swipe = useMobileSessionSwipe({
     model: swipeModel,
     runtimeKey,
-    disabled: !currentSessionId || selectionTransition === 'pending',
+    // Bottom navigation is a fixed destination bar, not a session-swipe
+    // surface. Keep swipe navigation on the top header only.
+    disabled: placement === 'bottom' || !currentSessionId || selectionTransition === 'pending',
     onClosePopovers: () => {
       setMetadataOpen(false);
       setSwitcherOpen(false);
