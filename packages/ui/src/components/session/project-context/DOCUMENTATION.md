@@ -25,6 +25,8 @@ fitting: a strip has one line of width to divide, and each section added took
 width from the rest, while a vertical list grows downwards where there is room.
 The surface's default width matches the files surface for the same reason; at a
 third of the window the content column is too narrow to read a note in.
+On mobile, the section navigation moves below the content when mobile bottom
+navigation is enabled; disabling that setting keeps it at the top instead.
 
 Search shares the title row rather than owning one of its own: it filters what
 is already on screen, and a full-width field read as the panel's primary control.

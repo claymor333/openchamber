@@ -58,6 +58,8 @@ display can be all projects or one selected project. The mobile sessions sheet
 project tree, with no Recent projection. VS Code excludes worktrees and managed
 Chats, while retaining its workspace-scoped grouped list and inline archived
 buckets.
+When mobile bottom navigation is enabled, list actions sit in the
+sheet/sidebar's bottom bar; disabling that setting keeps them beside the title.
 
 Hosted mobile and Capacitor use their separate `MobileSessionsSheet` renderer.
 The shared directory-cache rules apply there, but this sidebar virtualizer does not.

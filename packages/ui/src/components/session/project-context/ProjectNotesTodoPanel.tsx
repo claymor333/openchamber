@@ -139,6 +139,7 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
   );
 
   const isMobile = useUIStore((state) => state.isMobile);
+  const useBottomNavigation = useUIStore((state) => state.mobileUseBottomNavigation);
   const storedTab = useUIStore((state) => state.projectContextTab);
   const setStoredTab = useUIStore((state) => state.setProjectContextTab);
   const requestedTab = TAB_ORDER.includes(storedTab as ProjectContextTab)
@@ -350,6 +351,43 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
     }] : []),
   ]), [counts, highlightedMemoryCount, memoryVisible, t]);
 
+  const renderMobileSectionNavigation = (position: 'top' | 'bottom') => (
+    <nav
+      className={cn(
+        'flex flex-shrink-0 items-center gap-1.5 overflow-x-auto px-3 py-2',
+        position === 'top'
+          ? 'border-b border-[var(--interactive-border)]'
+          : 'border-t border-[var(--interactive-border)]',
+      )}
+      aria-label={t('rightSidebar.contextNotesTodo.sections.label')}
+    >
+      {sections.map((section) => {
+        const isActive = activeTab === section.id;
+        return (
+          <button
+            key={section.id}
+            type="button"
+            onClick={() => setStoredTab(section.id)}
+            aria-current={isActive ? 'page' : undefined}
+            className={cn(
+              'flex flex-shrink-0 items-center gap-1.5 rounded-full border px-3 py-1.5 transition-colors',
+              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+              isActive
+                ? 'border-transparent bg-interactive-active text-foreground'
+                : 'border-[var(--interactive-border)] text-muted-foreground',
+            )}
+          >
+            <Icon name={section.icon} className="h-4 w-4 flex-shrink-0" />
+            {isActive ? (
+              <span className="whitespace-nowrap typography-meta">{section.label}</span>
+            ) : null}
+            <span className="typography-micro text-muted-foreground">{section.count}</span>
+          </button>
+        );
+      })}
+    </nav>
+  );
+
   if (!projectRef) {
     return (
       <div className={cn('w-full min-w-0 p-3', className)}>
@@ -417,41 +455,7 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
 
       </div>
 
-      {/* Mobile: a half-width panel has no room for a side column, so the
-          sections become the same pill strip the mobile drawer's surface
-          tabs use — the active pill carries the label, the rest collapse to
-          icon and count. */}
-      {isMobile ? (
-        <nav
-          className="flex flex-shrink-0 items-center gap-1.5 overflow-x-auto px-3 pb-2"
-          aria-label={t('rightSidebar.contextNotesTodo.sections.label')}
-        >
-          {sections.map((section) => {
-            const isActive = activeTab === section.id;
-            return (
-              <button
-                key={section.id}
-                type="button"
-                onClick={() => setStoredTab(section.id)}
-                aria-current={isActive ? 'page' : undefined}
-                className={cn(
-                  'flex flex-shrink-0 items-center gap-1.5 rounded-full border px-3 py-1.5 transition-colors',
-                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-                  isActive
-                    ? 'border-transparent bg-interactive-active text-foreground'
-                    : 'border-[var(--interactive-border)] text-muted-foreground',
-                )}
-              >
-                <Icon name={section.icon} className="h-4 w-4 flex-shrink-0" />
-                {isActive ? (
-                  <span className="whitespace-nowrap typography-meta">{section.label}</span>
-                ) : null}
-                <span className="typography-micro text-muted-foreground">{section.count}</span>
-              </button>
-            );
-          })}
-        </nav>
-      ) : null}
+      {isMobile && !useBottomNavigation ? renderMobileSectionNavigation('top') : null}
 
       {/* Content first, sidebar on the right — the same order and the same
           drag-to-resize edge the files surface uses, so the two panels do not
@@ -557,6 +561,10 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
         </nav>
         )}
       </div>
+
+      {/* Mobile bottom navigation: keep section navigation below the content so it stays within
+          thumb reach without taking the first rows away from the list. */}
+      {isMobile && useBottomNavigation ? renderMobileSectionNavigation('bottom') : null}
 
       <TodoSendDialog
         open={send.pendingSendTarget !== null}

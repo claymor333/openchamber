@@ -73,6 +73,7 @@ import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useAllLiveSessions, useGlobalSessionStatus } from '@/sync/sync-context';
 import { useSessionUnseenCount } from '@/sync/notification-store';
 import { useHasSessionActivityDuration } from '@/sync/session-activity-timing';
+import { useUIStore } from '@/stores/useUIStore';
 import { SessionActivityDuration } from '@/components/session/SessionActivityDuration';
 import { useSessionAiRenameAction } from '@/components/session/useSessionAiRenameAction';
 import { handleSessionRenameKeyDown } from '@/components/session/sessionRenameKeyboard';
@@ -930,6 +931,7 @@ const SortableProjectRow: React.FC<{
 export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, onOpenChange, variant = 'drawer', footer }) => {
   const { t } = useI18n();
   const { git } = useRuntimeAPIs();
+  const useBottomNavigation = useUIStore((state) => state.mobileUseBottomNavigation);
   const liveSessions = useAllLiveSessions();
   const globalActiveSessions = useGlobalSessionsStore((state) => state.activeSessions);
   const pinnedSessionIds = useSessionPinnedStore(React.useCallback(
@@ -2039,12 +2041,25 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
           )}
         </ScrollShadow>
 
+        {/* Mobile list actions live at the bottom so the controls stay within
+            thumb reach while the session tree gets the full remaining height. */}
+        {useBottomNavigation && trailingActions ? (
+          <nav
+            className="flex shrink-0 items-center justify-end gap-1 border-t border-border/70 px-3 py-1.5"
+            aria-label={t('mobile.sessions.sheet.title')}
+          >
+            {trailingActions}
+          </nav>
+        ) : null}
+
         {/* App-level footer: instance on the left (Capacitor), settings —
-            plus a pending web update — on the right. Bottom placement keeps
-            the header for list actions and stays thumb-reachable. */}
+            plus a pending web update — on the right. */}
         {footer ? (
           <div
-            className="flex shrink-0 items-center justify-between gap-2 border-t border-border/70 px-2 pt-1.5"
+            className={cn(
+              'flex shrink-0 items-center justify-between gap-2 border-t border-border/70 px-2 pt-1.5',
+              useBottomNavigation && trailingActions && 'border-t-border/40',
+            )}
             style={{ paddingBottom: 'calc(0.375rem + var(--oc-safe-area-bottom, 0px))' }}
           >
             {footer.instanceLabel && footer.onOpenInstances ? (
@@ -2166,7 +2181,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
           <h2 className="truncate typography-ui-label font-semibold text-foreground">
             {t('mobile.sessions.sheet.title')}
           </h2>
-          {trailingActions ? (
+          {!useBottomNavigation && trailingActions ? (
             <div className="flex shrink-0 items-center gap-2">{trailingActions}</div>
           ) : null}
         </div>
@@ -2207,7 +2222,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
         <h2 className="min-w-0 flex-1 truncate px-1 typography-ui-label font-semibold text-foreground">
           {t('mobile.sessions.sheet.title')}
         </h2>
-        {trailingActions ? (
+        {!useBottomNavigation && trailingActions ? (
           <div className="flex shrink-0 items-center gap-2">{trailingActions}</div>
         ) : null}
       </div>

@@ -14,6 +14,7 @@ import { cn } from '@/lib/utils';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useMcpConfigStore } from '@/stores/useMcpConfigStore';
 import { useMcpStore } from '@/stores/useMcpStore';
+import { useUIStore } from '@/stores/useUIStore';
 
 import { MobileChangesSurface } from './MobileChangesSurface';
 import { MobileFilesSurface } from './MobileFilesSurface';
@@ -115,6 +116,7 @@ export const MobileWorkspaceDrawer: React.FC<{
   variant?: 'drawer' | 'panel';
 }> = ({ open, onClose, tab, onTabChange, pendingChangesDiff, onOpenPlan, onOpenMcpSettings, variant = 'drawer' }) => {
   const { t } = useI18n();
+  const useBottomNavigation = useUIStore((state) => state.mobileUseBottomNavigation);
   const rootRef = React.useRef<HTMLElement | null>(null);
   const drawerRef = React.useRef<HTMLElement>(null);
   const [entered, setEntered] = React.useState(false);
@@ -202,28 +204,30 @@ export const MobileWorkspaceDrawer: React.FC<{
     { id: 'mcp', label: t('mobile.menu.mcp'), icon: <McpIcon className="h-3.5 w-3.5" /> },
   ];
 
+  const tabStrip = visible ? (
+    <SortableTabsStrip
+      items={tabItems}
+      activeId={tab}
+      onSelect={(id) => onTabChange(id as MobileWorkspaceTab)}
+      layoutMode="fit"
+      variant="active-pill"
+      nonCompositedIndicator
+      // Five tabs don't fit with labels — the active tab keeps
+      // icon + label, the rest collapse to icons.
+      inactiveTabsIconOnly
+      className="h-full w-full"
+    />
+  ) : null;
+
   const body = (
     <>
-      <div className="flex h-[var(--oc-header-height,56px)] shrink-0 items-center gap-2 px-3">
-        <div className="flex h-9 min-w-0 flex-1 items-center">
-          {/* Mounted only while shown; nonCompositedIndicator keeps the active
-              pill off its own compositing layer — creating one inside the
-              drawer's slide flickers in WKWebView. */}
-          {visible ? (
-            <SortableTabsStrip
-              items={tabItems}
-              activeId={tab}
-              onSelect={(id) => onTabChange(id as MobileWorkspaceTab)}
-              layoutMode="fit"
-              variant="active-pill"
-              nonCompositedIndicator
-              // Five tabs don't fit with labels — the active tab keeps
-              // icon + label, the rest collapse to icons.
-              inactiveTabsIconOnly
-              className="h-full"
-            />
-          ) : null}
-        </div>
+      <div className={cn(
+        'flex h-[var(--oc-header-height,56px)] shrink-0 items-center px-3',
+        useBottomNavigation ? 'justify-end' : 'gap-2',
+      )}>
+        {!useBottomNavigation ? (
+          <div className="flex h-9 min-w-0 flex-1 items-center">{tabStrip}</div>
+        ) : null}
         <button
           type="button"
           className="-mr-1 flex size-10 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
@@ -282,6 +286,16 @@ export const MobileWorkspaceDrawer: React.FC<{
           </div>
         ) : null}
       </div>
+      {/* Keep workspace navigation at the bottom on mobile, alongside the
+          other thumb-reachable navigation bars. */}
+      {useBottomNavigation ? (
+        <nav
+          className="flex h-[var(--oc-header-height,56px)] shrink-0 items-center border-t border-border/70 bg-background/95 px-2 backdrop-blur supports-[backdrop-filter]:bg-background/80"
+          aria-label={t('mobile.header.openWorkspaceAria')}
+        >
+          {tabStrip}
+        </nav>
+      ) : null}
     </>
   );
 
