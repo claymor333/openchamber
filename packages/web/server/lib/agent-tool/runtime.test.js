@@ -109,6 +109,11 @@ describe('managed agent tool runtime', () => {
       'Wait for current session activity to become idle. Omit by default; use only when the user asks or the next step requires the completed result',
     );
     expect(hooks.tool.openchamber.args.parameters.properties.sessionId).toEqual({ type: 'string' });
+    expect(hooks.tool.openchamber.args.parameters.properties.roleKey).toEqual(expect.objectContaining({ type: 'string' }));
+    expect(hooks.tool.openchamber.args.parameters.properties.independent).toEqual({
+      type: 'boolean',
+      description: 'Create a top-level session instead of a child of the current session; cannot be combined with roleKey',
+    });
     expect(source).not.toContain('title: "OpenChamber"');
     expect(source).not.toContain('@opencode-ai/plugin');
     expect(source).not.toContain(preparedEnv.OPENCHAMBER_AGENT_TOOL_TOKEN);
@@ -211,9 +216,9 @@ describe('managed agent tool runtime', () => {
 
     expect(executeAction).toHaveBeenCalledWith(
       'session.create',
-      expect.objectContaining({ action: 'session.create', roleKey: 'review:tests', contextSessionId: 'ses_parent' }),
+      { action: 'session.create', roleKey: 'review:tests' },
       '/work/project',
-      {},
+      { contextSessionId: 'ses_parent' },
     );
   });
 

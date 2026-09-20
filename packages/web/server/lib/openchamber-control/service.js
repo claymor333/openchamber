@@ -261,24 +261,38 @@ export const createOpenChamberControlService = (dependencies) => {
     }
   };
 
-  const executeSessionAction = async (action, input, contextDirectory, signal) => {
+  const executeSessionAction = async (action, input, contextDirectory, { signal, contextSessionId } = {}) => {
     if (input.timeout !== undefined && input.wait !== true) throw new OpenChamberControlError('timeout requires wait', 400);
     if (input.lastAssistant === true && input.wait !== true) throw new OpenChamberControlError('lastAssistant requires wait', 400);
-    const sessionID = asNonEmptyString(input.sessionId);
-    const roleKey = asNonEmptyString(input.roleKey);
-    const independent = input.independent === true;
-    if (action === 'session.create'
-      && input.independent !== undefined
-      && input.independent !== true
-      && input.independent !== false) {
+    const isCreate = action === 'session.create';
+    const roleKey = isCreate ? asNonEmptyString(input.roleKey) : null;
+    // The managed-tool adapter carries this in options so it cannot leak into
+    // the action payload. Keep the input fallback for direct service callers,
+    // with the explicit option taking precedence when both are present.
+    const callerSessionId = isCreate
+      ? asNonEmptyString(contextSessionId) || asNonEmptyString(input.contextSessionId)
+      : null;
+    if (!isCreate && (input.roleKey !== undefined || input.independent !== undefined)) {
+      throw new OpenChamberControlError('roleKey and independent are only valid with session.create', 400);
+    }
+    if (isCreate && input.independent !== undefined
+      && input.independent !== true && input.independent !== false) {
       throw new OpenChamberControlError('independent must be a boolean', 400);
     }
-    if (action === 'session.create' && input.roleKey !== undefined && input.roleKey !== null && !roleKey) {
+    if (isCreate && input.independent === true && roleKey) {
+      throw new OpenChamberControlError('roleKey cannot be combined with independent', 400);
+    }
+    if (isCreate && input.independent === false && !callerSessionId) {
+      throw new OpenChamberControlError('independent:false requires the current session context', 400);
+    }
+    if (roleKey && !callerSessionId) {
+      throw new OpenChamberControlError('roleKey requires the current session context', 400);
+    }
+    if (isCreate && input.roleKey !== undefined && input.roleKey !== null && !roleKey) {
       throw new OpenChamberControlError('roleKey must be a non-empty string', 400);
     }
-    if (action === 'session.create' && independent && roleKey) {
-      throw new OpenChamberControlError('independent cannot be combined with roleKey', 400);
-    }
+    const sessionID = asNonEmptyString(input.sessionId);
+    const independent = input.independent === true;
     let directory = asNonEmptyString(input.directory) || (!input.projectId ? asNonEmptyString(contextDirectory) : null);
     if (sessionID && action !== 'session.create' && !asNonEmptyString(input.directory) && !input.projectId) {
       const resolvedSessionDirectory = await resolveSessionDirectory(sessionID);
@@ -304,10 +318,9 @@ export const createOpenChamberControlService = (dependencies) => {
       ...(action === 'session.create' && roleKey
         ? { roleKey: roleKey.trim() }
         : {}),
-      ...(action === 'session.create' && !independent && asNonEmptyString(input.contextSessionId)
-        ? { parentSessionId: input.contextSessionId.trim() }
-        : {}),
     };
+    if (callerSessionId && input.independent !== true) payload.parentID = callerSessionId;
+    if (roleKey) payload.roleKey = roleKey;
     const startedAt = now();
     let result;
     if (action === 'session.create') {
@@ -529,7 +542,7 @@ export const createOpenChamberControlService = (dependencies) => {
         }
       }
       if (action === 'session.create' || action === 'session.send' || action === 'session.fork') {
-        return executeSessionAction(action, input, contextDirectory, options.signal);
+        return executeSessionAction(action, input, contextDirectory, options);
       }
       if (action.startsWith('session.')) {
         const directory = asNonEmptyString(input.directory) || asNonEmptyString(contextDirectory);

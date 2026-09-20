@@ -231,7 +231,7 @@ const runPromptAsync = async ({ baseUrl, authHeaders, sessionID, directory, payl
   }
 };
 
-const createSession = async ({ baseUrl, authHeaders, directory, title, parentSessionId, roleKey }) => {
+const createSession = async ({ baseUrl, authHeaders, directory, title, parentSessionId, roleKey, worktree }) => {
   const sessionUrl = new URL(`${baseUrl}/session`);
   sessionUrl.searchParams.set('directory', directory);
   const response = await fetch(sessionUrl.toString(), {
@@ -246,7 +246,14 @@ const createSession = async ({ baseUrl, authHeaders, directory, title, parentSes
       directory,
       ...(title ? { title } : {}),
       ...(parentSessionId ? { parentID: parentSessionId } : {}),
-      ...(roleKey ? { metadata: { openchamber: { roleKey } } } : {}),
+      ...(roleKey || worktree ? {
+        metadata: {
+          openchamber: {
+            ...(roleKey ? { roleKey } : {}),
+            ...(worktree ? { worktree } : {}),
+          },
+        },
+      } : {}),
     }),
   });
 
@@ -261,6 +268,15 @@ const createSession = async ({ baseUrl, authHeaders, directory, title, parentSes
     throw new Error('failed to create session');
   }
   return sessionID;
+};
+
+const getOpenChamberMetadata = (session) => {
+  const metadata = session?.metadata;
+  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) return null;
+  const openchamber = metadata.openchamber;
+  return openchamber && typeof openchamber === 'object' && !Array.isArray(openchamber)
+    ? openchamber
+    : null;
 };
 
 const forkSession = async ({ client, sessionID, directory, messageID }) => {
@@ -601,7 +617,11 @@ export const createOpenChamberSessionService = (dependencies) => {
       );
     }
 
-    return { sessionID: session.id, directory: sessionDirectory };
+    return {
+      sessionID: session.id,
+      directory: sessionDirectory,
+      worktree: getOpenChamberMetadata(session)?.worktree || null,
+    };
   };
 
   const dispatchPrompt = async ({
@@ -818,7 +838,7 @@ export const createOpenChamberSessionService = (dependencies) => {
     const title = asNonEmptyString(payload.title);
     const prompt = asNonEmptyString(payload.prompt);
     const roleKey = resolveRoleKey(payload.roleKey);
-    const parentSessionId = asNonEmptyString(payload.parentSessionId);
+    const parentSessionId = asNonEmptyString(payload.parentSessionId) || asNonEmptyString(payload.parentID);
     if (payload.roleKey !== undefined && payload.roleKey !== null && !roleKey) {
       throw new OpenChamberControlError('roleKey must be a non-empty string', 400);
     }
@@ -849,16 +869,6 @@ export const createOpenChamberSessionService = (dependencies) => {
     }
 
     if (typeof waitForOpenCodeReady === 'function') await waitForOpenCodeReady(10_000, 250);
-
-    if (prompt) {
-      await validateRequestedSelection({
-        directory: resolvedDirectory.directory,
-        requestedModel: model,
-        requestedAgent: agent,
-        requestedVariant: variant,
-      });
-    }
-
     const baseUrl = buildOpenCodeUrl('/', '').replace(/\/$/, '');
     const authHeaders = getOpenCodeAuthHeaders();
     const client = createOpencodeClient({ baseUrl, headers: authHeaders });
@@ -872,7 +882,12 @@ export const createOpenChamberSessionService = (dependencies) => {
           directory: resolvedDirectory.directory,
         });
         if (existing) {
-          return { sessionID: existing.sessionID, sessionDirectory: existing.directory, worktree: null, reused: true };
+          return {
+            sessionID: existing.sessionID,
+            sessionDirectory: existing.directory,
+            worktree: existing.worktree,
+            reused: true,
+          };
         }
       }
 
@@ -892,6 +907,7 @@ export const createOpenChamberSessionService = (dependencies) => {
         ...(title ? { title } : {}),
         ...(parentSessionId ? { parentSessionId } : {}),
         ...(roleKey ? { roleKey } : {}),
+        ...(worktree ? { worktree } : {}),
       });
       return { sessionID, sessionDirectory, worktree, reused: false };
     };
@@ -920,6 +936,15 @@ export const createOpenChamberSessionService = (dependencies) => {
           `roleKey '${roleKey}' already has an overlapping prompt on child session '${activeReservation.sessionID}'; wait for it to finish`,
           409,
         );
+      }
+
+      if (prompt) {
+        await validateRequestedSelection({
+          directory: resolvedDirectory.directory,
+          requestedModel: model,
+          requestedAgent: agent,
+          requestedVariant: variant,
+        });
       }
 
       const session = await createOrReuseSession();
@@ -964,6 +989,7 @@ export const createOpenChamberSessionService = (dependencies) => {
       ...(resolvedDirectory.projectId ? { projectId: resolvedDirectory.projectId } : {}),
       ...(title ? { title } : {}),
       ...(worktree ? { worktree } : {}),
+      ...(parentSessionId ? { parentID: parentSessionId } : {}),
       ...(roleKey ? { roleKey, reused } : {}),
       ...(deduplicated ? { deduplicated: true } : {}),
       ...(prompt && dispatch.model ? { model: dispatch.model } : {}),
@@ -984,6 +1010,7 @@ export const createOpenChamberSessionService = (dependencies) => {
           ...(resolvedDirectory.projectId ? { projectID: resolvedDirectory.projectId } : {}),
           ...(title ? { title } : {}),
           ...(worktree ? { worktree } : {}),
+          ...(parentSessionId ? { parentID: parentSessionId } : {}),
           ...(prompt && dispatch.model ? { model: dispatch.model } : {}),
           ...(prompt && dispatch.agent ? { agent: dispatch.agent } : {}),
           ...(prompt && dispatch.variant ? { variant: dispatch.variant } : {}),

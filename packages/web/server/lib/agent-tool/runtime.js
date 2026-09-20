@@ -207,7 +207,7 @@ const createToolEntry = ({ name, description, definitions, parameters }) => Stri
               authorization: "Bearer " + token,
               "content-type": "application/json",
             },
-             body: JSON.stringify({ input: args, contextDirectory: context.directory, contextSessionId: context.sessionID, tool: ${JSON.stringify(name)} }),
+            body: JSON.stringify({ input: args, contextDirectory: context.directory, contextSessionId: context.sessionID, tool: ${JSON.stringify(name)} }),
             signal: context.abort,
           })
           const output = await response.text()
@@ -361,12 +361,10 @@ export const createAgentToolRuntime = (dependencies) => {
     }
     try {
       const contextSessionId = asNonEmptyString(payload.contextSessionId);
-      const actionInput = {
-        ...payload.input,
-        action,
-        ...(contextSessionId ? { contextSessionId } : {}),
-      };
-      const data = await executeAction(action, actionInput, payload.contextDirectory, options);
+      const executionOptions = contextSessionId
+        ? { ...options, contextSessionId }
+        : options;
+      const data = await executeAction(action, { ...payload.input, action }, payload.contextDirectory, executionOptions);
       return createResult({ ok: true, action, data });
     } catch (error) {
       return createResult({

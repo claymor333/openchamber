@@ -129,15 +129,14 @@ describe('OpenChamber control service', () => {
     await service.execute('session.create', {
       directory: '/repo',
       roleKey: 'review:tests',
-      contextSessionId: 'ses_root',
       prompt: 'Review the tests',
-    }, '/repo');
+    }, '/repo', { contextSessionId: 'ses_root' });
 
     expect(sessionService.create).toHaveBeenCalledWith({
       directory: '/repo',
       prompt: 'Review the tests',
       roleKey: 'review:tests',
-      parentSessionId: 'ses_root',
+      parentID: 'ses_root',
     });
   });
 
@@ -147,8 +146,7 @@ describe('OpenChamber control service', () => {
       directory: '/repo',
       title: 'Top-level review',
       independent: true,
-      contextSessionId: 'ses_root',
-    }, '/repo');
+    }, '/repo', { contextSessionId: 'ses_root' });
 
     expect(sessionService.create).toHaveBeenCalledWith({
       directory: '/repo',
@@ -156,28 +154,56 @@ describe('OpenChamber control service', () => {
     });
   });
 
+  it('creates a child role in the requested worktree and branch', async () => {
+    const { service, sessionService } = createService();
+    await service.execute('session.create', {
+      title: 'Review tests',
+      roleKey: 'review:tests',
+      worktree: 'review-tests',
+      branch: 'openchamber/review-tests',
+      startRef: 'main',
+      setUpstream: true,
+    }, '/repo', { contextSessionId: 'ses_parent' });
+
+    expect(sessionService.create).toHaveBeenCalledWith({
+      directory: '/repo',
+      title: 'Review tests',
+      parentID: 'ses_parent',
+      roleKey: 'review:tests',
+      worktree: {
+        name: 'review-tests',
+        branchName: 'openchamber/review-tests',
+        startRef: 'main',
+      },
+      setUpstream: true,
+    });
+  });
+
   it.each([
     [{ independent: 'true' }, 'independent must be a boolean'],
-    [{ independent: true, roleKey: 'review:tests', contextSessionId: 'ses_root' }, 'independent cannot be combined with roleKey'],
+    [{ independent: true, roleKey: 'review:tests' }, 'roleKey cannot be combined with independent'],
   ])('rejects invalid independent session options', async (options, error) => {
     const { service, sessionService } = createService();
 
     await expect(service.execute('session.create', {
       directory: '/repo',
       ...options,
-    }, '/repo')).rejects.toThrow(error);
+    }, '/repo', { contextSessionId: 'ses_parent' })).rejects.toThrow(error);
 
     expect(sessionService.create).not.toHaveBeenCalled();
   });
 
-  it('rejects an invalid role key before creating a managed child', async () => {
+  it('rejects invalid or context-free role keys before creating a managed child', async () => {
     const { service, sessionService } = createService();
 
     await expect(service.execute('session.create', {
       directory: '/repo',
       roleKey: '   ',
-      contextSessionId: 'ses_root',
-    }, '/repo')).rejects.toThrow('roleKey must be a non-empty string');
+    }, '/repo', { contextSessionId: 'ses_root' })).rejects.toThrow('roleKey must be a non-empty string');
+    await expect(service.execute('session.create', {
+      directory: '/repo',
+      roleKey: 'review:tests',
+    }, '/repo')).rejects.toThrow('roleKey requires the current session context');
 
     expect(sessionService.create).not.toHaveBeenCalled();
   });

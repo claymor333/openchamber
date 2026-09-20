@@ -71,6 +71,9 @@ both settings are `false`.
 - Optional behavior switches (`worktree`, `goal`, `agent`, `variant`, `wait`)
   state their default and an explicit "only when the user asks" rule so agents
   do not invent worktrees, goal mode, or waits the user never requested.
+- Session creation defaults to a child of the invoking session. `independent`
+  opts into a top-level session, while `roleKey` identifies a logical child role
+  whose idle, non-archived session and existing worktree can be reused.
 - Detailed combination rules are enforced by the shared control service and
   returned as actionable usage errors only after an invalid call. Per-action
   examples and a repeated per-action parameter schema are intentionally omitted.

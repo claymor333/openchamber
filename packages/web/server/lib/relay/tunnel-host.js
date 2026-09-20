@@ -231,6 +231,10 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
       if (STRIPPED_RESPONSE_HEADERS.has(name)) continue;
       responseHeaders[name] = value;
     }
+    if (isCancelled()) {
+      await response.body?.cancel();
+      return;
+    }
     const clientAcceptsGzip = String(request.headers?.['accept-encoding'] || '').toLowerCase().includes('gzip');
     const shouldCompress = clientAcceptsGzip
       && typeof Readable.fromWeb === 'function'
@@ -241,38 +245,26 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
     try {
       await sendJson(TunnelFrameType.HttpResponse, streamId, { status: response.status, headers: responseHeaders });
       if (response.body) {
+        const sendBodyChunk = async (chunk) => {
+          const bytes = chunk instanceof Uint8Array ? chunk : new Uint8Array(chunk);
+          for (const piece of chunkPayload(bytes, responseChunkBytes)) {
+            await waitForBackpressure(stream.abort.signal, isCancelled);
+            if (isCancelled()) {
+              await response.body?.cancel();
+              return false;
+            }
+            await send(encodeTunnelFrame(TunnelFrameType.HttpBody, streamId, piece));
+          }
+          return true;
+        };
         if (shouldCompress) {
           const gz = Readable.fromWeb(response.body).pipe(createGzip());
           for await (const chunk of gz) {
-            if (isCancelled()) {
-              await response.body?.cancel();
-              return;
-            }
-            const bytes = chunk instanceof Uint8Array ? chunk : new Uint8Array(chunk);
-            for (const piece of chunkPayload(bytes, MAX_TUNNEL_PAYLOAD_BYTES)) {
-              await waitForBackpressure(stream.abort.signal, isCancelled);
-              if (isCancelled()) {
-                await response.body?.cancel();
-                return;
-              }
-              await send(encodeTunnelFrame(TunnelFrameType.HttpBody, streamId, piece));
-            }
+            if (!(await sendBodyChunk(chunk))) return;
           }
         } else {
           for await (const chunk of response.body) {
-            if (isCancelled()) {
-              await response.body?.cancel();
-              return;
-            }
-            const bytes = chunk instanceof Uint8Array ? chunk : new Uint8Array(chunk);
-            for (const piece of chunkPayload(bytes, MAX_TUNNEL_PAYLOAD_BYTES)) {
-              await waitForBackpressure(stream.abort.signal, isCancelled);
-              if (isCancelled()) {
-                await response.body?.cancel();
-                return;
-              }
-              await send(encodeTunnelFrame(TunnelFrameType.HttpBody, streamId, piece));
-            }
+            if (!(await sendBodyChunk(chunk))) return;
           }
         }
       }
