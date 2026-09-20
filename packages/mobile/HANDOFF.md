@@ -96,6 +96,8 @@ iOS Simulator helpers: `mobile:sim:{boot,install,launch,run,serve,list,kill}` (s
 - **Native chrome** — status bar (iOS overlay + safe-area; Android inset + themed background),
   keyboard handling (iOS CSS inset; Android native `adjustResize`), edge-swipe session switch,
   back-button handling, app-icon badge.
+- **Session swipe feedback** — `@capacitor/haptics` emits one light impact when the mobile session
+  header first crosses its threshold. Hosted mobile/PWA uses `navigator.vibrate` when available.
 - **App icons** — iOS `AppIcon`; Android adaptive launcher icon; notification small icon
   (`ic_stat_notify`).
 
@@ -158,6 +160,9 @@ bun run mobile:build:ios:simulator
 
 Web-inherited build warnings (KaTeX font URLs, `onnxruntime-web` eval, chunk-size) are expected and
 non-fatal.
+
+Simulator and Android debug builds verify plugin packaging, not physical haptic output. Acceptance
+must include a physical iOS and Android swipe, plus hosted mobile and PWA fallback checks.
 
 ## The gap: CI / release automation (next work)
 

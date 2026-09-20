@@ -118,7 +118,7 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
     } catch { /* ignored */ }
   }, [safeStorage]);
 
-  const [projectRootBranches, setProjectRootBranches] = React.useState<Map<string, string>>(new Map());
+  const projectRootBranches = useSessionUIStore((state) => state.projectRootBranches);
 
   const homeDirectory = useDirectoryStore((state) => state.homeDirectory);
 
@@ -162,6 +162,7 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
   // sessionAttentionStates removed — now using notification-store directly in SessionNodeItem
   const worktreeMetadata = useSessionUIStore((state) => state.worktreeMetadata);
   const availableWorktreesByProject = useSessionUIStore((state) => state.availableWorktreesByProject);
+  const setWorktreeTopologyAuthority = useSessionUIStore((state) => state.setWorktreeTopologyAuthority);
   const openNewSessionDraft = useSessionUIStore((state) => state.openNewSessionDraft);
   const knownSessionDirectories = React.useMemo(
     () => buildKnownSessionDirectories(projects, availableWorktreesByProject, { includeWorktrees: !isVSCode }),
@@ -233,6 +234,11 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
       }
 
       const knownPublishedWorktreesByProject = useSessionUIStore.getState().availableWorktreesByProject;
+      const topologyGeneration = Date.now();
+      for (const project of projectEntries) {
+        const projectPath = normalizePath(project.path);
+        if (projectPath) setWorktreeTopologyAuthority(projectPath, { status: 'loading', generation: topologyGeneration });
+      }
       const seededRawScope = ensureRawWorktreesByProjectScope({
         rawWorktreesByProjectRef,
         publishedWorktreesByProject: knownPublishedWorktreesByProject,
@@ -268,6 +274,7 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
             });
             if (worktrees === null) {
               worktreesByProject.delete(projectPath);
+              setWorktreeTopologyAuthority(projectPath, { status: 'ready', generation: topologyGeneration });
               continue;
             }
             if (cancelled) return;
@@ -276,9 +283,18 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
             } else {
               worktreesByProject.set(projectPath, worktrees);
             }
+            setWorktreeTopologyAuthority(projectPath, { status: 'ready', generation: topologyGeneration });
+            for (const worktree of worktrees) {
+              setWorktreeTopologyAuthority(worktree.path, { status: 'ready', generation: topologyGeneration });
+            }
           } catch {
             // Keep last-known worktrees when a project is temporarily unavailable.
             unresolvedProjectPaths.add(projectPath);
+            setWorktreeTopologyAuthority(projectPath, {
+              status: 'failed',
+              generation: topologyGeneration,
+              error: 'worktree topology refresh failed',
+            });
           }
         }
       });
@@ -326,7 +342,7 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [isVSCode, projectWorktreeDiscoveryKey, runtimeKey, worktreeDiscoveryRevision]);
+  }, [isVSCode, projectWorktreeDiscoveryKey, runtimeKey, setWorktreeTopologyAuthority, worktreeDiscoveryRevision]);
 
   const isDesktopShellRuntime = React.useMemo(() => isDesktopShell(), []);
 
@@ -441,7 +457,6 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
     normalizedProjects,
     gitRepoStatus,
     setProjectRepoStatus,
-    setProjectRootBranches,
   });
 
   const isSessionsLoading = useSessionUIStore((state) => state.isLoading);

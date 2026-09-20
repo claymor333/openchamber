@@ -47,7 +47,9 @@ import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useFeatureFlagsStore } from '@/stores/useFeatureFlagsStore';
 import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
 import { useLinearAuthStore } from '@/stores/useLinearAuthStore';
-import { useGitStore } from '@/stores/useGitStore';
+import { useGitRepoStatusMap, useGitStore } from '@/stores/useGitStore';
+import { useProjectRepoStatus } from '@/components/session/sidebar/projects/useProjectRepoStatus';
+import { normalizePath } from '@/lib/pathNormalization';
 import { useMcpConfigStore, type McpDraft } from '@/stores/useMcpConfigStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import {
@@ -65,7 +67,7 @@ import { RAIL_WIDTH_PX, resolveHybridWorkspaceGeometry } from './hybridWorkspace
 import { SyncAppEffects } from './AppEffects';
 import { BusyDots } from '@/components/chat/message/parts/BusyDots';
 import { MobileConnectionWelcome, type MobileConnectionNotice } from './MobileConnectionWelcome';
-import { MobileHeader } from './MobileHeader';
+import { MobileHeader, type RenderMobileHeader } from './MobileHeader';
 import { MobileInstancesSurface } from './MobileInstancesSurface';
 import { MobileSessionsSheet } from './MobileSessionsSheet';
 import { MobileFullscreenSurface } from './MobileFullscreenSurface';
@@ -124,6 +126,22 @@ type MobileSurface = 'instances' | 'settings' | 'update';
 
 const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onActiveConnectionDeleted }) => {
   const { t } = useI18n();
+  const isConnected = useConfigStore((state) => state.isConnected);
+  const projects = useProjectsStore((state) => state.projects);
+  const normalizedProjects = React.useMemo(() => projects.map((project) => ({
+    id: project.id,
+    path: project.path,
+    normalizedPath: normalizePath(project.path) ?? project.path,
+  })), [projects]);
+  const projectPaths = React.useMemo(() => normalizedProjects.map((project) => project.normalizedPath), [normalizedProjects]);
+  const gitRepoStatus = useGitRepoStatusMap(projectPaths);
+  const [, setMobileProjectRepoStatus] = React.useState<Map<string, boolean | null>>(new Map());
+  useProjectRepoStatus({
+    enabled: isConnected,
+    normalizedProjects,
+    gitRepoStatus,
+    setProjectRepoStatus: setMobileProjectRepoStatus,
+  });
   // The mobile root does not mount MainLayout, so it owns its own terminal
   // keepalive: without it, background PTYs (running project actions included)
   // are idle-reaped by the server while the workspace drawer is closed.
@@ -487,6 +505,29 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
     [openSettingsSurface, openSurface, showCapacitorOnlyFeatures, showUpdateItem],
   );
 
+  const renderMobileHeader = React.useCallback<RenderMobileHeader>((placement, options) => (
+    <MobileHeader
+      placement={placement}
+      {...options}
+      onOpenSessions={() => (isTabletLayout ? toggleSidebar() : setSessionsSheetOpen(true))}
+      onOpenWorkspace={() => {
+        if (isHybridTablet) {
+          if (panelIsOpen) return;
+          if (directoryKey) {
+            const tabs = contextPanelState?.tabs ?? [];
+            const lastMode = tabs.length > 0 ? (contextPanelState?.activeTabId
+              ? tabs.find((tab) => tab.id === contextPanelState.activeTabId)?.mode
+              : tabs[tabs.length - 1]?.mode) : undefined;
+            openContextSurface(directoryKey, lastMode ?? 'git');
+          }
+          return;
+        }
+        setWorkspaceOpen(true);
+      }}
+      compactTitle={isTabletLayout}
+    />
+  ), [contextPanelState, directoryKey, isHybridTablet, isTabletLayout, openContextSurface, panelIsOpen, toggleSidebar]);
+
   const openMcpCreateSettings = React.useCallback(() => {
     const baseName = 'new-mcp-server';
     let newName = baseName;
@@ -603,33 +644,14 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
             data-page-scroll-lock="true"
             style={{ paddingTop: 'var(--oc-safe-area-top, 0px)' }}
           >
-             <main ref={chatMainRef} className="relative min-h-0 flex-1 overflow-hidden" data-page-scroll-lock="true">
-               <div className="h-full w-full">
-                 <ErrorBoundary>
-                   <ChatView />
-                 </ErrorBoundary>
-               </div>
-             </main>
-             <MobileHeader
-               onOpenSessions={() => (isTabletLayout ? toggleSidebar() : setSessionsSheetOpen(true))}
-               onOpenWorkspace={() => {
-                 if (isHybridTablet) {
-                   if (panelIsOpen) return; // already visible; never toggle-close
-                   if (directoryKey) {
-                     const tabs = contextPanelState?.tabs ?? [];
-                     const lastMode = tabs.length > 0 ? (contextPanelState?.activeTabId
-                       ? tabs.find((t) => t.id === contextPanelState.activeTabId)?.mode
-                       : tabs[tabs.length - 1]?.mode) : undefined;
-                     openContextSurface(directoryKey, lastMode ?? 'git');
-                   }
-                   return;
-                 }
-                 setWorkspaceOpen(true);
-               }}
-               compactTitle={isTabletLayout}
-               safeAreaEdge="bottom"
-             />
-          </div>
+              <main ref={chatMainRef} className="relative min-h-0 flex-1 overflow-hidden" data-page-scroll-lock="true">
+                <div className="h-full w-full">
+                  <ErrorBoundary>
+                    <ChatView renderMobileHeader={renderMobileHeader} />
+                  </ErrorBoundary>
+                </div>
+              </main>
+           </div>
 
           {/* Mounted permanently on phones (parked off-screen while closed) so
               the sessions/worktree state stays warm and the drawer opens with
@@ -1356,6 +1378,17 @@ export function MobileApp({ apis }: MobileAppProps) {
     let cancelled = false;
 
     const run = async () => {
+      const sessionUiStore = useSessionUIStore.getState();
+      const topologyGeneration = Date.now();
+      for (const project of projects) {
+        const projectPath = project.path.replace(/\\/g, '/').replace(/\/+$/, '');
+        if (projectPath) {
+          sessionUiStore.setWorktreeTopologyAuthority(projectPath, {
+            status: 'loading',
+            generation: topologyGeneration,
+          });
+        }
+      }
       const worktreesByProject = new Map(useSessionUIStore.getState().availableWorktreesByProject);
 
       await Promise.all(
@@ -1366,14 +1399,37 @@ export function MobileApp({ apis }: MobileAppProps) {
             const cachedIsGitRepo = useGitStore.getState().directories.get(projectPath)?.isGitRepo;
             const isGitRepo =
               cachedIsGitRepo ?? (await import('@/lib/gitApi').then((m) => m.checkIsGitRepository(projectPath)));
-            if (!isGitRepo) return;
+            if (cancelled) return;
+            if (!isGitRepo) {
+              sessionUiStore.setWorktreeTopologyAuthority(projectPath, {
+                status: 'ready',
+                generation: topologyGeneration,
+              });
+              return;
+            }
             const worktrees = await listProjectWorktrees({ id: project.id, path: projectPath });
             if (cancelled) return;
             worktreesByProject.set(projectPath, worktrees);
+            sessionUiStore.setWorktreeTopologyAuthority(projectPath, {
+              status: 'ready',
+              generation: topologyGeneration,
+            });
+            for (const worktree of worktrees) {
+              sessionUiStore.setWorktreeTopologyAuthority(worktree.path, {
+                status: 'ready',
+                generation: topologyGeneration,
+              });
+            }
           } catch {
+            if (cancelled) return;
             // Worktree discovery is best-effort per project: a failed probe keeps
             // that project's previously known (persisted) worktrees instead of
             // wiping the whole map.
+            sessionUiStore.setWorktreeTopologyAuthority(projectPath, {
+              status: 'failed',
+              generation: topologyGeneration,
+              error: 'worktree topology refresh failed',
+            });
           }
         }),
       );

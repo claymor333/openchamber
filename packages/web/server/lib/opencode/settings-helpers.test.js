@@ -518,6 +518,12 @@ describe('settings helpers', () => {
     expect(helpers.sanitizeSettingsUpdate({ enterToSendConfigured: 1 })).toEqual({});
   });
 
+  it('rejects the device-local mobile session swipe limit', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({ mobileSessionSwipeLimit: 3 })).toEqual({});
+  });
+
   it('accepts dismissed OpenCode update toast version as a persisted shared setting', () => {
     const helpers = createTestHelpers();
 

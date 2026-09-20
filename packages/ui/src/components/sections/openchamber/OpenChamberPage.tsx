@@ -2,6 +2,7 @@ import React from 'react';
 import { OpenChamberVisualSettings } from './OpenChamberVisualSettings';
 import { AboutSettings } from './AboutSettings';
 import { SessionRetentionSettings } from './SessionRetentionSettings';
+import { MobileSessionSwipeSettings } from './MobileSessionSwipeSettings';
 import { PasskeySettings } from './PasskeySettings';
 import { AppLinkSecuritySettings } from './AppLinkSecuritySettings';
 import { DefaultsSettings } from './DefaultsSettings';
@@ -54,6 +55,7 @@ export const OpenChamberPage: React.FC<OpenChamberPageProps> = ({ section }) => 
                 {!isVSCode && <OpenCodeCliSettings />}
                 {!isVSCode && <OpenChamberToolsSettings />}
                 <SessionRetentionSettings />
+                <MobileSessionSwipeSettings />
                 <AppLinkSecuritySettings />
                 {isWebRuntime() && !isDesktopShell() && !isVSCode && !isCapacitorApp() && <PasskeySettings />}
                 {showAbout && <AboutSettings />}
@@ -225,6 +227,7 @@ const SessionsSectionContent: React.FC<{ runtimeEndpointEpoch: number }> = ({ ru
         <>
             <DefaultsSettings key={runtimeEndpointEpoch} />
             <SessionRetentionSettings />
+            <MobileSessionSwipeSettings />
         </>
     );
 };

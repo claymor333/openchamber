@@ -38,6 +38,8 @@ export interface MobileComposerHolders {
     prPickerOpen: boolean;
     linearPickerOpen: boolean;
     isDragging: boolean;
+    /** A header popover owns the composer until it closes. */
+    headerPopoverOpen?: boolean;
 }
 
 export interface MobileComposerShellOptions {
@@ -72,6 +74,10 @@ export interface MobileComposerShell {
     skipNextOverlayCloseRestore: () => void;
     /** Cancel a pending keyboard restore entirely (a native picker takes over). */
     cancelOverlayCloseRestore: () => void;
+    /** Hold the composer while a body-level mobile header popover is open. */
+    setExternalHold: (held: boolean, restoreFocus?: boolean) => void;
+    /** Hold focus/blur choreography while the header drag region owns a pointer. */
+    setSwipeGestureActive: (active: boolean) => void;
 }
 
 export function useMobileComposerShell(
@@ -90,9 +96,19 @@ export function useMobileComposerShell(
     const lastBlurAtRef = React.useRef(0);
     const restoreKeyboardRef = React.useRef(false);
     const blurTimerRef = React.useRef<number | null>(null);
+    const externalHoldRef = React.useRef(false);
+    const restoreExternalFocusRef = React.useRef(false);
+    const focusedRef = React.useRef(focused);
+    focusedRef.current = focused;
+    const swipeGestureActiveRef = React.useRef(false);
+    const blurDuringHoldRef = React.useRef(false);
 
     React.useEffect(() => () => {
         if (blurTimerRef.current !== null) window.clearTimeout(blurTimerRef.current);
+        externalHoldRef.current = false;
+        restoreExternalFocusRef.current = false;
+        swipeGestureActiveRef.current = false;
+        blurDuringHoldRef.current = false;
     }, []);
 
     const expandedRef = React.useRef(expanded);
@@ -221,7 +237,8 @@ export function useMobileComposerShell(
         || holders.attachMenuOpen
         || holders.issuePickerOpen
         || holders.prPickerOpen
-        || holders.linearPickerOpen;
+        || holders.linearPickerOpen
+        || Boolean(holders.headerPopoverOpen);
 
     // Installed PWA (standalone): a focus() from a bare timeout is outside the
     // user gesture and iOS refuses to raise the keyboard for it (Safari
@@ -325,7 +342,10 @@ export function useMobileComposerShell(
         || holders.issuePickerOpen
         || holders.prPickerOpen
         || holders.linearPickerOpen
-        || holders.isDragging;
+        || holders.isDragging
+        || Boolean(holders.headerPopoverOpen)
+        || externalHoldRef.current
+        || swipeGestureActiveRef.current;
 
     React.useEffect(() => {
         if (!isMobile || !expanded || busy || alwaysExpanded) return;
@@ -419,6 +439,19 @@ export function useMobileComposerShell(
     const onEditorBlur = React.useCallback(() => {
         if (!isMobile) return;
 
+        // This is deliberately before the timer and Capacitor flushSync path.
+        // The header drag region prevents the pointer-down default, but WebKit
+        // can still deliver a blur while the pointer is captured. Treat it as
+        // part of the gesture and let the real post-gesture blur run normally.
+        if (swipeGestureActiveRef.current || externalHoldRef.current) {
+            blurDuringHoldRef.current = true;
+            if (blurTimerRef.current !== null) {
+                window.clearTimeout(blurTimerRef.current);
+                blurTimerRef.current = null;
+            }
+            return;
+        }
+
         // Focus hold after an overlay-close restore: iOS may retract the rising
         // keyboard as the closing tap settles — take the focus right back
         // instead of accepting the blur.
@@ -468,6 +501,48 @@ export function useMobileComposerShell(
         restoreKeyboardRef.current = false;
     }, []);
 
+    const setExternalHold = React.useCallback((held: boolean, restoreFocus = true) => {
+        if (held && !externalHoldRef.current) {
+            restoreExternalFocusRef.current = focusedRef.current || Boolean(editorRef.current?.isFocused());
+            restoreKeyboardRef.current = false;
+        }
+        externalHoldRef.current = held;
+        if (held && blurTimerRef.current !== null) {
+            window.clearTimeout(blurTimerRef.current);
+            blurTimerRef.current = null;
+        }
+        if (!held) {
+            const shouldRestoreFocus = restoreFocus
+                && restoreExternalFocusRef.current
+                && !swipeGestureActiveRef.current;
+            restoreExternalFocusRef.current = false;
+            const wasBlurred = !editorRef.current?.isFocused();
+            blurDuringHoldRef.current = false;
+            if (shouldRestoreFocus && wasBlurred) {
+                editorRef.current?.focus({ preventScroll: isCapacitorApp() });
+                setFocused(true);
+            } else if (wasBlurred) {
+                setFocused(false);
+            }
+        }
+    }, [editorRef]);
+
+    const setSwipeGestureActive = React.useCallback((active: boolean) => {
+        swipeGestureActiveRef.current = active;
+        if (active) {
+            if (blurTimerRef.current !== null) {
+                window.clearTimeout(blurTimerRef.current);
+                blurTimerRef.current = null;
+            }
+            return;
+        }
+        if (blurDuringHoldRef.current && !externalHoldRef.current) {
+            const wasBlurred = !editorRef.current?.isFocused();
+            blurDuringHoldRef.current = false;
+            if (wasBlurred) setFocused(false);
+        }
+    }, [editorRef]);
+
     return {
         expanded,
         focused,
@@ -479,5 +554,7 @@ export function useMobileComposerShell(
         onEditorBlur,
         skipNextOverlayCloseRestore,
         cancelOverlayCloseRestore,
+        setExternalHold,
+        setSwipeGestureActive,
     };
 }

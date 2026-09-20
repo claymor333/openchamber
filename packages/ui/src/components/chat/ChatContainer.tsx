@@ -21,6 +21,7 @@ const SESSION_SWITCH_HOLD_MS = 400;
 // End inset reserved for the status row that floats over the timeline's
 // bottom edge (its tallest resting height plus the mb-2 gap).
 const STATUS_OVERLAY_RESERVED_HEIGHT = 40;
+const MOBILE_HEADER_RESTING_HEIGHT = 56;
 /**
  * Gap between the last transcript row and the floating composer's top edge,
  * on top of the status row reserve. Generous on purpose: the recap note and
@@ -89,6 +90,7 @@ import { resolveChatPromptReadOnly } from './chatPromptReadOnly';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { createFirstVisibleSessionPerformanceTracker } from '@/sync/session-load-performance';
 import { isChatDirectoryPath } from '@/lib/chatDirectories';
+import type { RenderMobileHeader } from '@/apps/MobileHeader';
 
 const EMPTY_MESSAGES: Array<{ info: Message; parts: Part[] }> = [];
 const IDLE_SESSION_STATUS = { type: 'idle' as const };
@@ -218,6 +220,7 @@ type ChatViewportProps = {
     canLoadEarlierPrompts: boolean;
     isLoadingOlderPrompts: boolean;
     onLoadEarlierPrompts: () => void;
+    mobileChatChromeReserve: number;
 };
 
 const ChatViewport = React.memo(({
@@ -256,6 +259,7 @@ const ChatViewport = React.memo(({
     canLoadEarlierPrompts,
     isLoadingOlderPrompts,
     onLoadEarlierPrompts,
+    mobileChatChromeReserve,
 }: ChatViewportProps) => {
     const { t } = useI18n();
     const promptPreviewsByTurnIdRef = React.useRef<Map<string, Part[]>>(new Map());
@@ -588,7 +592,8 @@ const ChatViewport = React.memo(({
         && prev.isHybridTablet === next.isHybridTablet
         && prev.canLoadEarlierPrompts === next.canLoadEarlierPrompts
         && prev.isLoadingOlderPrompts === next.isLoadingOlderPrompts
-        && prev.onLoadEarlierPrompts === next.onLoadEarlierPrompts;
+        && prev.onLoadEarlierPrompts === next.onLoadEarlierPrompts
+        && prev.mobileChatChromeReserve === next.mobileChatChromeReserve;
 });
 
 ChatViewport.displayName = 'ChatViewport';
@@ -705,6 +710,7 @@ type ChatContainerProps = {
     autoOpenDraft?: boolean;
     readOnly?: boolean;
     initialAllowPromptingSubagentSessions?: boolean;
+    renderMobileHeader?: RenderMobileHeader;
 };
 
 export const ChatContainer: React.FC<ChatContainerProps> = ({
@@ -713,6 +719,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
     autoOpenDraft = true,
     readOnly = false,
     initialAllowPromptingSubagentSessions,
+    renderMobileHeader,
 }) => {
     const messagesEnabled = messagesEnabledProp ?? active;
     const { t } = useI18n();
@@ -725,10 +732,11 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
     // new session id.
     const liveSessionId = useSessionUIStore((s) => s.currentSessionId);
     const liveSessionDirectory = useSessionUIStore((s) => s.currentSessionDirectory);
+    const liveSelectionGeneration = useSessionUIStore((s) => s.selectionGeneration);
     const materializedDraftSessionId = useSessionUIStore((s) => s.materializedDraftSessionId);
     const liveSelection = React.useMemo(
-        () => ({ sessionId: liveSessionId, directory: liveSessionDirectory }),
-        [liveSessionId, liveSessionDirectory],
+        () => ({ sessionId: liveSessionId, directory: liveSessionDirectory, generation: liveSelectionGeneration }),
+        [liveSelectionGeneration, liveSessionDirectory, liveSessionId],
     );
     // A session whose messages are not in memory yet keeps the previous
     // timeline on screen while they load, instead of flashing a skeleton
@@ -760,8 +768,16 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
         waitedSessionIdRef.current = liveSessionId && !liveSessionRenderable ? liveSessionId : null;
     }
     const targetSelection = holdPreviousTimeline ? shownSelectionRef.current : liveSelection;
-    const { sessionId: currentSessionId, directory: currentSessionDirectory } = React.useDeferredValue(targetSelection);
-    shownSelectionRef.current = { sessionId: currentSessionId, directory: currentSessionDirectory };
+    const {
+        sessionId: currentSessionId,
+        directory: currentSessionDirectory,
+        generation: currentSelectionGeneration,
+    } = React.useDeferredValue(targetSelection);
+    shownSelectionRef.current = {
+        sessionId: currentSessionId,
+        directory: currentSessionDirectory,
+        generation: currentSelectionGeneration,
+    };
     const revealWaited = Boolean(currentSessionId) && currentSessionId === waitedSessionIdRef.current;
 
     const clearMaterializedDraftSession = useSessionUIStore((s) => s.clearMaterializedDraftSession);
@@ -774,7 +790,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
     const syncDirectory = useSyncDirectory();
     const effectiveSessionDirectory = currentSessionDirectory ?? syncDirectory;
     const currentSessionKey = currentSessionId
-        ? JSON.stringify([getRuntimeKey(), effectiveSessionDirectory, currentSessionId])
+        ? JSON.stringify([getRuntimeKey(), effectiveSessionDirectory, currentSessionId, currentSelectionGeneration])
         : null;
     // One gate per opened session; the scroll hook holds it until the
     // viewport is pinned to the end so the first visible frame is already
@@ -801,6 +817,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
 
     // UI store
     const isExpandedInput = useUIStore((state) => state.isExpandedInput);
+    const useBottomNavigation = useUIStore((state) => state.mobileUseBottomNavigation);
     const stickyUserHeader = useUIStore((state) => state.stickyUserHeader);
     const promptNavigatorEnabled = useUIStore((state) => state.promptNavigatorEnabled);
     const allowPromptingSubagentSessions = useUIStore((state) => state.allowPromptingSubagentSessions);
@@ -1050,6 +1067,14 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
         embeddedAllowPrompting ?? allowPromptingSubagentSessions,
         readOnly,
     );
+    // ChatContainer knows which branch owns the bottom of the column. Empty
+    // and read-only branches keep one top header instead. A draft uses the
+    // bottom header when that navigation mode is enabled, just like a session.
+    const mobileTopHeader = isMobile && renderMobileHeader && (
+        !useBottomNavigation || promptReadOnly || (!draftOpen && !currentSessionId)
+    )
+        ? renderMobileHeader('top')
+        : null;
 
     React.useEffect(() => {
         // VS Code/Cursor/Positron webviews delete window.parent (and window.top).
@@ -1116,6 +1141,10 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
     // would otherwise be left sitting the row's height above it. Measurement
     // only extends the reserve for a taller row.
     const composerOverlayHeight = Math.max(STATUS_OVERLAY_RESERVED_HEIGHT, statusOverlayHeight);
+    // The footer owns this whole fixed chrome band. Keeping it fixed while the
+    // focused bottom header shrinks prevents transcript and scroll anchoring
+    // from moving when the keyboard opens.
+    const mobileChatChromeReserve = MOBILE_HEADER_RESTING_HEIGHT + composerOverlayHeight;
     const statusOverlayObserverRef = React.useRef<ResizeObserver | null>(null);
     const onStatusOverlayNode = React.useCallback((node: HTMLDivElement | null) => {
         statusOverlayObserverRef.current?.disconnect();
@@ -1159,7 +1188,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
         currentSessionId,
         currentSessionKey,
         sessionMessageCount,
-        composerOverlayHeight,
+            composerOverlayHeight: isMobile ? 0 : composerOverlayHeight,
         sessionIsWorking,
         revealGate,
         onActiveTurnChange: handleActiveTurnChange,
@@ -1372,6 +1401,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
         }
 
         const run = () => {
+            if (useSessionUIStore.getState().selectionGeneration !== currentSelectionGeneration) return;
             void restoreSnapshot();
         };
         if (typeof window === 'undefined') {
@@ -1379,7 +1409,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
         } else {
             window.requestAnimationFrame(run);
         }
-    }, [active, currentSessionId, currentSessionKey, onManualNavigation, restoreSnapshot]);
+    }, [active, currentSelectionGeneration, currentSessionId, currentSessionKey, onManualNavigation, restoreSnapshot]);
 
     React.useEffect(() => {
         if (!messagesEnabled || !currentSessionId) return;
@@ -1495,13 +1525,18 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
 	if (!currentSessionId && !draftOpen) {
 		// The auto-open effect runs on the next tick. Use a neutral background
 		// until then instead of flashing the standard empty state.
-		if (autoOpenDraft && !initError) {
-			return <div className="flex h-full flex-col bg-background" />;
-		}
-		return (
-			<div className="flex flex-col h-full bg-background">
-				<ChatEmptyState />
-			</div>
+        if (autoOpenDraft && !initError) {
+            return (
+                <div className="flex h-full flex-col bg-background">
+                    {mobileTopHeader}
+                </div>
+            );
+        }
+        return (
+            <div className="flex flex-col h-full bg-background">
+                {mobileTopHeader}
+                <ChatEmptyState />
+            </div>
 		);
 	}
 
@@ -1630,19 +1665,21 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
                 canLoadEarlierPrompts={canLoadEarlierPrompts}
                 isLoadingOlderPrompts={timelineController.isLoadingOlder}
                 onLoadEarlierPrompts={handleLoadOlderClick}
+                mobileChatChromeReserve={mobileChatChromeReserve}
             />
         );
     })();
 
 	return (
 		<div ref={workStatusRowRef} className="flex h-full min-h-0 bg-background">
-		<ChatColumnSessionContext.Provider value={chatColumnSession}>
-		{/* One mobile comment controller per column: selections in this column
-		    comment into this column's composer, never a sibling's. */}
-		<MobileCommentComposerContext.Provider value={mobileCommentComposer}>
-		<div data-composer-bound className="relative flex min-w-0 flex-1 flex-col h-full bg-background">
-			{returnToParentButton}
-			{sessionSurface}
+        <ChatColumnSessionContext.Provider value={chatColumnSession}>
+        {/* One mobile comment controller per column: selections in this column
+            comment into this column's composer, never a sibling's. */}
+        <MobileCommentComposerContext.Provider value={mobileCommentComposer}>
+        <div data-composer-bound className="relative flex min-w-0 flex-1 flex-col h-full bg-background">
+            {returnToParentButton}
+            {mobileTopHeader}
+            {sessionSurface}
 
             <div
                 ref={attachComposerSlot}
@@ -1671,6 +1708,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
                             visible={timelineController.showScrollToBottom}
                             working={sessionIsWorking}
                             onClick={navigation.resumeToLatest}
+                            bottomOffset={isMobile ? mobileChatChromeReserve : 0}
                         />
                         {/* Same anchor and column as the pill, so the status
                             row and the pill it hands off to share the exact
@@ -1732,6 +1770,9 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
                         scrollToBottom={scrollToBottomOnSend}
                         scrollToLatest={resumeToLatestInstant}
                         draftPresentationExiting={draftPresentationExiting}
+                        mobileHeader={isMobile && useBottomNavigation && !promptReadOnly && (currentSessionId || draftOpen) && renderMobileHeader
+                            ? (options) => renderMobileHeader('bottom', options)
+                            : undefined}
                     />
                 )}
             </div>

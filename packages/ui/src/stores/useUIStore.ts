@@ -44,6 +44,14 @@ export type LargeTextPasteBehavior = 'ask' | 'attach' | 'inline';
 
 export const DEFAULT_LARGE_TEXT_PASTE_BEHAVIOR: LargeTextPasteBehavior = 'ask';
 
+export const DEFAULT_MOBILE_SESSION_SWIPE_LIMIT = 5;
+
+export const normalizeMobileSessionSwipeLimit = (value: number | null | undefined): number => {
+  const numeric = Number(value);
+  if (value === null || value === undefined || !Number.isFinite(numeric)) return DEFAULT_MOBILE_SESSION_SWIPE_LIMIT;
+  return Math.max(1, Math.min(5, Math.round(numeric)));
+};
+
 export const normalizeLargeTextPasteBehavior = (value: unknown): LargeTextPasteBehavior => {
   if (value === 'attach' || value === 'inline' || value === 'ask') {
     return value;
@@ -907,6 +915,8 @@ interface UIStore {
   cornerRadius: number;
   inputBarOffset: number;
   mobileKeyboardMode: MobileKeyboardMode;
+  mobileSessionSwipeLimit: number;
+  mobileUseBottomNavigation: boolean;
 
   favoriteModels: Array<{ providerID: string; modelID: string }>;
   hiddenModels: Array<{ providerID: string; modelID: string }>;
@@ -1125,6 +1135,8 @@ interface UIStore {
   setCornerRadius: (radius: number) => void;
   setInputBarOffset: (offset: number) => void;
   setMobileKeyboardMode: (mode: MobileKeyboardMode) => void;
+  setMobileSessionSwipeLimit: (limit: number) => void;
+  setMobileUseBottomNavigation: (enabled: boolean) => void;
   applyTypography: () => void;
   applyPadding: () => void;
   toggleFavoriteModel: (providerID: string, modelID: string) => void;
@@ -1315,6 +1327,8 @@ export const useUIStore = create<UIStore>()(
         cornerRadius: 18,
         inputBarOffset: 0,
         mobileKeyboardMode: getStoredMobileKeyboardMode(),
+        mobileSessionSwipeLimit: DEFAULT_MOBILE_SESSION_SWIPE_LIMIT,
+        mobileUseBottomNavigation: true,
         favoriteModels: [],
         hiddenModels: [],
         providerOrder: [],
@@ -2371,6 +2385,13 @@ export const useUIStore = create<UIStore>()(
         setMobileKeyboardMode: (mode) => {
           set((state) => state.mobileKeyboardMode === mode ? state : { mobileKeyboardMode: mode });
         },
+        setMobileSessionSwipeLimit: (limit) => {
+          const normalized = normalizeMobileSessionSwipeLimit(limit);
+          set((state) => state.mobileSessionSwipeLimit === normalized ? state : { mobileSessionSwipeLimit: normalized });
+        },
+        setMobileUseBottomNavigation: (enabled) => {
+          set((state) => state.mobileUseBottomNavigation === enabled ? state : { mobileUseBottomNavigation: enabled });
+        },
 
         toggleFavoriteModel: (providerID, modelID) => {
           set((state) => {
@@ -3059,6 +3080,14 @@ export const useUIStore = create<UIStore>()(
 
           state.fileEditorKeymap = normalizeFileEditorKeymap(state.fileEditorKeymap);
           state.largeTextPasteBehavior = normalizeLargeTextPasteBehavior(state.largeTextPasteBehavior);
+          const persistedMobileSessionSwipeLimit = state.mobileSessionSwipeLimit;
+          state.mobileSessionSwipeLimit = persistedMobileSessionSwipeLimit == null
+            ? DEFAULT_MOBILE_SESSION_SWIPE_LIMIT
+            : normalizeMobileSessionSwipeLimit(Number(persistedMobileSessionSwipeLimit));
+          const persistedMobileUseBottomNavigation = state.mobileUseBottomNavigation;
+          state.mobileUseBottomNavigation = persistedMobileUseBottomNavigation == null
+            ? true
+            : persistedMobileUseBottomNavigation === true;
 
           if (state.toolJsonViewMode !== 'summary'
             && state.toolJsonViewMode !== 'formatted'
@@ -3189,6 +3218,8 @@ export const useUIStore = create<UIStore>()(
           desktopWindowControlsPosition: state.desktopWindowControlsPosition,
           desktopWindowControlsStyle: state.desktopWindowControlsStyle,
           inputBarOffset: state.inputBarOffset,
+          mobileSessionSwipeLimit: state.mobileSessionSwipeLimit,
+          mobileUseBottomNavigation: state.mobileUseBottomNavigation,
           mermaidRenderingMode: state.mermaidRenderingMode,
           userMessageRenderingMode: state.userMessageRenderingMode,
           collapsibleUserMessages: state.collapsibleUserMessages,

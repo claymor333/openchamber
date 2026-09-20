@@ -702,8 +702,113 @@
 /* Mobile-browser fullscreen composer (visual-viewport pinned form in
    ChatInput): the header would otherwise paint above it — the form can't
    out-stack it from inside the composer wrapper's z-10 context. */
-:root.oc-browser-kb-fullscreen .oc-mobile-header {
+:root.oc-browser-kb-fullscreen .oc-mobile-header[data-mobile-header-placement="top"] {
   visibility: hidden;
+}
+
+/* The bottom navigator keeps its drag target on the header itself. Only the
+   central title column translates during a swipe; the side controls remain
+   anchored. */
+.oc-mobile-header[data-mobile-header-placement="bottom"] {
+  height: var(--oc-mobile-header-layout-height, 56px);
+  padding-top: 0;
+}
+
+.oc-mobile-header[data-mobile-header-placement="top"] {
+  min-height: calc(var(--oc-header-height, 56px) + var(--oc-safe-area-top, 0px));
+}
+
+.oc-mobile-composer > .chat-input-column {
+  transform: translateY(0);
+  transition: transform 180ms ease-out;
+}
+
+.oc-mobile-composer[data-mobile-swipe-preview="true"] > .chat-input-column {
+  transform: translateY(-24px);
+}
+
+.oc-mobile-header-keyboard-visible {
+  margin-top: 8px;
+}
+
+.oc-mobile-header-swipe-frame {
+  isolation: isolate;
+}
+
+.oc-mobile-header {
+  --oc-mobile-header-swipe-mask-color: var(--background);
+}
+
+.oc-mobile-header.oc-mobile-header-swipe-active {
+  background-color: var(--oc-mobile-header-swipe-mask-color);
+}
+
+.oc-mobile-header-swipe-active > .oc-mobile-header-swipe-surface {
+  will-change: transform;
+}
+
+.oc-mobile-header-swipe-frame::before,
+.oc-mobile-header-swipe-frame::after {
+  position: absolute;
+  inset-block: 0;
+  content: '';
+  pointer-events: none;
+  z-index: 2;
+  opacity: 0;
+  transition: opacity 120ms ease-out;
+}
+
+.oc-mobile-header-swipe-frame.oc-mobile-header-swipe-text::before,
+.oc-mobile-header-swipe-frame.oc-mobile-header-swipe-text::after {
+  opacity: 1;
+}
+
+.oc-mobile-header-swipe-frame::before {
+  left: 0;
+  width: calc(var(--oc-mobile-header-swipe-mask-left, 0px) + var(--oc-mobile-header-swipe-mask-width, 18px) + 2px);
+  background: linear-gradient(
+    to right,
+    var(--oc-mobile-header-swipe-mask-color) 0,
+    var(--oc-mobile-header-swipe-mask-color) var(--oc-mobile-header-swipe-mask-left, 0px),
+    transparent 100%
+  );
+}
+
+.oc-mobile-header-swipe-frame::after {
+  left: calc(var(--oc-mobile-header-swipe-mask-right, 100%) - var(--oc-mobile-header-swipe-mask-width, 18px));
+  right: 0;
+  background: linear-gradient(
+    to right,
+    transparent 0,
+    var(--oc-mobile-header-swipe-mask-color) var(--oc-mobile-header-swipe-mask-width, 18px),
+    var(--oc-mobile-header-swipe-mask-color) 100%
+  );
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .oc-mobile-header-swipe-frame::before,
+  .oc-mobile-header-swipe-frame::after {
+    transition: none;
+  }
+
+  .oc-mobile-composer[data-mobile-swipe-preview="true"] > .chat-input-column {
+    transition: none;
+  }
+}
+
+/* Capacitor keeps the WebView at its full height and lifts the shell by the
+   keyboard inset. Pin the focused strip to the same above-keyboard edge (or
+   the native safe area when the keyboard is not visible); normal-flow content
+   below a fullscreen composer would otherwise land outside the viewport. */
+:root.oc-capacitor-app .oc-mobile-header.oc-mobile-header-keyboard-visible {
+  position: fixed;
+  inset-inline: 0;
+  bottom: max(0px, calc(max(var(--oc-keyboard-inset, 0px), var(--oc-app-bottom-safe, 0px)) - 8px));
+  z-index: 50;
+}
+
+.oc-mobile-header > .relative.z-10 > button {
+  pointer-events: auto;
 }
 
 /* Installed PWA (standalone) safe areas. In the in-browser page Safari's own

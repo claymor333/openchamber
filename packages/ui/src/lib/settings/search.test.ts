@@ -77,6 +77,24 @@ describe('settings search', () => {
     expect(results.some((result) => result.id === 'chat.input-history-limit')).toBe(true);
   });
 
+  test('finds mobile bottom navigation only on mobile', () => {
+    const desktopResults = buildSettingsSearchResults({
+      query: 'bottom navigation',
+      runtimeCtx,
+      t,
+      getPageTitle: (page) => page,
+    });
+    const mobileResults = buildSettingsSearchResults({
+      query: 'bottom navigation',
+      runtimeCtx: { ...runtimeCtx, isMobile: true },
+      t,
+      getPageTitle: (page) => page,
+    });
+
+    expect(desktopResults.some((result) => result.id === 'sessions.mobile-bottom-navigation')).toBe(false);
+    expect(mobileResults.find((result) => result.id === 'sessions.mobile-bottom-navigation')?.page).toBe('sessions');
+  });
+
   test('hides Linear connect in VS Code', () => {
     const results = buildSettingsSearchResults({
       query: 'linear',

@@ -63,6 +63,12 @@ export const useEdgeSwipe = (
     };
 
     const onTouchStart = (event: TouchEvent) => {
+      // The full-width mobile session header owns its own move-aware pointer
+      // gesture. Do not let a start at the screen edge open a drawer too.
+      if (event.target instanceof Element && event.target.closest('[data-mobile-header-surface="true"]')) {
+        tracking = false;
+        return;
+      }
       if (event.touches.length !== 1 || hasSelection()) {
         tracking = false;
         return;

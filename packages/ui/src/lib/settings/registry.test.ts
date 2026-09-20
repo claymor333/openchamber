@@ -179,6 +179,18 @@ describe('settings registry', () => {
     expect(useUIStore.getState().workStatusHiddenSectionsExplicit).toBe(true);
   });
 
+  test('bounds the local mobile session swipe limit and marks it local', () => {
+    expect(parseSettingsDocument({ mobileSessionSwipeLimit: 1.6 })).toEqual({ mobileSessionSwipeLimit: 2 });
+    expect(parseSettingsDocument({ mobileSessionSwipeLimit: 0 })).toEqual({ mobileSessionSwipeLimit: 1 });
+    expect(buildSettingsRegistrySnapshot().fields.mobileSessionSwipeLimit).toEqual({
+      scope: 'device',
+      surfaces: ['mobile'],
+      local: true,
+    });
+    useUIStore.getState().setMobileSessionSwipeLimit(99);
+    expect(useUIStore.getState().mobileSessionSwipeLimit).toBe(5);
+  });
+
   test('the checked-in JSON snapshots match the registry (run `bun run settings-registry:generate`)', () => {
     const rendered = renderSettingsRegistrySnapshot();
     for (const relativePath of SETTINGS_REGISTRY_SNAPSHOT_PATHS) {

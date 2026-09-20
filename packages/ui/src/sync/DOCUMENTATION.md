@@ -191,6 +191,15 @@ Cleanup uses the canonical archive/delete actions, including confirmed `404`
 deletion, persisted-state cleanup and runtime guards. Settings shares the run
 state and shows loading or fetch failure separately from an eligible count.
 
+Mobile session swiping reads the global cache and live initialized-directory
+gaps together. `useGlobalSessionsStore.directoryAuthority` records loading,
+ready, partial, and failed completeness per normalized directory, so one failed
+directory cannot become a false empty boundary for its siblings. Worktree
+topology and project-root branch state live in `session-ui-store.ts` and are
+published by the existing sidebar/mobile discovery paths. The swipe model
+resolves parent chains before grouping and selects only eligible root sessions.
+Its target cap is a local mobile preference, not the sidebar retention limit.
+
 ### Live cross-directory session/status view
 
 Extension session subscriptions project these same stores through `lib/guests/workspace.ts`; they own no poller or git discovery. `global-session-status.observedById` retains explicit live activity/outcomes for at most 2,000 sessions in memory. A status snapshot can establish current activity but does not manufacture a successful turn. An error followed by idle retains its failed outcome until another run starts; runtime reset clears observations. Extension task status remains extension-owned.
@@ -269,6 +278,12 @@ runs normal authoritative gap repair even during early boot. Ordinary reconnects
 retain their existing startup grace period.
 
 `SessionMessageLoader` is the shared authority for session message requests. Navigation, reactive chat loading, sidebar prefetch, pagination, reconnect/recovery, and optimistic reconciliation must delegate to it rather than issuing parallel initial requests.
+
+`setCurrentSession` increments a monotonic selection generation before starting
+navigation loading. Loader, viewport, persistence, and viewed-state
+continuations capture that generation and must not publish into a newer runtime
+or selection. `ChatContainer` includes the generation in its deferred session
+key before restoring a viewport.
 
 Rules:
 

@@ -366,6 +366,23 @@ and cancels stray focus in a capture-phase `focusin`, dropping on a real tap.
 none of them is verifiable outside a real device.** Change them only against
 hardware.
 
+The mobile chat places one `MobileHeader` after the composer controls for an
+editable session or new-session draft when bottom navigation is enabled.
+`ChatContainer` uses the top placement for empty and read-only branches, and for
+drafts when bottom navigation is disabled. The top header owns a transparent
+session-swipe surface; the bottom header is fixed navigation, while its title
+and workspace buttons retain ordinary tap behavior. The composer shell holds focus and blur
+choreography during that gesture or while a header popover is open, so the
+keyboard does not collapse the editor underneath it. The timeline reserves the
+whole resting header/status stack through its one list-footer spacer; neither
+the list nor the scroll hook adds that reserve a second time.
+During sideways travel only, the header publishes preview metadata above the
+header and the composer moves up to make room. Its return is delayed until the
+metadata fade completes, including when session selection replaces the header.
+The selected session title and branch remain stable during that preview; the
+candidate title is carried by the metadata line and is committed only on
+release.
+
 `state/mobileComposerMorph.ts` plays the pill ↔ composer swap as a FLIP morph
 in the native iOS shell only, after t3code's resting-composer transition.
 The swap commits synchronously (`flushSync`); the glass box

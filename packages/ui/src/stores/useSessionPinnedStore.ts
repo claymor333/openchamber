@@ -44,8 +44,17 @@ const parsePinnedSessionKey = (key: string): [string, string, string] | null => 
 };
 
 export const isSessionPinned = (ids: Set<string>, directory: string | null | undefined, sessionId: string): boolean => {
+  return isSessionPinnedForRuntime(ids, getRuntimeKey(), directory, sessionId);
+};
+
+export const isSessionPinnedForRuntime = (
+  ids: ReadonlySet<string>,
+  runtimeKey: string,
+  directory: string | null | undefined,
+  sessionId: string,
+): boolean => {
   if (!directory) return false;
-  const key = getPinnedSessionKey(getRuntimeKey(), directory, sessionId);
+  const key = getPinnedSessionKey(runtimeKey, directory, sessionId);
   return key ? ids.has(key) : false;
 };
 
