@@ -58,6 +58,7 @@ import { guestHasSharedSurface } from '@/lib/guests/surfaces';
 import { FALLBACK_GUEST_ICON } from '@/lib/guests/icon';
 import { isPluginContextPanelMode, pluginIdFromMode } from '@/lib/surfaces/modes';
 import { getContextSurfaceWidthFraction } from '@/lib/surfaces/registry';
+import { resolveContextPanelWidth } from '@/lib/contextPanelWidth';
 import { isVimEditorEventTarget } from '@/lib/editorFocus';
 import { isTerminalEventTarget } from '@/lib/terminalFocus';
 
@@ -478,7 +479,14 @@ const truncateTabLabel = (value: string, maxChars: number): string => {
 };
 
 
-export const ContextPanel: React.FC = () => {
+export const ContextPanel: React.FC<{
+  embeddedWidth?: number;
+  /** Hybrid tablet: true while the host aside is mid-drag. The panel follows
+      the aside's var with its own width transition OFF so it tracks the finger
+      without a 200ms lag; when not dragging, its own transition animates the
+      expand/collapse var change. */
+  embeddedResizing?: boolean;
+}> = ({ embeddedWidth, embeddedResizing = false }) => {
   const { t } = useI18n();
   const effectiveDirectory = useEffectiveDirectory() ?? '';
   const directoryKey = React.useMemo(() => normalizeDirectoryKey(effectiveDirectory), [effectiveDirectory]);
@@ -536,9 +544,15 @@ export const ContextPanel: React.FC = () => {
   const effectiveManualWidth = manualWidthFraction != null && availablePanelAreaWidth != null
     ? Math.round(manualWidthFraction * availablePanelAreaWidth)
     : manualWidth;
-  const width = isTreeOnly
+  const width = isTreeOnly && embeddedWidth === undefined
     ? contextEditorTreeWidth
-    : clampWidth(effectiveManualWidth ?? Math.round(widthFraction * widthFallbackBase), maxPanelWidth(availablePanelAreaWidth ?? widthFallbackBase));
+    : resolveContextPanelWidth({
+        embeddedWidth,
+        manualWidth: effectiveManualWidth,
+        widthFraction,
+        fallbackBase: widthFallbackBase,
+        clamp: (candidate) => clampWidth(candidate, maxPanelWidth(availablePanelAreaWidth ?? widthFallbackBase)),
+      });
 
   // Convert legacy pixel-only preferences to a ratio the first time the
   // available area is known, so existing users also get responsive sizing.
@@ -630,7 +644,7 @@ export const ContextPanel: React.FC = () => {
   }, [isTreeOnly]);
 
   const handleResizeStart = React.useCallback((event: React.PointerEvent) => {
-    if (!isOpen || isExpanded || !directoryKey) {
+    if (embeddedWidth !== undefined || !isOpen || isExpanded || !directoryKey) {
       return;
     }
 
@@ -643,7 +657,7 @@ export const ContextPanel: React.FC = () => {
     resizeAvailableWidthRef.current = getAvailablePanelWidth(panelRef.current);
     document.documentElement.style.cursor = 'col-resize';
     event.preventDefault();
-  }, [directoryKey, isExpanded, isOpen, width]);
+  }, [directoryKey, embeddedWidth, isExpanded, isOpen, width]);
 
   const finishResize = React.useCallback(() => {
     // Apply the final width once, letting the regular 200ms width transition
@@ -1221,27 +1235,43 @@ export const ContextPanel: React.FC = () => {
 
   // width/min/max stay interpolable across open/close (no instant min/max
   // jumps) so the 200ms width transition matches the sidebars.
-  const panelStyle: React.CSSProperties = !isOpen
+  const panelStyle: React.CSSProperties = embeddedWidth !== undefined
     ? {
-        ['--oc-context-panel-width' as string]: `${width}px`,
-        width: 0,
+        // Hybrid tablet: the panel sits inside the host aside, which the iPad
+        // resize hook resizes live via imperative `--oc-ipad-sidebar-width`
+        // updates — docked to the dragged width, expanded to the full chat
+        // area. Reading that var instead of the React-state width keeps the
+        // panel in lockstep with the host during reveal and resize.
+        //
+        // The width is the same when closed as when docked: the host aside is
+        // 0 wide and clipped then, so the panel itself does not animate on
+        // open/close. Only expand/collapse changes this width variable.
+        width: 'min(var(--oc-ipad-sidebar-width), 100%)',
         maxWidth: '100%',
         overflowX: 'clip',
+        ['--oc-context-panel-width' as string]: 'min(var(--oc-ipad-sidebar-width), 100%)',
       }
-    : isExpanded
+    : !isOpen
       ? {
-          // px, not '100%': px↔% width changes do not interpolate, which
-          // would make the expand/collapse width snap instead of animating.
-          ['--oc-context-panel-width' as string]: availablePanelAreaWidth !== null ? `${availablePanelAreaWidth}px` : '100%',
-          width: availablePanelAreaWidth !== null ? `${availablePanelAreaWidth}px` : '100%',
-          maxWidth: '100%',
-        }
-      : {
-          width: 'min(var(--oc-context-panel-width), 100%)',
+          ['--oc-context-panel-width' as string]: `${width}px`,
+          width: 0,
           maxWidth: '100%',
           overflowX: 'clip',
-          ['--oc-context-panel-width' as string]: `${width}px`,
-        };
+        }
+      : isExpanded
+        ? {
+            // px, not '100%': px↔% width changes do not interpolate, which
+            // would make the expand/collapse width snap instead of animating.
+            ['--oc-context-panel-width' as string]: availablePanelAreaWidth !== null ? `${availablePanelAreaWidth}px` : '100%',
+            width: availablePanelAreaWidth !== null ? `${availablePanelAreaWidth}px` : '100%',
+            maxWidth: '100%',
+          }
+        : {
+            width: 'min(var(--oc-context-panel-width), 100%)',
+            maxWidth: '100%',
+            overflowX: 'clip',
+            ['--oc-context-panel-width' as string]: `${width}px`,
+          };
 
   return (
     <aside
@@ -1259,7 +1289,8 @@ export const ContextPanel: React.FC = () => {
           : 'relative h-full flex-shrink-0',
         !isOpen && 'pointer-events-none',
         'will-change-[width] motion-reduce:transition-none',
-        'transition-[width] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)]'
+        'transition-[width] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)]',
+        embeddedResizing && 'transition-none'
       )}
       onKeyDownCapture={handlePanelKeyDownCapture}
       style={panelStyle}
@@ -1274,7 +1305,7 @@ export const ContextPanel: React.FC = () => {
       {isOpen && (
         <div aria-hidden="true" className="absolute right-0 top-0 z-40 h-full w-px bg-border" />
       )}
-      {!isExpanded && (
+      {!isExpanded && embeddedWidth === undefined && (
         <div
           className={cn(
             'absolute left-0 top-0 z-50 h-full w-[3px] cursor-col-resize transition-colors hover:bg-[var(--interactive-border)]/80',
@@ -1290,17 +1321,18 @@ export const ContextPanel: React.FC = () => {
         className={cn(
           'relative z-10 flex h-full min-h-0 shrink-0 flex-col duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none',
           // Width animates in sync with the panel (surface switches, resize
-          // release); during the drag itself nothing resizes — only the ghost
-          // guide line moves.
+          // release); during a hybrid drag the panel follows the host aside's
+          // var live, so no own smoothing is applied there either.
           'transition-[width,opacity]',
+          embeddedResizing && 'transition-none',
           !isOpen && 'pointer-events-none select-none opacity-0'
         )}
         // px in the expanded state too: px↔% width changes cannot interpolate,
         // so the header controls would snap instead of riding the animation.
         style={{
-          width: isExpanded
-            ? (availablePanelAreaWidth !== null ? `${availablePanelAreaWidth}px` : '100%')
-            : 'var(--oc-context-panel-width)',
+          width: embeddedWidth !== undefined || !isExpanded
+            ? 'var(--oc-context-panel-width)'
+            : (availablePanelAreaWidth !== null ? `${availablePanelAreaWidth}px` : '100%'),
         }}
         aria-hidden={!isOpen}
       >
