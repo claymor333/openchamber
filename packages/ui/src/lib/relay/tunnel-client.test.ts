@@ -933,7 +933,7 @@ describe('createRelayTunnelClient', () => {
       const { client, connectionCount } = await setupClient(
         {},
         {
-          probeStaleAfterMs: 5_000,
+          probeStaleAfterMs: 20,
           pingIntervalMs: 1_000,
           pingTimeoutMs: 30_000,
           reconnectBaseDelayMs: 10,
@@ -942,8 +942,10 @@ describe('createRelayTunnelClient', () => {
       );
       track(client);
       await waitForStatus(client, 'connected');
+      await wait(30); // let the channel become stale before proving new traffic refreshes it
       const response = await client.fetch('/health');
       expect(response.status).toBe(200);
+      await wait(5);
       const before = connectionCount();
       dispatchVisibilityWake();
       await wait(50);
