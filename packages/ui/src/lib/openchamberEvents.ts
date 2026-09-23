@@ -1,4 +1,4 @@
-import { getRuntimeUrlResolver } from './runtime-url';
+import { runtimeFetch } from './runtime-fetch';
 import { subscribeRuntimeEndpointChanged } from './runtime-switch';
 import { isVSCodeRuntime } from './desktop';
 import { messageQueueUpdatedEventSchema, type MessageQueueUpdatedEvent } from '@/stores/messageQueueStore';
@@ -126,7 +126,7 @@ const worktreeChangedPropertiesSchema = z.object({
   at: z.number().optional(),
 });
 
-let eventSource: EventSource | null = null;
+let streamAbort: AbortController | null = null;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let heartbeatTimer: ReturnType<typeof setTimeout> | null = null;
 let reconnectAttempt = 0;
@@ -158,10 +158,10 @@ const scheduleReconnect = () => {
 
 const cleanupSource = () => {
   clearHeartbeatTimer();
-  if (eventSource) {
-    eventSource.close();
+  if (streamAbort) {
+    streamAbort.abort();
   }
-  eventSource = null;
+  streamAbort = null;
 };
 
 const resetHeartbeatTimer = () => {
@@ -200,17 +200,25 @@ const getEventProperties = (properties: unknown): Record<string, unknown> | null
   return properties as Record<string, unknown>;
 };
 
-const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) => {
+const dispatchToListeners = (event: OpenChamberEvent, isCurrent: () => boolean): void => {
+  for (const listener of listeners) {
+    if (!isCurrent()) return;
+    listener(event);
+  }
+};
+
+const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }, isCurrent: () => boolean): void => {
+  if (!isCurrent()) return;
   if (envelope.type === 'openchamber:event-stream-ready') {
     reconnectAttempt = 0;
-    for (const listener of listeners) listener({ type: 'event-stream-ready' });
+    dispatchToListeners({ type: 'event-stream-ready' }, isCurrent);
     return;
   }
 
   if (envelope.type === 'openchamber:message-queue.updated') {
     const parsed = messageQueueUpdatedEventSchema.safeParse(envelope);
     if (parsed.success) {
-      for (const listener of listeners) listener(parsed.data);
+      dispatchToListeners(parsed.data, isCurrent);
     }
     return;
   }
@@ -221,31 +229,31 @@ const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) =
 
   if (envelope.type === 'openchamber:routing.updated') {
     const parsed = routingUpdatedSchema.safeParse(envelope.properties);
-    if (parsed.success) for (const listener of listeners) listener({ type: 'routing-updated', ...parsed.data });
+    if (parsed.success) dispatchToListeners({ type: 'routing-updated', ...parsed.data }, isCurrent);
     return;
   }
 
   if (envelope.type === 'openchamber:routing.decision') {
     const parsed = routingDecisionSchema.safeParse(envelope.properties);
-    if (parsed.success) for (const listener of listeners) listener({ type: 'routing-decision', decision: parsed.data });
+    if (parsed.success) dispatchToListeners({ type: 'routing-decision', decision: parsed.data }, isCurrent);
     return;
   }
 
   if (envelope.type === 'openchamber:routing.permission-held') {
     const parsed = routingPermissionHeldSchema.safeParse(envelope.properties);
-    if (parsed.success) for (const listener of listeners) listener({ type: 'routing-permission-held', ...parsed.data });
+    if (parsed.success) dispatchToListeners({ type: 'routing-permission-held', ...parsed.data }, isCurrent);
     return;
   }
 
   if (envelope.type === 'openchamber:routing.safety-skipped') {
     const parsed = routingSafetySkippedSchema.safeParse(envelope.properties);
-    if (parsed.success) for (const listener of listeners) listener({ type: 'routing-safety-skipped', ...parsed.data });
+    if (parsed.success) dispatchToListeners({ type: 'routing-safety-skipped', ...parsed.data }, isCurrent);
     return;
   }
 
   if (envelope.type === 'openchamber:browser-provider-reset') {
     const parsed = browserProviderResetSchema.safeParse(envelope.properties);
-    if (parsed.success) for (const listener of listeners) listener({ type: 'browser-provider-reset', ...parsed.data });
+    if (parsed.success) dispatchToListeners({ type: 'browser-provider-reset', ...parsed.data }, isCurrent);
     return;
   }
 
@@ -259,9 +267,7 @@ const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) =
         ? { projectId: properties.projectId }
         : {}),
     };
-    for (const listener of listeners) {
-      listener(nextEvent);
-    }
+    dispatchToListeners(nextEvent, isCurrent);
     return;
   }
 
@@ -284,9 +290,7 @@ const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) =
         ? { projectId: properties.projectId }
         : {}),
     };
-    for (const listener of listeners) {
-      listener(nextEvent);
-    }
+    dispatchToListeners(nextEvent, isCurrent);
     return;
   }
 
@@ -298,7 +302,7 @@ const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) =
       directories: parsed.data.directories,
       changedAt: parsed.data.at ?? Date.now(),
     };
-    for (const listener of listeners) listener(nextEvent);
+    dispatchToListeners(nextEvent, isCurrent);
     return;
   }
 
@@ -319,9 +323,7 @@ const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) =
         ? rawParameters as Record<string, unknown>
         : {},
     };
-    for (const listener of listeners) {
-      listener(nextEvent);
-    }
+    dispatchToListeners(nextEvent, isCurrent);
     return;
   }
 
@@ -349,22 +351,102 @@ const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) =
       ? { sessionId: properties.sessionId }
       : {}),
   };
-  for (const listener of listeners) {
-    listener(nextEvent);
+  dispatchToListeners(nextEvent, isCurrent);
+};
+
+const parseSseFrame = (frame: string): { type: string; properties: unknown } | null => {
+  const data = frame
+    .replaceAll('\r\n', '\n')
+    .replaceAll('\r', '\n')
+    .split('\n')
+    .filter((line) => line.startsWith('data:'))
+    .map((line) => line.slice(5).trimStart())
+    .join('\n');
+  return parseEnvelope(data);
+};
+
+const readStream = async (signal: AbortSignal, canControlBrowser: boolean): Promise<void> => {
+  const isCurrentStream = (): boolean => !signal.aborted && streamAbort?.signal === signal;
+  let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
+  let shouldReconnect = false;
+  try {
+    const response = await runtimeFetch('/api/openchamber/events', {
+      headers: { Accept: 'text/event-stream' },
+      query: canControlBrowser ? { browser: '1' } : undefined,
+      signal,
+    });
+
+    if (!isCurrentStream()) return;
+    if (!response.ok || !response.body) {
+      shouldReconnect = true;
+    } else {
+      resetHeartbeatTimer();
+      reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let pendingCarriageReturn = false;
+
+      const appendText = (text: string): void => {
+        if (pendingCarriageReturn) {
+          if (text.startsWith('\n')) text = text.slice(1);
+          buffer += '\n';
+          pendingCarriageReturn = false;
+        }
+        if (text.endsWith('\r')) {
+          text = text.slice(0, -1);
+          pendingCarriageReturn = true;
+        }
+        buffer += text.replaceAll('\r\n', '\n').replaceAll('\r', '\n');
+      };
+
+      for (;;) {
+        if (!isCurrentStream()) return;
+        const { done, value } = await reader.read();
+        if (!isCurrentStream()) return;
+        if (done) break;
+
+        resetHeartbeatTimer();
+        appendText(decoder.decode(value, { stream: true }));
+
+        let frameEnd = buffer.indexOf('\n\n');
+        while (frameEnd !== -1) {
+          if (!isCurrentStream()) return;
+          const frame = buffer.slice(0, frameEnd);
+          buffer = buffer.slice(frameEnd + 2);
+          const envelope = parseSseFrame(frame);
+          if (envelope) dispatchFromEnvelope(envelope, isCurrentStream);
+          if (!isCurrentStream()) return;
+          frameEnd = buffer.indexOf('\n\n');
+        }
+      }
+      appendText(decoder.decode());
+      if (pendingCarriageReturn) buffer += '\n';
+      const envelope = parseSseFrame(buffer.trim());
+      if (envelope && isCurrentStream()) dispatchFromEnvelope(envelope, isCurrentStream);
+      shouldReconnect = isCurrentStream();
+    }
+  } catch {
+    shouldReconnect = isCurrentStream();
+  } finally {
+    if (reader) {
+      try {
+        void reader.cancel().catch(() => undefined);
+      } catch {
+        // The fetch abort may already have canceled the reader.
+      }
+      try {
+        reader.releaseLock();
+      } catch {
+        // A pending read releases its lock when the abort settles.
+      }
+    }
+    if (streamAbort?.signal === signal) cleanupSource();
   }
+  if (shouldReconnect) scheduleReconnect();
 };
 
 const connect = () => {
-  if (typeof window === 'undefined' || listeners.size === 0) {
-    return;
-  }
-  if (typeof EventSource !== 'function') {
-    return;
-  }
-
-  if (eventSource && eventSource.readyState !== EventSource.CLOSED) {
-    return;
-  }
+  if (typeof window === 'undefined' || listeners.size === 0 || streamAbort) return;
 
   cleanupSource();
 
@@ -372,32 +454,10 @@ const connect = () => {
   // Chromium host can drive a page; a browser tab can display one but not be
   // driven, and the agent tool needs to know which it is talking to without a
   // setting anyone has to remember to change.
-  const canControlBrowser = typeof window !== 'undefined' && Boolean(window.__OPENCHAMBER_ELECTRON__);
-  const source = new EventSource(getRuntimeUrlResolver().sse(
-    '/api/openchamber/events',
-    canControlBrowser ? { browser: '1' } : undefined,
-  ));
-  source.onopen = () => {
-    if (eventSource !== source) return;
-    resetHeartbeatTimer();
-  };
-  source.onmessage = (event) => {
-    if (eventSource !== source) return;
-    resetHeartbeatTimer();
-    const envelope = parseEnvelope(event.data);
-    if (!envelope) {
-      return;
-    }
-    dispatchFromEnvelope(envelope);
-  };
-
-  source.onerror = () => {
-    if (eventSource !== source) return;
-    cleanupSource();
-    scheduleReconnect();
-  };
-
-  eventSource = source;
+  const canControlBrowser = Boolean(window.__OPENCHAMBER_ELECTRON__);
+  const controller = new AbortController();
+  streamAbort = controller;
+  void readStream(controller.signal, canControlBrowser);
 };
 
 const ensureRuntimeChangeSubscription = () => {

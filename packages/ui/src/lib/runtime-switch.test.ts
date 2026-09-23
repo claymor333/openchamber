@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import {
   getRuntimeApiBaseUrl,
+  getRuntimeEndpointRevision,
   getRuntimeKey,
   subscribeRuntimeEndpointChanged,
   subscribeRuntimeEndpointWillChange,
@@ -9,9 +10,12 @@ import {
 import { clearRuntimeUrlAuthToken, setRuntimeExtraHeaders } from './runtime-auth';
 import {
   activateRelayTunnel,
+  adoptRelayTunnel,
   deactivateRelayTunnel,
   getActiveRelayDescriptor,
+  probeActiveRelayTunnel,
 } from './relay/runtime-tunnel';
+import type { RelayTunnelClient } from './relay/tunnel-client';
 
 describe('runtime endpoint switching', () => {
   test('exposes a credential-free copy of the active relay descriptor', () => {
@@ -37,6 +41,30 @@ describe('runtime endpoint switching', () => {
     }
   });
 
+  test('forwards native wake probes to the active relay tunnel', async () => {
+    let probeCalls = 0;
+    const tunnel: RelayTunnelClient = {
+      fetch: async () => new Response(null),
+      openWebSocket: () => { throw new Error('WebSocket is not used by this test'); },
+      probeLiveness: async () => { probeCalls += 1; },
+      getStatus: () => ({ state: 'connected' }),
+      subscribeStatus: () => () => undefined,
+      close: () => undefined,
+    };
+
+    try {
+      adoptRelayTunnel({
+        relayUrl: 'wss://relay.example.com',
+        serverId: 'server-1',
+        hostEncPubJwk: { kty: 'EC', crv: 'P-256', x: 'public-x', y: 'public-y' },
+      }, tunnel);
+      await probeActiveRelayTunnel();
+      expect(probeCalls).toBe(1);
+    } finally {
+      deactivateRelayTunnel();
+    }
+  });
+
   test('notifies listeners before and after mutating the active endpoint', () => {
     const previousWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
     const previousFetch = globalThis.fetch;
@@ -48,12 +76,14 @@ describe('runtime endpoint switching', () => {
     };
 
     try {
+      const initialRevision = getRuntimeEndpointRevision();
       globalThis.fetch = (async () => new Response(null, { status: 404 })) as typeof fetch;
       Object.defineProperty(globalThis, 'window', {
         configurable: true,
         value: runtimeWindow,
       });
       switchRuntimeEndpoint({ apiBaseUrl: 'https://runtime-a.example', runtimeKey: 'runtime-a' });
+      expect(getRuntimeEndpointRevision()).toBe(initialRevision + 1);
       const observed: Array<[string, string, string]> = [];
       const unsubscribeWillChange = subscribeRuntimeEndpointWillChange((detail) => {
         observed.push(['will-change', getRuntimeKey(), detail.previousRuntimeKey]);
@@ -63,6 +93,7 @@ describe('runtime endpoint switching', () => {
       });
 
       switchRuntimeEndpoint({ apiBaseUrl: 'https://runtime-b.example', runtimeKey: 'runtime-b' });
+      expect(getRuntimeEndpointRevision()).toBe(initialRevision + 2);
 
       expect(observed).toEqual([
         ['will-change', 'runtime-a', 'runtime-a'],

@@ -33,6 +33,9 @@ export const getActiveRelayDescriptor = (): Omit<RelayRuntimeDescriptor, 'grant'
 
 export const isRelayModeActive = (): boolean => activeTunnel !== null;
 
+/** Probe the active relay after a native foreground transition. */
+export const probeActiveRelayTunnel = (): Promise<void> => activeTunnel?.probeLiveness() ?? Promise.resolve();
+
 /**
  * Activates relay mode with the given descriptor, replacing any previous tunnel.
  * Reuses the existing client when the descriptor is unchanged so a redundant

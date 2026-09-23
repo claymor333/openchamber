@@ -18,6 +18,7 @@ const RUNTIME_ENDPOINT_WILL_CHANGE_EVENT = 'openchamber:runtime-endpoint-will-ch
 
 let activeApiBaseUrl = '';
 let activeRuntimeKey = '';
+let activeRuntimeEndpointRevision = 0;
 
 const setWindowRuntimeValue = <K extends '__OPENCHAMBER_API_BASE_URL__' | '__OPENCHAMBER_CLIENT_TOKEN__' | '__OPENCHAMBER_RUNTIME_HEADERS__'>(
   runtimeWindow: typeof window & {
@@ -85,6 +86,9 @@ const sameOrigin = (left: string, right: string): boolean => {
 
 export const getRuntimeApiBaseUrl = (): string => activeApiBaseUrl || readInjectedApiBaseUrl();
 
+/** Monotonic authority token for async work scoped to the active endpoint. */
+export const getRuntimeEndpointRevision = (): number => activeRuntimeEndpointRevision;
+
 // `getRuntimeKey` keys caches, stores, and persisted state across the whole UI,
 // so it runs on store reads, event handling, and render paths. Before the
 // runtime endpoint is explicitly initialised, every call re-derived the key by
@@ -150,6 +154,7 @@ export const initializeRuntimeEndpoint = (options: { apiBaseUrl?: string | null;
   const isLocal = localOrigin && (!apiBaseUrl || sameOrigin(apiBaseUrl, localOrigin));
   activeApiBaseUrl = apiBaseUrl;
   activeRuntimeKey = options.runtimeKey?.trim() || (isLocal ? 'local' : normalizeRuntimeUrlKey(apiBaseUrl || sameOriginBaseUrl));
+  activeRuntimeEndpointRevision += 1;
 };
 
 export const switchRuntimeEndpoint = (options: { apiBaseUrl: string; clientToken?: string | null; runtimeKey?: string | null; requestHeaders?: Record<string, string> | null; relay?: RelayRuntimeDescriptor | null }): void => {
@@ -158,6 +163,7 @@ export const switchRuntimeEndpoint = (options: { apiBaseUrl: string; clientToken
   const previousRuntimeKey = getRuntimeKey();
   const runtimeKey = options.runtimeKey?.trim() || normalizeRuntimeUrlKey(apiBaseUrl);
   const detail = { apiBaseUrl, previousApiBaseUrl, runtimeKey, previousRuntimeKey };
+  activeRuntimeEndpointRevision += 1;
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent<RuntimeEndpointChangedDetail>(RUNTIME_ENDPOINT_WILL_CHANGE_EVENT, { detail }));
   }

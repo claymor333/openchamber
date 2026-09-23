@@ -84,6 +84,9 @@ class FakeEndpoint implements TunnelWireSocket {
 
 type MiniHostOptions = {
   silent?: boolean;
+  ignorePings?: boolean;
+  /** Keep only the first established wire silent; reconnects answer normally. */
+  silentFirstConnection?: boolean;
   onConnect?: () => void;
   // Delay handling of the first inbound text frame: with a delay longer than
   // the client's helloRetryMs this reproduces the first-connect race where the
@@ -128,7 +131,7 @@ const attachMiniHost = (endpoint: FakeEndpoint, hostPrivateKey: CryptoKey, optio
     options.recordFrame?.(frame);
     if (options.silent) return;
     if (frame.frameType === TunnelFrameType.Ping) {
-      sendFrame(encodeTunnelFrame(TunnelFrameType.Pong, frame.streamId, new Uint8Array(0)));
+      if (!options.ignorePings) sendFrame(encodeTunnelFrame(TunnelFrameType.Pong, frame.streamId, new Uint8Array(0)));
       return;
     }
     if (frame.frameType === TunnelFrameType.HttpRequest) {
@@ -274,7 +277,10 @@ const setupClient = async (
       hostEndpoint.peer = clientEndpoint;
       lastClientEndpoint = clientEndpoint;
       lastHostEndpoint = hostEndpoint;
-      attachMiniHost(hostEndpoint, hostKeyPair.privateKey, hostOptions);
+      attachMiniHost(hostEndpoint, hostKeyPair.privateKey, {
+        ...hostOptions,
+        silent: hostOptions.silent || (hostOptions.silentFirstConnection === true && count === 1),
+      });
       queueMicrotask(() => clientEndpoint.onopen?.());
       return clientEndpoint;
     },
@@ -477,6 +483,197 @@ describe('createRelayTunnelClient', () => {
     } finally {
       clearInterval(timer);
     }
+  });
+
+  test('probes a quiet tunnel before sending a request', async () => {
+    const frames: TunnelFrame[] = [];
+    const { client } = await setupClient(
+      { recordFrame: frame => frames.push(frame) },
+      { pingIntervalMs: 1_000, probeStaleAfterMs: 20, probeTimeoutMs: 100 },
+    );
+    track(client);
+    await client.fetch('/health');
+    await wait(30);
+
+    const response = await client.fetch('/health');
+    expect(response.status).toBe(200);
+    expect(frames.some(frame => frame.frameType === TunnelFrameType.Ping)).toBe(true);
+  });
+
+  test('fails over a silently dead tunnel before dispatching the request', async () => {
+    const { client, connectionCount } = await setupClient(
+      { silent: true },
+      {
+        pingIntervalMs: 1_000,
+        probeStaleAfterMs: 20,
+        probeTimeoutMs: 30,
+        reconnectBaseDelayMs: 10,
+        reconnectMaxDelayMs: 10,
+      },
+    );
+    track(client);
+    await wait(30);
+    const request = client.fetch('/health').catch(() => undefined);
+    await wait(80);
+    expect(connectionCount()).toBeGreaterThan(1);
+    client.close();
+    await request;
+  });
+
+  test('repeated callers cannot postpone the original probe deadline', async () => {
+    const { client, connectionCount } = await setupClient(
+      { silentFirstConnection: true },
+      {
+        pingIntervalMs: 1_000,
+        probeStaleAfterMs: 5,
+        probeTimeoutMs: 40,
+        reconnectBaseDelayMs: 5,
+        reconnectMaxDelayMs: 5,
+      },
+    );
+    track(client);
+    while (client.getStatus().state !== 'connected') await wait(1);
+    await wait(10);
+
+    const requests: Array<Promise<Response>> = [];
+    const issueRequest = () => requests.push(client.fetch('/health'));
+    issueRequest();
+    const timer = setInterval(issueRequest, 5);
+    try {
+      await wait(60);
+      expect(connectionCount()).toBeGreaterThan(1);
+    } finally {
+      clearInterval(timer);
+    }
+    const responses = await Promise.all(requests);
+    expect(responses.every((response) => response.status === 200)).toBe(true);
+  });
+
+  test('an immediate lifecycle probe recovers a dead wire before it becomes stale', async () => {
+    const previousWindow = globalThis.window;
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: new EventTarget() });
+    try {
+      const { client, connectionCount } = await setupClient(
+        { silentFirstConnection: true },
+        {
+          pingIntervalMs: 1_000,
+          probeStaleAfterMs: 1_000,
+          probeTimeoutMs: 30,
+          reconnectBaseDelayMs: 5,
+          reconnectMaxDelayMs: 5,
+        },
+      );
+      track(client);
+      while (client.getStatus().state !== 'connected') await wait(1);
+      const probe = client.probeLiveness();
+      const request = client.fetch('/health');
+      await probe;
+      const response = await request;
+      expect(response.status).toBe(200);
+      expect(connectionCount()).toBe(2);
+    } finally {
+      if (previousWindow === undefined) Reflect.deleteProperty(globalThis, 'window');
+      else Object.defineProperty(globalThis, 'window', { configurable: true, value: previousWindow });
+    }
+  });
+
+  test('an immediate lifecycle probe keeps a healthy fresh wire connected', async () => {
+    const previousWindow = globalThis.window;
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: new EventTarget() });
+    try {
+      const frames: TunnelFrame[] = [];
+      const { client, connectionCount } = await setupClient(
+        { recordFrame: frame => frames.push(frame) },
+        { pingIntervalMs: 1_000, probeStaleAfterMs: 1_000, probeTimeoutMs: 30 },
+      );
+      track(client);
+      const initialResponse = await client.fetch('/health');
+      await initialResponse.arrayBuffer();
+      await client.probeLiveness();
+      expect(frames.some((frame) => frame.frameType === TunnelFrameType.Ping)).toBe(true);
+      expect(connectionCount()).toBe(1);
+    } finally {
+      if (previousWindow === undefined) Reflect.deleteProperty(globalThis, 'window');
+      else Object.defineProperty(globalThis, 'window', { configurable: true, value: previousWindow });
+    }
+  });
+
+  test('a foreground transition accelerates a reconnect after the wire closes', async () => {
+    const { client, connectionCount, killWire } = await setupClient({}, {
+      pingIntervalMs: 1_000,
+      reconnectBaseDelayMs: 1_000,
+      reconnectMaxDelayMs: 1_000,
+    });
+    track(client);
+    const initialResponse = await client.fetch('/health');
+    await initialResponse.arrayBuffer();
+    killWire();
+    await wait(0);
+    expect(connectionCount()).toBe(1);
+
+    await client.probeLiveness();
+    const response = await client.fetch('/health');
+    expect(response.status).toBe(200);
+    expect(connectionCount()).toBe(2);
+  });
+
+  test('foreground probe deadline is independent of an outstanding keepalive', async () => {
+    const frames: TunnelFrame[] = [];
+    const { client, connectionCount } = await setupClient(
+      { ignorePings: true, recordFrame: frame => frames.push(frame) },
+      {
+        pingIntervalMs: 20,
+        pingTimeoutMs: 5_000,
+        probeStaleAfterMs: 1_000,
+        probeTimeoutMs: 40,
+        reconnectBaseDelayMs: 5,
+        reconnectMaxDelayMs: 5,
+      },
+    );
+    track(client);
+    await client.fetch('/health');
+    for (let attempt = 0; attempt < 100 && !frames.some(frame => frame.frameType === TunnelFrameType.Ping); attempt += 1) {
+      await wait(1);
+    }
+    expect(frames.some(frame => frame.frameType === TunnelFrameType.Ping)).toBe(true);
+
+    const probeStartedAt = Date.now();
+    await client.probeLiveness();
+    for (let attempt = 0; attempt < 100 && connectionCount() === 1; attempt += 1) await wait(1);
+
+    expect(Date.now() - probeStartedAt).toBeLessThan(500);
+    expect(connectionCount()).toBe(2);
+  });
+
+  test('aborting the last probe waiter clears its deadline for the next request', async () => {
+    const { client, connectionCount } = await setupClient(
+      { silentFirstConnection: true },
+      {
+        pingIntervalMs: 1_000,
+        probeStaleAfterMs: 5,
+        probeTimeoutMs: 300,
+        reconnectBaseDelayMs: 5,
+        reconnectMaxDelayMs: 5,
+      },
+    );
+    track(client);
+    while (client.getStatus().state !== 'connected') await wait(1);
+    await wait(10);
+
+    const controller = new AbortController();
+    const abortedRequest = client.fetch('/health', { signal: controller.signal }).catch(() => undefined);
+    await wait(5);
+    controller.abort();
+    await abortedRequest;
+    await wait(200);
+
+    const request = client.fetch('/health');
+    await wait(120);
+    expect(connectionCount()).toBe(1);
+
+    await wait(220);
+    expect((await request).status).toBe(200);
+    expect(connectionCount()).toBe(2);
   });
 
   test('continuing inbound stream data stays healthy without idle pings', async () => {

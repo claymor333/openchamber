@@ -32,7 +32,8 @@ import { useHardwareKeyboard } from '@/lib/hardwareKeyboard';
 import { useI18n } from '@/lib/i18n';
 import { subscribeOpenchamberEvents } from '@/lib/openchamberEvents';
 import { runtimeFetch } from '@/lib/runtime-fetch';
-import { getRuntimeApiBaseUrl, getRuntimeKey, subscribeRuntimeEndpointChanged, switchRuntimeEndpoint, MOBILE_DISCONNECTED_RUNTIME_KEY } from '@/lib/runtime-switch';
+import { getRuntimeApiBaseUrl, getRuntimeEndpointRevision, getRuntimeKey, subscribeRuntimeEndpointChanged, switchRuntimeEndpoint, MOBILE_DISCONNECTED_RUNTIME_KEY } from '@/lib/runtime-switch';
+import { probeActiveRelayTunnel } from '@/lib/relay/runtime-tunnel';
 import { refreshGlobalSessions, resolveGlobalSessionDirectory } from '@/stores/useGlobalSessionsStore';
 import { clearLastActiveSession, readLastActiveSession } from '@/sync/last-session-cache';
 import { cn } from '@/lib/utils';
@@ -671,8 +672,12 @@ export function MobileApp({ apis }: MobileAppProps) {
 
   const handleNativeResume = React.useCallback(() => {
     const apiBaseUrl = getRuntimeApiBaseUrl();
+    const runtimeRevision = getRuntimeEndpointRevision();
     const validationSeq = nativeResumeValidationSeqRef.current + 1;
     nativeResumeValidationSeqRef.current = validationSeq;
+    const isCurrent = () =>
+      nativeResumeValidationSeqRef.current === validationSeq &&
+      getRuntimeEndpointRevision() === runtimeRevision;
 
     if (!apiBaseUrl) {
       // Already disconnected — e.g. a previous re-probe ran mid network flux
@@ -705,8 +710,14 @@ export function MobileApp({ apis }: MobileAppProps) {
       setConnectionEpoch((value) => value + 1);
     };
 
-    void reprobeActiveConnection().then((outcome) => {
-      if (nativeResumeValidationSeqRef.current !== validationSeq) return;
+    // A native foreground event can arrive before the normal stale-activity
+    // threshold, while the OS has already killed the socket. Force a probe now;
+    // requests over that relay join it before dispatch, and a missing Pong starts
+    // the tunnel's existing reconnect path.
+    void probeActiveRelayTunnel().catch(() => undefined);
+    void reprobeActiveConnection({ isCurrent }).then((outcome) => {
+      if (!isCurrent()) return;
+      if (outcome === 'stale') return;
       if (outcome === 'no-connection') {
         disconnect('no-connection');
         return;
@@ -729,10 +740,14 @@ export function MobileApp({ apis }: MobileAppProps) {
         const retryDelaysMs = [4000, 10000];
         const retryAt = (attempt: number) => {
           window.setTimeout(() => {
-            if (nativeResumeValidationSeqRef.current !== validationSeq) return;
+            if (!isCurrent()) return;
             const lastAttempt = attempt === retryDelaysMs.length - 1;
-            void reprobeActiveConnection({ fast: !lastAttempt }).then((retry) => {
-              if (nativeResumeValidationSeqRef.current !== validationSeq) return;
+            void reprobeActiveConnection({
+              fast: !lastAttempt,
+              isCurrent,
+            }).then((retry) => {
+              if (!isCurrent()) return;
+              if (retry === 'stale') return;
               if (retry === 'switched') return;
               if (retry === 'unchanged') {
                 refreshInPlace();
@@ -829,6 +844,9 @@ export function MobileApp({ apis }: MobileAppProps) {
         previousRuntimeKey: detail.previousRuntimeKey || 'none',
         connected: Boolean(detail.apiBaseUrl),
       });
+      // Runtime endpoint changes supersede every pending native-resume probe
+      // and retry. Their captured endpoint revision is also checked at commit.
+      nativeResumeValidationSeqRef.current += 1;
       // A LAN⇄relay swap for the SAME device keeps the runtime key stable. Treat
       // that as a transport-only change: rebind the sync layer to the new
       // transport but keep the user's session/connection state — no reconnecting
@@ -908,16 +926,18 @@ export function MobileApp({ apis }: MobileAppProps) {
     // exactly when it's needed. Check it at resolution time instead.
     if (!isNativeMobileApp || !getRuntimeApiBaseUrl()) return;
     let cancelled = false;
+    const runtimeRevision = getRuntimeEndpointRevision();
+    const isCurrent = () => !cancelled && getRuntimeEndpointRevision() === runtimeRevision;
     const dropToConnectScreen = (notice: MobileConnectionNotice | null) => {
       logMobileConnectEvent('cold-launch:drop', { kind: notice?.kind ?? 'unknown' });
       if (notice) setAutoConnectNotice(notice);
       switchRuntimeEndpoint({ apiBaseUrl: '', clientToken: null, runtimeKey: MOBILE_DISCONNECTED_RUNTIME_KEY });
       setConnectionEpoch((value) => value + 1);
     };
-    void reprobeActiveConnection().then(async (outcome) => {
-      if (cancelled) return;
+    void reprobeActiveConnection({ isCurrent }).then(async (outcome) => {
+      if (!isCurrent()) return;
       // A genuinely live connection established itself while we probed.
-      if (outcome === 'switched' || outcome === 'unchanged') return;
+      if (outcome === 'switched' || outcome === 'unchanged' || outcome === 'stale') return;
       const label = getAutoConnectTargetLabel();
       if (outcome === 'needs-login') {
         dropToConnectScreen({ kind: 'auth-expired', label: label ?? '' });
@@ -938,7 +958,7 @@ export function MobileApp({ apis }: MobileAppProps) {
       // connection yet — fall back to the auto-connect path, which both
       // classifies the failure and connects when everything is actually fine.
       const fallback = await autoConnectLastInstance().catch((): AutoConnectOutcome => ({ status: 'no-candidate' }));
-      if (cancelled || fallback.status === 'connected') return;
+      if (!isCurrent() || fallback.status === 'connected') return;
       if (fallback.status === 'needs-login') {
         dropToConnectScreen({ kind: 'auth-expired', label: fallback.label });
       } else if (fallback.status === 'unreachable') {

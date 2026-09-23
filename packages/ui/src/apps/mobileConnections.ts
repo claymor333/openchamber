@@ -24,7 +24,7 @@ import { isCapacitorApp } from '@/lib/platform';
 import { adoptRelayTunnel, isRelayModeActive } from '@/lib/relay/runtime-tunnel';
 import { createRelayTunnelClient } from '@/lib/relay/tunnel-client';
 import { addRuntimeProxyHeaders, runtimeFetch } from '@/lib/runtime-fetch';
-import { getRuntimeApiBaseUrl, getRuntimeKey, switchRuntimeEndpoint } from '@/lib/runtime-switch';
+import { getRuntimeApiBaseUrl, getRuntimeEndpointRevision, getRuntimeKey, switchRuntimeEndpoint } from '@/lib/runtime-switch';
 
 import { recordMobileConnectDebug } from './mobileConnectionDebug';
 
@@ -236,12 +236,20 @@ const secureTokenKeyOf = (connection: { candidates: MobileTransportCandidate[] }
   return direct ? getConnectionStorageKey(direct.url) : '';
 };
 
-// Two candidate sets are the same device if they share a relay serverId or a
-// normalized direct URL — used to dedupe saved connections on upsert.
+// A relay identity wins over a shared LAN URL. Two paired devices may occupy
+// the same address after DHCP reassignment; direct URLs are a fallback identity
+// when either record lacks a relay identity.
 const candidateSetsMatch = (a: MobileTransportCandidate[], b: MobileTransportCandidate[]): boolean => {
   const aRelay = a.find((c) => c.kind === 'relay');
   const aServerId = aRelay && aRelay.kind === 'relay' ? aRelay.relay.serverId : null;
-  const aUrls = new Set(a.filter((c) => c.kind === 'direct').map((c) => getConnectionStorageKey((c as { url: string }).url)));
+  const bRelay = b.find((c) => c.kind === 'relay');
+  const bServerId = bRelay && bRelay.kind === 'relay' ? bRelay.relay.serverId : null;
+  if (aServerId !== null && bServerId !== null) return aServerId === bServerId;
+  const aUrls = new Set(
+    a
+      .filter((candidate): candidate is Extract<MobileTransportCandidate, { kind: 'direct' }> => candidate.kind === 'direct')
+      .map((candidate) => getConnectionStorageKey(candidate.url)),
+  );
   return b.some((c) => {
     if (c.kind === 'relay') return aServerId !== null && c.relay.serverId === aServerId;
     return aUrls.has(getConnectionStorageKey(c.url));
@@ -610,7 +618,7 @@ const upsertConnectionInList = (
   draft: { id?: string; label: string; candidates: MobileTransportCandidate[]; clientToken?: string; hasToken?: boolean },
 ): MobileSavedConnection[] => {
   const existing = connections.find(
-    (item) => (draft.id && item.id === draft.id) || candidateSetsMatch(item.candidates, draft.candidates),
+    (item) => draft.id ? item.id === draft.id : candidateSetsMatch(item.candidates, draft.candidates),
   );
   const native = isCapacitorApp();
   const next: MobileSavedConnection = {
@@ -624,7 +632,9 @@ const upsertConnectionInList = (
   };
   return [
     next,
-    ...connections.filter((item) => item.id !== next.id && !candidateSetsMatch(item.candidates, draft.candidates)),
+    ...connections.filter((item) =>
+      item.id !== next.id && (Boolean(draft.id) || !candidateSetsMatch(item.candidates, draft.candidates)),
+    ),
   ].slice(0, MOBILE_CONNECTIONS_LIMIT);
 };
 
@@ -982,7 +992,10 @@ const switchToTransport = (
   // Every live connection is an opportunity to learn the server's CURRENT LAN
   // addresses (pairing-payload candidates go stale when DHCP reassigns the
   // host's IP). Background-only: never blocks or repaints the connect flow.
-  scheduleCandidateRefresh();
+  const active = findActiveConnection();
+  if (active) {
+    scheduleCandidateRefresh({ connectionId: active.id, runtimeRevision: getRuntimeEndpointRevision() });
+  }
 };
 
 // The display label of the instance cold-launch auto-connect will try (the
@@ -1185,7 +1198,7 @@ export const isActiveRuntimeConnection = (connection: MobileSavedConnection): bo
   return Boolean(runtimeKey) && secureTokenKeyOf(connection) === runtimeKey;
 };
 
-export type ReprobeOutcome = 'switched' | 'unchanged' | 'unreachable' | 'needs-login' | 'no-connection';
+export type ReprobeOutcome = 'switched' | 'unchanged' | 'unreachable' | 'needs-login' | 'no-connection' | 'stale';
 
 // App-resume re-probe: when the app wakes (Capacitor `isActive`), the network may
 // have changed while it slept, so re-select the active device's transport and
@@ -1195,13 +1208,29 @@ export type ReprobeOutcome = 'switched' | 'unchanged' | 'unreachable' | 'needs-l
 // validates the current transport over its live channel; only if that is dead does
 // it fall through to the lower-priority candidates. 'unchanged' → keep the runtime
 // and just refresh; 'unreachable'/'no-connection' → show the connect screen.
-export const reprobeActiveConnection = async (options?: { fast?: boolean }): Promise<ReprobeOutcome> => {
+export const reprobeActiveConnection = async (options?: {
+  fast?: boolean;
+  /** Prevent a stale lifecycle probe from committing a transport switch. */
+  isCurrent?: () => boolean;
+}): Promise<ReprobeOutcome> => {
   const fast = options?.fast !== false;
+  const startedRuntimeRevision = getRuntimeEndpointRevision();
+  const isCurrent = (): boolean =>
+    getRuntimeEndpointRevision() === startedRuntimeRevision && (options?.isCurrent?.() ?? true);
+  if (!isCurrent()) return 'stale';
+
   const active = findActiveConnection();
   if (!active) {
     logConnect('reprobe:no-connection', { runtimeKey: Boolean(getRuntimeKey()) });
     return 'no-connection';
   }
+
+  const discardTransport = (transport: ChosenTransport): void => {
+    if (transport.kind === 'relay') transport.tunnel?.close();
+  };
+  const discardProbeResult = (result: ProbeResult): void => {
+    if (result.status === 'ok') discardTransport(result.transport);
+  };
 
   let token: string | undefined;
   if (isCapacitorApp()) {
@@ -1209,6 +1238,7 @@ export const reprobeActiveConnection = async (options?: { fast?: boolean }): Pro
   } else {
     token = active.clientToken;
   }
+  if (!isCurrent()) return 'stale';
   // Tokenless is valid (server auth disabled — the probe reports needs-login if
   // that changed); bail only when an EXPECTED token cannot be read. 'unreachable'
   // (not needs-login) so the resume retry ladder re-reads the token — a transient
@@ -1219,6 +1249,20 @@ export const reprobeActiveConnection = async (options?: { fast?: boolean }): Pro
   }
   logConnect('reprobe:start', { candidates: active.candidates.map((c) => c.kind), fast, hasToken: Boolean(token) });
 
+  const commitTransport = async (transport: ChosenTransport): Promise<boolean> => {
+    if (!isCurrent()) {
+      discardTransport(transport);
+      return false;
+    }
+    await upsertMobileConnection({ id: active.id, label: active.label, candidates: active.candidates });
+    if (!isCurrent()) {
+      discardTransport(transport);
+      return false;
+    }
+    switchToTransport(transport, token ?? null, { runtimeKey: secureTokenKeyOf(active) });
+    return true;
+  };
+
   const currentIndex = active.candidates.findIndex(
     (candidate) => transportMatchesCurrentRuntime(candidate.kind === 'relay' ? { kind: 'relay', relay: candidate.relay } : { kind: 'direct', url: candidate.url }),
   );
@@ -1226,11 +1270,13 @@ export const reprobeActiveConnection = async (options?: { fast?: boolean }): Pro
   // 1. A higher-priority transport becoming reachable means "came home" (relay → LAN).
   const higher = currentIndex >= 0 ? active.candidates.slice(0, currentIndex) : active.candidates;
   const better = await probeConnectionCandidates(higher, token, { fast });
+  if (!isCurrent()) {
+    discardProbeResult(better);
+    return 'stale';
+  }
   logConnect('reprobe:better', { status: better.status, probed: higher.length });
   if (better.status === 'ok') {
-    await upsertMobileConnection({ id: active.id, label: active.label, candidates: active.candidates });
-    switchToTransport(better.transport, token ?? null, { runtimeKey: secureTokenKeyOf(active) });
-    return 'switched';
+    return await commitTransport(better.transport) ? 'switched' : 'stale';
   }
   // The shared token was explicitly rejected — no transport will accept it.
   if (better.status === 'needs-login') return 'needs-login';
@@ -1238,13 +1284,14 @@ export const reprobeActiveConnection = async (options?: { fast?: boolean }): Pro
   // 2. No better transport — is the current one still alive on its live channel?
   if (currentIndex >= 0) {
     const stillValid = await validateActiveRuntimeSession({ url: getRuntimeApiBaseUrl(), clientToken: token }, { fast });
+    if (!isCurrent()) return 'stale';
     logConnect('reprobe:current', { stillValid });
     if (stillValid) {
       // Still on the same transport (typically: woke up on the relay, old LAN
       // candidate dead). Ask the server for its current LAN addresses in the
       // background — if it moved, the refreshed candidates trigger one more
       // re-probe and the hot-switch back to direct.
-      scheduleCandidateRefresh();
+      scheduleCandidateRefresh({ connectionId: active.id, runtimeRevision: startedRuntimeRevision });
       return 'unchanged';
     }
   }
@@ -1252,11 +1299,13 @@ export const reprobeActiveConnection = async (options?: { fast?: boolean }): Pro
   // 3. Current transport is dead — fall through to lower-priority candidates.
   const lower = currentIndex >= 0 ? active.candidates.slice(currentIndex + 1) : [];
   const fallback = await probeConnectionCandidates(lower, token, { fast });
+  if (!isCurrent()) {
+    discardProbeResult(fallback);
+    return 'stale';
+  }
   logConnect('reprobe:fallback', { status: fallback.status, probed: lower.length });
   if (fallback.status === 'ok') {
-    await upsertMobileConnection({ id: active.id, label: active.label, candidates: active.candidates });
-    switchToTransport(fallback.transport, token ?? null, { runtimeKey: secureTokenKeyOf(active) });
-    return 'switched';
+    return await commitTransport(fallback.transport) ? 'switched' : 'stale';
   }
   if (fallback.status === 'needs-login') return 'needs-login';
   return 'unreachable';
@@ -1273,7 +1322,22 @@ const CANDIDATE_REFRESH_DELAY_MS = 5_000;
 
 type CandidateRefreshResult = 'updated' | 'unchanged' | 'skipped';
 
-let candidateRefreshInFlight = false;
+type CandidateRefreshAuthority = { connectionId: string; runtimeRevision: number };
+
+// A stale request for one connection must not block refresh for the new runtime.
+const candidateRefreshInFlight = new Set<string>();
+
+const candidateRefreshKey = (authority: CandidateRefreshAuthority): string =>
+  JSON.stringify([authority.runtimeRevision, authority.connectionId]);
+
+const readCurrentCandidateRefreshConnection = (authority: CandidateRefreshAuthority): MobileSavedConnection | null => {
+  if (getRuntimeEndpointRevision() !== authority.runtimeRevision) return null;
+  const active = findActiveConnection();
+  return active?.id === authority.connectionId ? active : null;
+};
+
+const isCandidateRefreshCurrent = (authority: CandidateRefreshAuthority): boolean =>
+  readCurrentCandidateRefreshConnection(authority) !== null;
 
 // Fetch /api/client-auth/connection/candidates through the ACTIVE runtime
 // transport (direct or relay — runtimeFetch routes it) and merge the reported
@@ -1287,9 +1351,12 @@ let candidateRefreshInFlight = false;
 // Only runs for relay-paired connections: their token/runtime key derives from
 // the stable relay identity, so rewriting direct URLs cannot orphan the stored
 // token. The response must echo the connection's serverId or it is ignored.
-const refreshActiveConnectionCandidates = async (): Promise<CandidateRefreshResult> => {
-  if (candidateRefreshInFlight) return 'skipped';
-  const active = findActiveConnection();
+const refreshActiveConnectionCandidates = async (
+  authority: CandidateRefreshAuthority,
+): Promise<CandidateRefreshResult> => {
+  const refreshKey = candidateRefreshKey(authority);
+  if (candidateRefreshInFlight.has(refreshKey)) return 'skipped';
+  const active = readCurrentCandidateRefreshConnection(authority);
   if (!active) {
     logConnect('candidates:refresh-skip', { reason: 'no-active-connection' });
     return 'skipped';
@@ -1299,17 +1366,25 @@ const refreshActiveConnectionCandidates = async (): Promise<CandidateRefreshResu
     logConnect('candidates:refresh-skip', { reason: 'no-relay-candidate' });
     return 'skipped';
   }
-  candidateRefreshInFlight = true;
+  candidateRefreshInFlight.add(refreshKey);
   try {
     const response = await raceWithTimeout(
       RELAY_CONNECT_TIMEOUT_MS,
       runtimeFetch('/api/client-auth/connection/candidates').then((r): Response | null => r).catch(() => null),
     );
+    if (!isCandidateRefreshCurrent(authority)) {
+      logConnect('candidates:refresh-skip', { reason: 'stale-runtime' });
+      return 'skipped';
+    }
     if (!response?.ok) {
       logConnect('candidates:refresh-skip', { reason: 'fetch-failed', status: response?.status ?? null });
       return 'skipped';
     }
     const payload = await response.json().catch(() => null) as { serverId?: unknown; candidates?: unknown } | null;
+    if (!isCandidateRefreshCurrent(authority)) {
+      logConnect('candidates:refresh-skip', { reason: 'stale-runtime' });
+      return 'skipped';
+    }
     // Identity gate: the refresh must come from the server this device paired
     // with. Old servers (no serverId) are skipped rather than trusted blindly.
     if (!payload || payload.serverId !== relay.serverId) {
@@ -1336,19 +1411,32 @@ const refreshActiveConnectionCandidates = async (): Promise<CandidateRefreshResu
       logConnect('candidates:refresh-skip', { reason: 'no-lan-reported' });
       return 'skipped';
     }
-    const preservedHttps = directCandidates(active).filter((candidate) => candidate.url.startsWith('https://'));
+    // Re-read the record after the network wait. A user may have renamed it or
+    // changed its saved metadata while this response was in flight.
+    const current = readCurrentCandidateRefreshConnection(authority);
+    if (!current) {
+      logConnect('candidates:refresh-skip', { reason: 'stale-runtime' });
+      return 'skipped';
+    }
+    const currentRelay = relayCandidateOf(current);
+    if (!currentRelay || currentRelay.serverId !== relay.serverId) {
+      logConnect('candidates:refresh-skip', { reason: 'connection-identity-changed' });
+      return 'skipped';
+    }
+    const preservedHttps = directCandidates(current).filter((candidate) => candidate.url.startsWith('https://'));
     const next: MobileTransportCandidate[] = [
       ...lanUrls.map((url): MobileTransportCandidate => ({ kind: 'direct', url })),
       ...preservedHttps,
-      { kind: 'relay', relay },
+      { kind: 'relay', relay: currentRelay },
     ];
-    const unchanged = JSON.stringify(active.candidates.map(serializeCandidate)) === JSON.stringify(next.map(serializeCandidate));
+    const unchanged = JSON.stringify(current.candidates.map(serializeCandidate)) === JSON.stringify(next.map(serializeCandidate));
     if (unchanged) return 'unchanged';
     logConnect('candidates:refreshed', { lanCount: lanUrls.length });
-    await upsertMobileConnection({ id: active.id, label: active.label, candidates: next });
+    if (!isCandidateRefreshCurrent(authority)) return 'skipped';
+    await upsertMobileConnection({ id: current.id, label: current.label, candidates: next });
     return 'updated';
   } finally {
-    candidateRefreshInFlight = false;
+    candidateRefreshInFlight.delete(refreshKey);
   }
 };
 
@@ -1358,14 +1446,15 @@ const refreshActiveConnectionCandidates = async (): Promise<CandidateRefreshResu
 // (reprobeActiveConnection re-reads storage and applies its usual identity-gated
 // probe + stable-runtime-key switch). Converges: a re-entered refresh reports
 // 'unchanged'/'skipped', which never triggers another re-probe.
-const scheduleCandidateRefresh = (): void => {
+const scheduleCandidateRefresh = (authority: CandidateRefreshAuthority): void => {
   if (typeof window === 'undefined') return;
   window.setTimeout(() => {
+    if (!isCandidateRefreshCurrent(authority)) return;
     void (async () => {
-      const result = await refreshActiveConnectionCandidates().catch((): CandidateRefreshResult => 'skipped');
+      const result = await refreshActiveConnectionCandidates(authority).catch((): CandidateRefreshResult => 'skipped');
       logConnect('candidates:refresh-result', { result });
-      if (result === 'updated' && isRelayModeActive()) {
-        await reprobeActiveConnection().catch(() => null);
+      if (result === 'updated' && isRelayModeActive() && isCandidateRefreshCurrent(authority)) {
+        await reprobeActiveConnection({ isCurrent: () => isCandidateRefreshCurrent(authority) }).catch(() => null);
       }
     })();
   }, CANDIDATE_REFRESH_DELAY_MS);

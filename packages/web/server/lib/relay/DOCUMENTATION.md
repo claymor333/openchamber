@@ -149,6 +149,13 @@ pinned relay identity, and verify `/health`'s `serverId` on a learned address
 **before** sending their bearer token to it — a re-assigned LAN address may now
 belong to a different machine.
 
+The delayed mobile refresh belongs to the connection and runtime revision that
+scheduled it. Before saving, it re-reads that connection and merges the reported
+LAN addresses into its latest record, preserving edits such as a renamed label.
+When both records have relay identities, those identities outrank overlapping
+LAN URLs, so a DHCP reassignment cannot evict a different saved pairing. A
+response is discarded if the user switches instances before save or re-probe.
+
 ## Two implementations, kept in sync
 
 The E2EE and framing logic exists twice: TypeScript in `packages/ui/src/lib/relay/` (shared by the client and the normative reference) and a JavaScript mirror in this module (the host, which is plain JS ESM). They **must stay byte-compatible** — a client encrypted by one must decrypt on the other. A cross-compatibility test (`cross-compat.test.js`) imports the TS modules directly and exercises a full TS-client ↔ JS-host exchange. Any change to the wire format, frame codec, handshake, or batching must update both sides and keep that test green.
@@ -161,6 +168,17 @@ Pong, clears the probe deadline. Terminal relay close codes retain their error
 for the lifetime of that client: subsequent HTTP requests and WS opens fail
 immediately rather than waiting for a reconnect that will never be scheduled.
 Transient failures still use the existing reconnect/backoff path.
+
+Native foreground transitions force a short Ping/Pong check even when recent
+inbound activity is below the normal stale threshold. That short deadline is
+independent of the longer idle-keepalive deadline; concurrent requests share it,
+and canceling its last waiter clears it. A missing Pong resets the wire and uses
+the same reconnect/backoff path. If the wire already closed, foreground starts
+its scheduled reconnect immediately. A healthy wire stays connected.
+
+The fetch-based control-event reader cancels its response body before reconnecting
+after a listener failure. It also stops dispatching buffered events as soon as
+the runtime endpoint changes, so an old stream cannot publish into a new runtime.
 
 Relay mode plugs into the existing client transport layer rather than a parallel path: `runtime-switch` activates the tunnel singleton, `runtime-fetch` routes runtime requests through it, `runtime-url`/`runtime-socket` yield tunnel-backed URLs and sockets, and `runtime-auth` mints the URL-scoped token through the tunnel. Direct-URL connections and the Electron realtime-proxy path are unaffected.
 
