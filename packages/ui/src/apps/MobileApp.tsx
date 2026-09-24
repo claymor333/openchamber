@@ -1,3 +1,4 @@
+import { OpenCodeCompatibilityGate } from '@/components/update/OpenCodeCompatibilityGate';
 import React from 'react';
 
 import { AboutSettings } from '@/components/sections/openchamber/AboutSettings';
@@ -63,6 +64,7 @@ import { MobileHeader } from './MobileHeader';
 import { MobileInstancesSurface } from './MobileInstancesSurface';
 import { MobileSessionsSheet } from './MobileSessionsSheet';
 import { MobileFullscreenSurface } from './MobileFullscreenSurface';
+import { UsageStatsView } from '@/components/views/usage/UsageStatsView';
 import { MobileWorkspaceDrawer, type MobileWorkspaceTab } from './MobileWorkspaceDrawer';
 import { DedicatedMobileAppProvider, type MobileAppActions } from './mobileAppContext';
 import { autoConnectLastInstance, getAutoConnectTargetLabel, logMobileConnectEvent, reprobeActiveConnection, type AutoConnectOutcome } from './mobileConnections';
@@ -99,6 +101,7 @@ const MOBILE_SETTINGS_PAGES = [
   'skills.installed',
   'skills.catalog',
   'providers',
+  'web-search',
   'usage',
   'voice',
   'integrations',
@@ -115,7 +118,7 @@ const NATIVE_RESUME_SYNC_EVENT_THROTTLE_MS = 1_000;
     footer. Exactly one can be open at a time — opening another replaces it,
     closing returns to the chat. The sessions drawer and the workspace drawer
     (Changes / Files / Terminal / Notes / MCP) are separate layers. */
-type MobileSurface = 'instances' | 'settings' | 'update';
+type MobileSurface = 'instances' | 'settings' | 'update' | 'usage';
 
 const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onActiveConnectionDeleted }) => {
   const { t } = useI18n();
@@ -192,6 +195,16 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
     setWorkspaceTab('files');
     setWorkspaceOpen(true);
   }, []);
+
+  // The agent asked for a file to be shown: open the files drawer and stage
+  // the path the way a chat file link does, so the surface routes to it.
+  React.useEffect(() => subscribeOpenchamberEvents((event) => {
+    if (event.type !== 'file-open-request') return;
+    const directory = event.directory ?? useDirectoryStore.getState().currentDirectory;
+    if (!directory) return;
+    useUIStore.getState().openContextFile(directory, event.path);
+    openFilesSurface();
+  }), [openFilesSurface]);
 
   const openChangesSurface = React.useCallback((diff: { path: string; staged: boolean } | null = null) => {
     setPendingChangesDiff(diff);
@@ -361,6 +374,7 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
       instanceLabel: showCapacitorOnlyFeatures ? getAutoConnectTargetLabel() : null,
       onOpenInstances: showCapacitorOnlyFeatures ? () => openSurface('instances') : undefined,
       onOpenSettings: () => openSettingsSurface('nav'),
+      onOpenUsage: () => openSurface('usage'),
       onOpenUpdate: showUpdateItem ? () => openSurface('update') : undefined,
     }),
     [openSettingsSurface, openSurface, showCapacitorOnlyFeatures, showUpdateItem],
@@ -388,8 +402,14 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
       oauthClientSecret: '',
       oauthScope: '',
       oauthRedirectUri: '',
-      timeout: '',
-      enabled: true,
+      oauthCallbackPort: '',
+      oauthAuthServerMetadataUrl: '',
+      protocol: 'legacy',
+      timeoutStartup: '',
+      timeoutCatalog: '',
+      timeoutExecution: '',
+      codemode: true,
+      disabled: false,
     };
 
     setMcpDraft(draft);
@@ -611,6 +631,21 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
           </MobileFullscreenSurface>
         ) : null}
 
+        {activeSurface === 'usage' ? (
+          <MobileFullscreenSurface
+            open
+            variant={surfaceVariant}
+            dialogAlign="app"
+            onClose={closeSurface}
+            ariaLabel={t('usageStats.title')}
+            title={t('usageStats.title')}
+          >
+            <ErrorBoundary>
+              <UsageStatsView />
+            </ErrorBoundary>
+          </MobileFullscreenSurface>
+        ) : null}
+
         {activeSurface === 'update' ? (
           <MobileFullscreenSurface
             open
@@ -632,7 +667,7 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
   );
 };
 
-export function MobileApp({ apis }: MobileAppProps) {
+function MobileAppContent({ apis }: MobileAppProps) {
   const { t } = useI18n();
   const initializeApp = useConfigStore((state) => state.initializeApp);
   const isInitialized = useConfigStore((state) => state.isInitialized);
@@ -1340,4 +1375,15 @@ export function MobileApp({ apis }: MobileAppProps) {
       </SyncProvider>
     </ErrorBoundary>
   );
+}
+
+export function MobileApp(props: MobileAppProps) {
+  const endpoint = React.useSyncExternalStore(
+    (notify) => subscribeRuntimeEndpointChanged(() => notify()),
+    getRuntimeApiBaseUrl,
+    getRuntimeApiBaseUrl,
+  );
+  // Native connection selection must mount before there is a server to probe.
+  if (isCapacitorMobileApp() && !endpoint) return <MobileAppContent {...props} />;
+  return <OpenCodeCompatibilityGate><MobileAppContent {...props} /></OpenCodeCompatibilityGate>;
 }

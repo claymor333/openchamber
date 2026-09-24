@@ -56,7 +56,6 @@ import { ModelControls } from './ModelControls';
 import { focusChatInput } from './composer/editor/dom';
 import { parseAgentMentions } from '@/lib/messages/agentMentions';
 import { CONTEXT_METADATA_KEY, draftFromContextPayload } from '@/lib/messages/contextParts';
-import { ComposerStatusBar } from './ComposerStatusBar';
 import { shouldSubmitEnter } from './composer/keyboardPolicy';
 import { getDropdownNavigationKey } from '@/components/ui/dropdown-navigation';
 import { useChatColumnSession } from './chatColumnSession';
@@ -87,7 +86,7 @@ import { useGuestsStore } from '@/lib/guests/store';
 import { isGuestActive } from '@/lib/guests/capabilities';
 import { routeGuestSlashCommand } from './composer/submit/guestCommands';
 import { pluginModeFromId } from '@/lib/surfaces/modes';
-import { opencodeClient } from '@/lib/opencode/client';
+import { opencodeClient, type SkillMentions } from '@/lib/opencode/client';
 import { useGitStore } from '@/stores/useGitStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { selectSkillsForDirectory, useSkillsStore } from '@/stores/useSkillsStore';
@@ -133,6 +132,7 @@ import {
     type ComposerChange,
     type ComposerEditorHandle,
 } from './composer/editor/ComposerEditor';
+import { useComposerHeightLimit } from './composer/editor/useComposerHeightLimit';
 import { createComposerEditorViewStore } from './composer/editor/viewStore';
 import { composerAutoCorrect } from './composer/editor/autocorrect';
 import {
@@ -183,6 +183,8 @@ import { ComposerContextChips } from './composer/ui/ComposerContextChips';
 import { LinkedReferenceRow } from './composer/ui/LinkedReferenceRow';
 import { RevertedMessageDock } from './composer/ui/RevertedMessageDock';
 import { SessionSuggestionChip } from '@/components/chat/SessionSuggestionChip';
+import { FormDock } from '@/components/chat/FormDock';
+import { PermissionDock } from '@/components/chat/PermissionDock';
 import { SessionGoalRow } from '@/components/chat/SessionGoalRow';
 import {
     createInputHistoryIdentity,
@@ -196,7 +198,7 @@ import {
     mapInputHistoryEntriesToValues,
     mergeSessionInputHistory,
 } from './inputHistory';
-import { useUserMessageHistory } from '@/sync/sync-context';
+import { useScopedBlockingForms, useScopedBlockingPermissions, useUserMessageHistory } from '@/sync/sync-context';
 
 // Lazy like in ChatMessage: a static import would pull the @pierre/diffs and
 // Shiki stacks into the eager startup graph for a dialog opened on demand.
@@ -242,7 +244,13 @@ const getFileMentionInputSourceForInsertedText = (insertedText: string): FileMen
 const collectInlineSkillMentions = (text: string, skillNames: Set<string>): string[] =>
     collectKnownTokenNames(text, '/', skillNames, 'exact');
 
-const buildSkillMentionInstruction = (skillNames: string[]): string | null => {
+/**
+ * Names skills in an instruction for the model. The fallback for skills that
+ * cannot be attached to the prompt: queued messages (delivered later by the
+ * server or the VS Code auto-send), the command route, and names OpenCode
+ * does not list.
+ */
+const buildSkillMentionInstruction = (skillNames: readonly string[]): string | null => {
     if (skillNames.length === 0) return null;
     const formatted = skillNames.map((name) => `/${name}`).join(', ');
     return `The user explicitly mentioned these skills in their message: ${formatted}. Use the corresponding skill tool when it is relevant to accomplishing the user's request.`;
@@ -335,7 +343,6 @@ const MemoComposerDictation = React.memo(ComposerDictation);
 const MemoMobileAgentButton = React.memo(MobileAgentButton);
 
 const MemoMobileModelButton = React.memo(MobileModelButton);
-const MemoComposerStatusBar = React.memo(ComposerStatusBar);
 
 interface ChatInputProps {
     onOpenSettings?: () => void;
@@ -394,7 +401,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const [mobileControlsPanel, setMobileControlsPanel] = React.useState<MobileControlsPanel>(null);
     const [mobileAttachMenuOpen, setMobileAttachMenuOpen] = React.useState(false);
     const [mobileDraftPicker, setMobileDraftPicker] = React.useState<'project' | 'branch' | null>(null);
-    const [mobileDraftPickerQuery, setMobileDraftPickerQuery] = React.useState('');
     // Message history navigation state (up/down arrow to recall previous messages)
     const composerRef = React.useRef<ComposerEditorHandle>(null);
     // The mobile composer swaps between the collapsed pill and the full
@@ -458,6 +464,11 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     // instead of the main session. Collapsed keeps the fork alive (chip stays
     // visible) while the composer talks to the main session again.
     const btwPanel = useBtwPanelState(currentSessionId, currentSessionDirectoryForSync ?? currentDirectory ?? undefined);
+    const pendingForms = useScopedBlockingForms(currentSessionId, currentSessionDirectoryForSync ?? currentDirectory ?? undefined);
+    const pendingPermissions = useScopedBlockingPermissions(currentSessionId, currentSessionDirectoryForSync ?? currentDirectory ?? undefined);
+    const hasPendingPermission = pendingPermissions.length > 0;
+    // A pending permission or form owns the dock; the composer is not for sending then.
+    const hasPendingForm = pendingForms.length > 0 || hasPendingPermission;
     const btwSessionId = btwPanel.btwSessionId;
     const btwDirectory = btwPanel.btwDirectory;
     const btwComposerSessionId = btwPanel.pending && currentSessionId
@@ -1606,15 +1617,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             return;
         }
 
-        // Sending is authoritative: if a question prompt is open, dismiss it
-        // so the prompt cannot linger or strand the session. The dismiss clears
-        // the card instantly (optimistic) and formally rejects the question.
-        // Rejecting unblocks the agent's tool but does NOT end its turn, so a
-        // direct send would race with the still-active run and be silently
-        // discarded by the OpenCode runner. Instead we queue the message; the
-        // queued-message auto-send hook delivers it as the next turn once the
-        // rejected turn winds down and the session returns to idle. This avoids
-        // aborting the turn (which would surface an "aborted" notice).
+        // Auto-review owns the active workflow; follow-ups wait in its queue.
         if (currentSessionId && !queuedOnly && autoReviewRunning && !isBtwActive && !commandPlan) {
             void handleQueueMessage();
             return;
@@ -1625,19 +1628,18 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         // queues if the fork's own turn is busy).
         if (currentSessionId && !queuedOnly && !isBtwActive && !commandPlan) {
             // Sending is authoritative for blocking prompts: deny pending
-            // permissions and dismiss open questions for the session subtree,
-            // then queue the message once if either was open. The deny/clear
-            // vanishes the card instantly (optimistic); rejecting unblocks the
-            // agent's tool but does NOT end its turn, so a direct send would
-            // race with the still-active run and be silently discarded by the
-            // OpenCode runner. Instead we queue; the queued-message auto-send
-            // hook delivers it as the next turn once the rejected turn winds
-            // down and the session returns to idle (parity with #1740).
-            const [deniedPermissions, dismissedQuestions] = await Promise.all([
+            // permissions and dismiss open forms for the session subtree. The
+            // deny/clear vanishes the card instantly (optimistic); rejecting
+            // unblocks the agent's tool but does NOT end its turn.
+            const [deniedPermissions, dismissedForms] = await Promise.all([
                 sessionActions.dismissOpenPermissionsForSession(currentSessionId),
-                sessionActions.dismissOpenQuestionsForSession(currentSessionId),
+                sessionActions.dismissOpenFormsForSession(currentSessionId),
             ]);
-            if (deniedPermissions || dismissedQuestions) {
+            // An explicit Steer goes straight to the session inbox, which
+            // takes it while the turn is still active. Any other send would
+            // race with that run, so it is queued; the queued-message auto-send
+            // hook delivers it once the session returns to idle (#1740, #3369).
+            if ((deniedPermissions || dismissedForms) && delivery !== 'steer') {
                 void handleQueueMessage();
                 return;
             }
@@ -1668,7 +1670,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                 } else if (actionName === 'compact') {
                     await sessionActions.waitForConnectionOrThrow();
                     const compactDirectory = useSessionUIStore.getState().getDirectoryForSession(currentSessionId) || currentDirectory || undefined;
-                    await opencodeClient.summarizeSession(currentSessionId, providerIdToSend, modelIdToSend, compactDirectory);
+                    await opencodeClient.compactSession(currentSessionId, compactDirectory);
                 }
             } catch (error) {
                 restoreComposerText();
@@ -1685,6 +1687,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             draftSnapshot?: NonNullable<typeof capturedDraftSnapshot>;
             historySubmissions?: InputHistorySubmission[];
             delivery?: 'steer';
+            skills?: SkillMentions;
         } | undefined;
         if (isBtwActive && btwSessionId && btwDirectory) {
             sendMessageOptions = {
@@ -1818,13 +1821,21 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             },
             sanitizeAttachments: sanitizeAttachmentsForSend,
             collectSkillNames: (text) => collectInlineSkillMentions(text, availableSkillNames),
-            buildSkillInstruction: buildSkillMentionInstruction,
         });
 
         let primaryText = outgoing.primaryText;
-        const { primaryAttachments, additionalParts, agentMentionName } = outgoing;
+        const { primaryAttachments, additionalParts, agentMentionName, skillNames } = outgoing;
 
         if (outgoing.isEmpty) return;
+
+        // Skills named inline are attached to the prompt so OpenCode loads
+        // them with the message, rather than hoping the model follows a hint.
+        if (skillNames.length > 0) {
+            sendMessageOptions = {
+                ...sendMessageOptions,
+                skills: { names: skillNames, instructionFor: buildSkillMentionInstruction },
+            };
+        }
 
         // Clear input (the queue was taken above)
         if (!queuedOnly) {
@@ -1952,6 +1963,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                     variant: variantToSend,
                     attachments: primaryAttachments,
                     additionalParts,
+                    skills: sendMessageOptions?.skills,
                     permissionAutoAccept: pendingBtwAutoAccept,
                 });
                 if (!ownsPendingBtwSend()) return;
@@ -2378,14 +2390,23 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         }
     }, [agents, currentAgentName, currentSessionId, setAgent, saveSessionAgentSelection]);
 
-    // Height the dictation transcript needs (null when idle). Its overlay sits
+    // Height the failed-dictation salvage text needs. Its overlay sits
     // absolutely over the composer, so the composer must be able to grow for
-    // it. The editor sizes itself to its own content; this is the one external
-    // constraint, applied as a floor on the editor's container.
+    // it. Apply the editor's line and screen bounds before using that height as
+    // a floor, otherwise long salvage text can push the action row off-screen.
+    const dictationHeightHostRef = React.useRef<HTMLDivElement | null>(null);
     const [dictationContentHeight, setDictationContentHeight] = React.useState<number | null>(null);
     const handleDictationContentHeightChange = React.useCallback((height: number | null) => {
         setDictationContentHeight((prev) => (prev === height ? prev : height));
     }, []);
+    const dictationHeightLimit = useComposerHeightLimit({
+        active: dictationContentHeight !== null,
+        disabled: isComposerExpanded,
+        hostRef: dictationHeightHostRef,
+        maxLines: isMobile ? MAX_MOBILE_COMPOSER_LINES : MAX_VISIBLE_COMPOSER_LINES,
+        boundSelector: isMobile ? '[data-composer-bound]' : undefined,
+        boundGapPx: isMobile ? MOBILE_COMPOSER_BOUND_GAP_PX : 0,
+    });
 
     const updateAutocompleteState = React.useCallback((
         value: string,
@@ -3298,10 +3319,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         }
     }, [consumePendingGuestIssue, handleGuestAttach, pendingGuestIssue]);
     const showLinearPicker = Boolean(runtimeLinear) && !isVSCode;
-    // The work-status panel carries the agent's todos, but only on the
-    // desktop/web layout — VS Code and mobile have no panel, so the todos keep
-    // their place above the composer there.
-    const composerStatusExtrasEnabled = isVSCode || isMobile;
     const showDraftTargetSelectors = newSessionDraftOpen && !isVSCode;
 
     // Which project and directory a new session will target.
@@ -3461,7 +3478,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     // The suggested follow-up is the composer's own top row on every surface
     // (inside the mobile pill and the box alike); on mobile the model and
     // agent are its bottom row too, so the surface stays one shape.
-    const suggestionHidden = hasContent || newSessionDraftOpen || isBtwActive || isBtwPanelVisible || hasQueuedMessages;
+    const suggestionHidden = hasContent || newSessionDraftOpen || isBtwActive || isBtwPanelVisible || hasQueuedMessages || hasPendingForm;
     const suggestionRow = !isBtwActive ? (
         <SessionSuggestionChip
             sessionId={currentSessionId}
@@ -3498,11 +3515,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         composerRef.current?.blur();
     }, []);
 
-
-    // Reset the picker search whenever a draft picker sheet opens/closes.
-    React.useEffect(() => {
-        setMobileDraftPickerQuery('');
-    }, [mobileDraftPicker]);
 
     // Mobile browsers pan the visual viewport instead of resizing the layout,
     // so the composer form is pinned to it explicitly.
@@ -3637,7 +3649,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                     sessionId={currentSessionId}
                     directory={currentSessionDirectoryForSync ?? currentDirectory}
                 />
-                <MemoComposerStatusBar showTodos={composerStatusExtrasEnabled} />
                 {!isMobile && (showDraftTargetSelectors || draftPresentationExiting) && selectedDraftProject ? (
                     <div className={draftPresentationClassName}>
                         <DraftTargetSelectors
@@ -3811,6 +3822,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                             {!isBtwActive ? <ActiveEditorFileSuggestion /> : null}
                         </div>
                         <div
+                            ref={dictationHeightHostRef}
                             className={cn("relative overflow-hidden", isComposerExpanded && 'flex flex-1 min-h-0 flex-col')}
                             // The mobile pill morph moves this block from the
                             // pill's text line and unfurls it.
@@ -3820,8 +3832,13 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                             onDropCapture={handleDropCapture}
                             onDrop={handleDrop}
                             onDragEnd={handleDragEnd}
-                            style={dictationContentHeight !== null
-                                ? { minHeight: `${dictationContentHeight}px` }
+                            style={dictationContentHeight !== null && !isComposerExpanded
+                                ? {
+                                    minHeight: `${Math.min(
+                                        dictationContentHeight,
+                                        dictationHeightLimit ?? dictationContentHeight,
+                                    )}px`,
+                                }
                                 : undefined}
                         >
                             <ComposerEditor
@@ -3966,10 +3983,22 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                     className={cn('chat-input-column mt-4', draftPresentationClassName)}
                 />
             ) : null}
+            {/* The agent's requests outrank the queue: BTW, then a permission,
+                then the form, then the queue, then the suggestion. */}
+            <PermissionDock
+                sessionId={currentSessionId}
+                directory={currentSessionDirectoryForSync ?? currentDirectory ?? undefined}
+                hidden={newSessionDraftOpen || isBtwActive || isBtwPanelVisible}
+            />
+            <FormDock
+                sessionId={currentSessionId}
+                directory={currentSessionDirectoryForSync ?? currentDirectory ?? undefined}
+                hidden={newSessionDraftOpen || isBtwActive || isBtwPanelVisible || hasPendingPermission}
+            />
             <QueuedMessageChips
                 key={parentMessageQueueKey}
                 target={parentMessageQueueTarget}
-                hidden={newSessionDraftOpen || isBtwActive || isBtwPanelVisible || mobileCommentActive}
+                hidden={newSessionDraftOpen || isBtwActive || isBtwPanelVisible || hasPendingForm || mobileCommentActive}
                 onEditMessage={handleQueuedMessageEdit}
                 onSendMessage={handleQueuedMessageSend}
             />
@@ -4142,8 +4171,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                 theme={currentTheme}
                 openPicker={mobileDraftPicker}
                 onOpenPickerChange={setMobileDraftPicker}
-                query={mobileDraftPickerQuery}
-                onQueryChange={setMobileDraftPickerQuery}
             />
         ) : null}
         </>

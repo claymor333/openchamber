@@ -851,6 +851,7 @@ interface UIStore {
   isSessionCreateDialogOpen: boolean;
   isScheduledTasksDialogOpen: boolean;
   isArchivePageOpen: boolean;
+  isUsageStatsPageOpen: boolean;
   openGuestPageId: string | null;
   worktreesPageProjectId: string | null;
   isSettingsDialogOpen: boolean;
@@ -883,8 +884,6 @@ interface UIStore {
   chatRenderMode: ChatRenderMode;
   activityRenderMode: ActivityRenderMode;
   showDeletionDialog: boolean;
-  /** When true, confirm before applying deferred OpenCode restart from Settings. */
-  showOpenCodeRestartConfirm: boolean;
   autoDeleteEnabled: boolean;
   /** Global file-editor autosave. Default true for backward compatibility. */
   autoSaveEnabled: boolean;
@@ -1078,9 +1077,10 @@ interface UIStore {
   setSessionCreateDialogOpen: (open: boolean) => void;
   setScheduledTasksDialogOpen: (open: boolean) => void;
   setArchivePageOpen: (open: boolean) => void;
+  setUsageStatsPageOpen: (open: boolean) => void;
   setOpenGuestPage: (id: string | null) => void;
   setWorktreesPageProjectId: (projectId: string | null) => void;
-  /** Close every full-page surface (Scheduled, Archive, Worktrees, Multi-run). */
+  /** Close every full-page surface (Scheduled, Archive, Usage, Worktrees, Multi-run). */
   closeMainSurfaces: () => void;
   setSettingsDialogOpen: (open: boolean) => void;
   setNewWorktreeDialogOpen: (open: boolean) => void;
@@ -1103,7 +1103,6 @@ interface UIStore {
   setChatRenderMode: (value: ChatRenderMode) => void;
   setActivityRenderMode: (value: ActivityRenderMode) => void;
   setShowDeletionDialog: (value: boolean) => void;
-  setShowOpenCodeRestartConfirm: (value: boolean) => void;
   setAutoDeleteEnabled: (value: boolean) => void;
   setAutoSaveEnabled: (value: boolean) => void;
   setAutoDeleteAfterDays: (days: number) => void;
@@ -1269,6 +1268,7 @@ export const useUIStore = create<UIStore>()(
         isSessionCreateDialogOpen: false,
         isScheduledTasksDialogOpen: false,
         isArchivePageOpen: false,
+        isUsageStatsPageOpen: false,
         openGuestPageId: null,
         worktreesPageProjectId: null,
         isSettingsDialogOpen: false,
@@ -1293,7 +1293,6 @@ export const useUIStore = create<UIStore>()(
         chatRenderMode: 'live',
         activityRenderMode: 'summary',
         showDeletionDialog: true,
-        showOpenCodeRestartConfirm: true,
         autoDeleteEnabled: false,
         autoSaveEnabled: true,
         autoDeleteAfterDays: 30,
@@ -2010,35 +2009,42 @@ export const useUIStore = create<UIStore>()(
 
         setScheduledTasksDialogOpen: (open) => {
           set(open
-            ? { isScheduledTasksDialogOpen: true, isArchivePageOpen: false, worktreesPageProjectId: null, isMultiRunLauncherOpen: false, openGuestPageId: null }
+            ? { isScheduledTasksDialogOpen: true, isArchivePageOpen: false, isUsageStatsPageOpen: false, worktreesPageProjectId: null, isMultiRunLauncherOpen: false, openGuestPageId: null }
             : { isScheduledTasksDialogOpen: false });
         },
 
         setArchivePageOpen: (open) => {
           set(open
-            ? { isArchivePageOpen: true, isScheduledTasksDialogOpen: false, worktreesPageProjectId: null, isMultiRunLauncherOpen: false, openGuestPageId: null }
+            ? { isArchivePageOpen: true, isUsageStatsPageOpen: false, isScheduledTasksDialogOpen: false, worktreesPageProjectId: null, isMultiRunLauncherOpen: false, openGuestPageId: null }
             : { isArchivePageOpen: false });
+        },
+
+        setUsageStatsPageOpen: (open) => {
+          set(open
+            ? { isUsageStatsPageOpen: true, isArchivePageOpen: false, isScheduledTasksDialogOpen: false, worktreesPageProjectId: null, isMultiRunLauncherOpen: false, openGuestPageId: null }
+            : { isUsageStatsPageOpen: false });
         },
 
         setWorktreesPageProjectId: (projectId) => {
           set(projectId
-            ? { worktreesPageProjectId: projectId, isScheduledTasksDialogOpen: false, isArchivePageOpen: false, isMultiRunLauncherOpen: false, openGuestPageId: null }
+            ? { worktreesPageProjectId: projectId, isScheduledTasksDialogOpen: false, isArchivePageOpen: false, isUsageStatsPageOpen: false, isMultiRunLauncherOpen: false, openGuestPageId: null }
             : { worktreesPageProjectId: null });
         },
 
         setOpenGuestPage: (id) => {
-          set(id ? { openGuestPageId: id, isScheduledTasksDialogOpen: false, isArchivePageOpen: false, worktreesPageProjectId: null, isMultiRunLauncherOpen: false }
+          set(id ? { openGuestPageId: id, isScheduledTasksDialogOpen: false, isArchivePageOpen: false, isUsageStatsPageOpen: false, worktreesPageProjectId: null, isMultiRunLauncherOpen: false }
             : { openGuestPageId: null });
         },
 
         closeMainSurfaces: () => {
           const state = get();
-          if (!state.isScheduledTasksDialogOpen && !state.isArchivePageOpen && !state.worktreesPageProjectId && !state.isMultiRunLauncherOpen && !state.openGuestPageId) {
+          if (!state.isScheduledTasksDialogOpen && !state.isArchivePageOpen && !state.isUsageStatsPageOpen && !state.worktreesPageProjectId && !state.isMultiRunLauncherOpen && !state.openGuestPageId) {
             return;
           }
           set({
             isScheduledTasksDialogOpen: false,
             isArchivePageOpen: false,
+            isUsageStatsPageOpen: false,
             worktreesPageProjectId: null,
             isMultiRunLauncherOpen: false,
             multiRunLauncherPrefillPrompt: '',
@@ -2136,10 +2142,6 @@ export const useUIStore = create<UIStore>()(
 
         setShowDeletionDialog: (value) => {
           set({ showDeletionDialog: value });
-        },
-
-        setShowOpenCodeRestartConfirm: (value) => {
-          set({ showOpenCodeRestartConfirm: value });
         },
 
         setAutoDeleteEnabled: (value) => {
@@ -2591,7 +2593,7 @@ export const useUIStore = create<UIStore>()(
           set((state) => ({
             isMultiRunLauncherOpen: open,
             multiRunLauncherPrefillPrompt: open ? state.multiRunLauncherPrefillPrompt : '',
-            ...(open ? { isScheduledTasksDialogOpen: false, isArchivePageOpen: false, worktreesPageProjectId: null, openGuestPageId: null } : {}),
+            ...(open ? { isScheduledTasksDialogOpen: false, isArchivePageOpen: false, isUsageStatsPageOpen: false, worktreesPageProjectId: null, openGuestPageId: null } : {}),
           }));
         },
 
@@ -2603,6 +2605,7 @@ export const useUIStore = create<UIStore>()(
             isSessionSwitcherOpen: false,
             isScheduledTasksDialogOpen: false,
             isArchivePageOpen: false,
+            isUsageStatsPageOpen: false,
             worktreesPageProjectId: null,
           });
         },
@@ -2615,6 +2618,7 @@ export const useUIStore = create<UIStore>()(
             isSessionSwitcherOpen: false,
             isScheduledTasksDialogOpen: false,
             isArchivePageOpen: false,
+            isUsageStatsPageOpen: false,
             worktreesPageProjectId: null,
           });
         },
@@ -3110,7 +3114,6 @@ export const useUIStore = create<UIStore>()(
           chatRenderMode: state.chatRenderMode,
           activityRenderMode: state.activityRenderMode,
           showDeletionDialog: state.showDeletionDialog,
-          showOpenCodeRestartConfirm: state.showOpenCodeRestartConfirm,
           autoDeleteEnabled: state.autoDeleteEnabled,
           autoSaveEnabled: state.autoSaveEnabled,
           autoDeleteAfterDays: state.autoDeleteAfterDays,

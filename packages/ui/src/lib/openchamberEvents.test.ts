@@ -286,4 +286,48 @@ describe('openchamber events', () => {
     ]);
     unsubscribe();
   });
+
+  test('dispatches an agent file-open request and drops one without a path', async () => {
+    const { subscribeOpenchamberEvents } = await import('./openchamberEvents');
+    const events: unknown[] = [];
+    const unsubscribe = subscribeOpenchamberEvents((event) => events.push(event));
+    const source = await waitForStream();
+
+    source.emit(JSON.stringify({
+        type: 'openchamber:file-open-request',
+        properties: { path: '/repo/out/report.csv', directory: '/repo', sessionId: null },
+      }));
+    source.emit(JSON.stringify({
+        type: 'openchamber:file-open-request',
+        properties: { directory: '/repo', sessionId: 'ses_1' },
+      }));
+    await flushStream();
+
+    expect(events).toEqual([
+      { type: 'file-open-request', path: '/repo/out/report.csv', directory: '/repo', sessionId: null },
+    ]);
+    unsubscribe();
+  });
+
+  test('dispatches validated notification events', async () => {
+    const { subscribeOpenchamberEvents } = await import('./openchamberEvents');
+    const events: unknown[] = [];
+    const unsubscribe = subscribeOpenchamberEvents((event) => events.push(event));
+    const source = await waitForStream();
+
+    source.emit(JSON.stringify({
+      type: 'openchamber:notification',
+      properties: { kind: 'agent-complete', sessionId: 'ses_1', title: 'Done' },
+    }));
+    source.emit(JSON.stringify({
+      type: 'openchamber:notification',
+      properties: { kind: 5 },
+    }));
+    await flushStream();
+
+    expect(events).toEqual([
+      { type: 'notification', payload: { kind: 'agent-complete', sessionId: 'ses_1', title: 'Done' } },
+    ]);
+    unsubscribe();
+  });
 });
