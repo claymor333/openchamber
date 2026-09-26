@@ -40,6 +40,21 @@ describe("translateWireEvent", () => {
     })
   })
 
+  test("session.forked carries the fork and parent ids (2.x sends no session.created for a fork)", () => {
+    const forked = translateWireEvent({
+      ...base,
+      type: "session.forked",
+      durable: { ...durable, version: 2 as const },
+      data: {
+        sessionID: "ses_fork",
+        parentID: "ses_1",
+        boundary: { type: "through", messageID: "msg_1" },
+      },
+    })
+    expect(forked).toEqual([{ type: "session.forked", properties: { sessionID: "ses_fork", parentID: "ses_1" } }])
+    expect(syncEventSessionID(forked[0])).toBe("ses_fork")
+  })
+
   test("session lifecycle events patch the session and emit switch messages", () => {
     const renamed = translateWireEvent({ ...base, type: "session.renamed", durable, data: { sessionID: "ses_1", title: "New" } })
     expect(renamed).toEqual([{ type: "session.patched", properties: { sessionID: "ses_1", patch: { title: "New", time: { updated: 1000 } } } }])
@@ -144,6 +159,49 @@ describe("translateWireEvent", () => {
           sessionID: "ses_1",
           messageID: "msg_a",
           patch: { time: { completed: 1000 }, finish: "stop", cost: 0.1, tokens: { input: 1, output: 2, reasoning: 0, cache: { read: 0, write: 0 } }, retry: null },
+        },
+      },
+    ])
+  })
+
+  test("shell completion records a termination signal when one is present", () => {
+    const ended = {
+      ...base,
+      type: "session.shell.ended",
+      durable,
+      data: {
+        sessionID: "ses_1",
+        shell: {
+          id: "shell_1",
+          status: "killed",
+          command: "sleep 10",
+          cwd: "/repo",
+          shell: "/bin/sh",
+          file: "/bin/sh",
+          exit: 137,
+          metadata: {},
+          time: { started: 900, completed: 1000 },
+        },
+        output: { output: "", cursor: 0, size: 0, truncated: false },
+      },
+    } satisfies OpenCodeEvent
+    Object.assign(ended.data.shell, { signal: "SIGTERM" })
+
+    expect(translateWireEvent(ended)).toEqual([
+      {
+        type: "message.patched",
+        properties: {
+          sessionID: "ses_1",
+          messageID: "shell:shell_1",
+          patch: {
+            time: { completed: 1000 },
+            shell: {
+              status: "killed",
+              exit: 137,
+              signal: "SIGTERM",
+              output: { output: "", cursor: 0, size: 0, truncated: false },
+            },
+          },
         },
       },
     ])

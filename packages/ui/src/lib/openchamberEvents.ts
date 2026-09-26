@@ -1,4 +1,6 @@
+import { getRuntimeUrlResolver } from './runtime-url';
 import { runtimeFetch } from './runtime-fetch';
+import { isRelayModeActive } from './relay/runtime-tunnel';
 import { subscribeRuntimeEndpointChanged } from './runtime-switch';
 import { isVSCodeRuntime } from './desktop';
 import { messageQueueUpdatedEventSchema, type MessageQueueUpdatedEvent } from '@/stores/messageQueueStore';
@@ -150,7 +152,8 @@ const worktreeChangedPropertiesSchema = z.object({
   at: z.number().optional(),
 });
 
-let streamAbort: AbortController | null = null;
+let eventSource: EventSource | null = null;
+let relayAbortController: AbortController | null = null;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let heartbeatTimer: ReturnType<typeof setTimeout> | null = null;
 let reconnectAttempt = 0;
@@ -182,10 +185,18 @@ const scheduleReconnect = () => {
 
 const cleanupSource = () => {
   clearHeartbeatTimer();
-  if (streamAbort) {
-    streamAbort.abort();
+  relayAbortController?.abort();
+  relayAbortController = null;
+  if (eventSource) {
+    eventSource.close();
   }
-  streamAbort = null;
+  eventSource = null;
+};
+
+const connectRelay = (canControlBrowser: boolean) => {
+  const controller = new AbortController();
+  relayAbortController = controller;
+  void readRelayStream(controller.signal, canControlBrowser);
 };
 
 const resetHeartbeatTimer = () => {
@@ -402,8 +413,8 @@ const parseSseFrame = (frame: string): { type: string; properties: unknown } | n
   return parseEnvelope(data);
 };
 
-const readStream = async (signal: AbortSignal, canControlBrowser: boolean): Promise<void> => {
-  const isCurrentStream = (): boolean => !signal.aborted && streamAbort?.signal === signal;
+const readRelayStream = async (signal: AbortSignal, canControlBrowser: boolean): Promise<void> => {
+  const isCurrentStream = (): boolean => !signal.aborted && relayAbortController?.signal === signal;
   let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
   let shouldReconnect = false;
   try {
@@ -413,9 +424,13 @@ const readStream = async (signal: AbortSignal, canControlBrowser: boolean): Prom
       signal,
     });
 
-    if (!isCurrentStream()) return;
+    if (!isCurrentStream()) {
+      await response.body?.cancel();
+      return;
+    }
     if (!response.ok || !response.body) {
-      shouldReconnect = true;
+      await response.body?.cancel();
+      shouldReconnect = isCurrentStream();
     } else {
       resetHeartbeatTimer();
       reader = response.body.getReader();
@@ -477,13 +492,16 @@ const readStream = async (signal: AbortSignal, canControlBrowser: boolean): Prom
         // A pending read releases its lock when the abort settles.
       }
     }
-    if (streamAbort?.signal === signal) cleanupSource();
+    if (relayAbortController?.signal === signal) cleanupSource();
   }
   if (shouldReconnect) scheduleReconnect();
 };
 
 const connect = () => {
-  if (typeof window === 'undefined' || listeners.size === 0 || streamAbort) return;
+  const currentWindow = globalThis.window;
+  const EventSourceConstructor = globalThis.EventSource;
+  if (!currentWindow || listeners.size === 0) return;
+  if (relayAbortController || (eventSource && eventSource.readyState !== EventSourceConstructor?.CLOSED)) return;
 
   cleanupSource();
 
@@ -491,14 +509,41 @@ const connect = () => {
   // Chromium host can drive a page; a browser tab can display one but not be
   // driven, and the agent tool needs to know which it is talking to without a
   // setting anyone has to remember to change.
-  const canControlBrowser = Boolean(window.__OPENCHAMBER_ELECTRON__);
-  const controller = new AbortController();
-  streamAbort = controller;
-  void readStream(controller.signal, canControlBrowser);
+  const canControlBrowser = Boolean(currentWindow.__OPENCHAMBER_ELECTRON__);
+  if (isRelayModeActive()) {
+    connectRelay(canControlBrowser);
+    return;
+  }
+  if (!EventSourceConstructor) return;
+  const source = new EventSourceConstructor(getRuntimeUrlResolver().sse(
+    '/api/openchamber/events',
+    canControlBrowser ? { browser: '1' } : undefined,
+  ));
+  source.onopen = () => {
+    if (eventSource !== source) return;
+    resetHeartbeatTimer();
+  };
+  source.onmessage = (event) => {
+    if (eventSource !== source) return;
+    resetHeartbeatTimer();
+    const envelope = parseEnvelope(event.data);
+    if (!envelope) {
+      return;
+    }
+    dispatchFromEnvelope(envelope, () => eventSource === source);
+  };
+
+  source.onerror = () => {
+    if (eventSource !== source) return;
+    cleanupSource();
+    scheduleReconnect();
+  };
+
+  eventSource = source;
 };
 
 const ensureRuntimeChangeSubscription = () => {
-  if (runtimeChangeUnsubscribe || typeof window === 'undefined') return;
+  if (runtimeChangeUnsubscribe || !globalThis.window) return;
   runtimeChangeUnsubscribe = subscribeRuntimeEndpointChanged(() => {
     cleanupSource();
     reconnectAttempt = 0;

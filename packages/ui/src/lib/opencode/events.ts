@@ -14,6 +14,7 @@
  */
 
 import type { OpenCodeEvent } from "@opencode/client"
+import { z } from "zod"
 import {
   compact,
   partIds,
@@ -32,6 +33,8 @@ import {
   type TokenUsageInfo,
 } from "./model"
 import { projectUserParts, structuredErrorText, toolAttachments, toolOutputText } from "./projection"
+
+const shellSignalSchema = z.object({ signal: z.string().optional() })
 
 // ---------------------------------------------------------------------------
 // Event vocabulary
@@ -66,7 +69,7 @@ export type MessagePatch = {
   snapshot?: { start?: string; end?: string; files?: string[] }
   retry?: Extract<Message, { role: "assistant" }>["retry"] | null
   /** Shell messages: exit status and captured output. */
-  shell?: { status: "running" | "exited" | "timeout" | "killed"; exit?: number; output?: Extract<Message, { role: "shell" }>["output"] }
+  shell?: { status: "running" | "exited" | "timeout" | "killed"; exit?: number; signal?: string; output?: Extract<Message, { role: "shell" }>["output"] }
 }
 
 /** State transitions of a tool call that need the part's existing state to apply. */
@@ -101,6 +104,12 @@ export type SyncEvent =
   | { type: "session.created"; properties: { info: Session } }
   | { type: "session.patched"; properties: { sessionID: string; patch: SessionPatch } }
   | { type: "session.deleted"; properties: { sessionID: string } }
+  /**
+   * A session was forked. OpenCode 2.x publishes no `session.created` for the
+   * fork and this event carries ids only, so the sync layer reads the fork's
+   * record and applies it as a `session.created`.
+   */
+  | { type: "session.forked"; properties: { sessionID: string; parentID: string } }
   /**
    * A staged revert became permanent: OpenCode deleted the boundary message
    * `to` and everything after it. The reducer trims the same range locally,
@@ -231,6 +240,9 @@ export function translateWireEvent(event: OpenCodeEvent): SyncEvent[] {
     }
     case "session.deleted":
       return [{ type: "session.deleted", properties: { sessionID: event.data.sessionID } }]
+    // No `session.created` follows a fork in 2.x; see the sync event's doc.
+    case "session.forked":
+      return [{ type: "session.forked", properties: { sessionID: event.data.sessionID, parentID: event.data.parentID } }]
     case "session.renamed":
       return [sessionEvent(event.data.sessionID, { title: event.data.title, time: { updated: event.created } })]
     // OpenCode's record holds the full metadata, so this replaces it.
@@ -676,9 +688,10 @@ export function translateWireEvent(event: OpenCodeEvent): SyncEvent[] {
           },
         },
       ]
-    case "session.shell.ended":
+    case "session.shell.ended": {
       // The shell message id is derived from the started event, which we
       // cannot recover here; the reducer matches shell messages by shellID.
+      const shellSignal = shellSignalSchema.safeParse(event.data.shell)
       return [
         {
           type: "message.patched",
@@ -687,11 +700,17 @@ export function translateWireEvent(event: OpenCodeEvent): SyncEvent[] {
             messageID: `shell:${event.data.shell.id}`,
             patch: {
               time: { completed: event.created },
-              shell: compact({ status: event.data.shell.status, exit: finiteExit(event.data.shell.exit), output: event.data.output }),
+              shell: compact({
+                status: event.data.shell.status,
+                exit: finiteExit(event.data.shell.exit),
+                signal: shellSignal.success ? shellSignal.data.signal : undefined,
+                output: event.data.output,
+              }),
             },
           },
         },
       ]
+    }
     case "session.compaction.started":
       return [
         {
@@ -808,9 +827,6 @@ export function translateWireEvent(event: OpenCodeEvent): SyncEvent[] {
     // acting here too would only double every read.
     case "integration.updated":
       return []
-    // The fork's own `session.created` carries everything the stores need.
-    case "session.forked":
-      return []
     // Queue-vs-steer placement of a pending inbox item is not shown.
     case "session.inbox.delivery.changed":
       return []
@@ -887,6 +903,7 @@ export function syncEventSessionID(event: SyncEvent): string | undefined {
       return event.properties.form.sessionID
     case "session.patched":
     case "session.deleted":
+    case "session.forked":
     case "session.revert.committed":
     case "session.status":
     case "session.idle":
