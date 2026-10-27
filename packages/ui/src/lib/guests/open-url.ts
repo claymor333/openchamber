@@ -23,6 +23,11 @@ export const guestUrlTarget = (url: string, { panelAvailable, directory, linksIn
 );
 
 export const openGuestUrl = async (url: string, directory: string | null, supported: boolean): Promise<boolean> => {
+  // Mobile and VS Code have no browser panel that can reach the connected
+  // server's loopback ports. Sending one to the system browser would resolve
+  // localhost on the client device instead.
+  if (!supported && isLoopbackHttpUrl(url)) return false;
+
   const { openLinksInBrowserPanel, openContextPreview } = useUIStore.getState();
   const target = guestUrlTarget(url, {
     panelAvailable: supported && isDesktopShell(),

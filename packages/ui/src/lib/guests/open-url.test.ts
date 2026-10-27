@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { guestUrlTarget } from './open-url.ts';
+import { guestUrlTarget, openGuestUrl } from './open-url.ts';
 
 const desktop = { panelAvailable: true, directory: '/work/app', linksInPanel: false };
 
@@ -19,5 +19,9 @@ describe('guestUrlTarget', () => {
   test('without the panel or a project, everything opens in the system browser', () => {
     expect(guestUrlTarget('http://localhost:8088', { ...desktop, panelAvailable: false })).toBe('system');
     expect(guestUrlTarget('http://localhost:8088', { ...desktop, directory: null })).toBe('system');
+  });
+
+  test('unsupported guest runtimes do not hand server loopback ports to the client browser', async () => {
+    expect(await openGuestUrl('http://localhost:8088', '/work/app', false)).toBe(false);
   });
 });

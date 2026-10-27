@@ -4,7 +4,7 @@ Build extensions for [OpenChamber](https://openchamber.dev). An extension can sh
 
 Full guide: [Build an extension](https://openchamber.dev/docs/sdk/). Reference: [Host API](https://openchamber.dev/docs/sdk/host/) and [UI kit](https://openchamber.dev/docs/sdk/ui/). Extensions with a local process: [GUEST_SERVICES.md](./GUEST_SERVICES.md).
 
-Extensions load in OpenChamber web and desktop. VS Code and mobile do not load them yet.
+General guest extensions load in OpenChamber web and desktop. The mobile app hosts only the curated Resource Monitor panel; other guest extensions remain unsupported. VS Code does not load guest extensions.
 
 Device-scoped extension storage is local browser preference data. It stays partitioned by the host's runtime identity and the extension installation. URL aliases are not guaranteed to share preferences; saved host and relay connections follow the host's existing runtime identity rules.
 
@@ -159,7 +159,7 @@ Copy keeps the toast open and shows Copied on success. A failed copy shows an er
 
 For a full-screen board, add `"page": true` under `contributes`, or `"page": { "entry": "panel/page.html", "title": "Board" }` for separate HTML. Users open it from the Extension pages menu above the session list. `ctx.surface` is `"page"`. The extension cannot open the page itself.
 
-For a small readout in the chat's Work Status panel, add `"statusSection": { "entry": "status/index.html", "title": "Recent commits" }`. It needs no `panel.entry`, so a section-only extension has no rail icon. `ctx.surface` is `"status"`. Call `host.setHeight(px)` when your content changes size; the host stops growing the frame at 320 px and your page scrolls after that. Object-form sections can opt into `defaultExpanded: false` or `requiresProject: true`; omitted fields keep the existing expanded, directory-independent behavior. `examples/git-graph-status` is a complete section with a local service.
+For a small readout in the chat's Work Status panel, add `"statusSection": { "entry": "status/index.html", "title": "Recent commits" }`. It needs no `panel.entry`, so a section-only extension has no rail icon. `ctx.surface` is `"status"`. Call `host.setHeight(px)` when your content changes size; the host stops growing the frame at 320 px and your page scrolls after that. Object-form sections can opt into `defaultExpanded: false` or `requiresProject: true`; omitted fields keep the existing expanded, directory-independent behavior. `examples/git-graph-status` is a complete section with a local service. Web and desktop support generic status sections; dedicated mobile currently exposes only the curated Resource Monitor's host-drawn source on roomy tablets where Work Status already exists. It does not make generic mobile status frames available.
 
 With `sessions` approved, use `listProjects()`, `listWorktrees(projectId)`, and `listSessions(projectId)`. Subscribe through `await onProjects(listener)`, `await onWorktrees(projectId, listener)`, or `await onSessions(projectId, listener)` and retain the returned unsubscribe function. Snapshots distinguish loading, ready, and error; session activity and observed turn outcomes are separate from your task status.
 

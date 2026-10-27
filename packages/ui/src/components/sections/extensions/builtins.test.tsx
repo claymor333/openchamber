@@ -11,6 +11,7 @@ import { getRuntimeApiBaseUrl, getRuntimeKey, switchRuntimeEndpoint } from '@/li
 import { clearRuntimeAuthCredentialProvider, clearRuntimeUrlAuthToken } from '@/lib/runtime-auth';
 import { getSettingsSaveState, reportSettingsSaveState } from '@/lib/persistence';
 import { useGuestOauthStore } from '@/lib/guests/oauth-store';
+import { RESOURCE_MONITOR_MOBILE_SOURCE_URL } from '@/lib/guests/mobile-support';
 import { ExtensionsPage } from './ExtensionsPage';
 import { IntegrationsPage } from '../integrations/IntegrationsPage';
 
@@ -22,6 +23,15 @@ const builtIn: InstalledGuest = {
 const installed: InstalledGuest = { ...builtIn, id: 'third-party', name: 'Third-party', source: 'git', origin: { url: 'git@github.com:acme/third-party.git' }, integration: { name: 'Third-party', description: 'GitHub', auth: 'token' } };
 // What a newer server can send: a capability this build does not know.
 const newer = { ...installed, id: 'newer-ext', name: 'Newer', capabilities: { requested: ['telepathy'], granted: [] } };
+const resourceMonitor: InstalledGuest = {
+  ...installed,
+  id: 'resource-monitor',
+  name: 'Resource Monitor',
+  icon: 'pulse',
+  version: '1.4.1',
+  origin: { url: RESOURCE_MONITOR_MOBILE_SOURCE_URL },
+};
+const withUpdate = (version: string): InstalledGuest => ({ ...resourceMonitor, update: { version } });
 const originalRuntimeKey = getRuntimeKey();
 const originalBase = getRuntimeApiBaseUrl();
 
@@ -62,7 +72,22 @@ describe('built-in extension settings', () => {
         unreadableRows = unreadableRows.filter((row) => path !== `/api/guests/${row.id}`);
         return new Response(null, { status: 204 });
       }
-      if (path === '/api/guests/updates/check') return Response.json({ updates: {} });
+      if (path === '/api/guests/updates/check') {
+        const updates: Record<string, NonNullable<InstalledGuest['update']>> = {};
+        for (const guest of catalog) {
+          if (guest.update) updates[guest.id] = guest.update;
+        }
+        return Response.json({ updates });
+      }
+      if (path.endsWith('/update') && init?.method === 'POST') {
+        const guestId = path.split('/').at(-2);
+        const guest = catalog.find((candidate) => candidate.id === guestId);
+        if (!guest) return Response.json({ error: 'not-found' }, { status: 404 });
+        const updated = { ...guest, version: guest.update?.version ?? guest.version };
+        delete updated.update;
+        catalog = catalog.map((candidate) => candidate.id === guest.id ? updated : candidate);
+        return Response.json(updated);
+      }
       if (path.endsWith('/enabled')) {
         const payload = JSON.parse(String(init?.body));
         catalog = catalog.map((guest) => guest.id === builtIn.id ? { ...guest, enabled: payload.enabled } : guest);
@@ -102,6 +127,15 @@ describe('built-in extension settings', () => {
     const result = [...parent.querySelectorAll('button')].find((entry) => entry.textContent?.trim() === text);
     if (!result) throw new Error(`Missing button: ${text}`);
     return result;
+  };
+  const card = (id: string) => container.querySelector<HTMLButtonElement>(`[data-settings-item="extensions.${id}"]`);
+  const hasButton = (text: string) => [...container.querySelectorAll('button')]
+    .some((entry) => entry.textContent?.trim() === text);
+  const renderCatalog = async (guests: InstalledGuest[], key: string) => {
+    catalog = guests;
+    await act(async () => { useGuestsStore.getState().replaceCatalog(guests, getRuntimeKey()); });
+    await render(<ExtensionsPage key={key} />);
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
   };
 
   test('shows the built-in badge and enable/disable without removal or approval', async () => {
@@ -152,6 +186,42 @@ describe('built-in extension settings', () => {
     } finally {
       open.mockRestore();
     }
+  });
+
+  test('hides stale and equal Git update state in the grid and detail screen', async () => {
+    for (const version of ['1.4.0', '1.4.1', '1.4.1+build.7']) {
+      await renderCatalog([builtIn, installed, withUpdate(version)], version);
+      const resourceMonitorCard = card(resourceMonitor.id);
+      if (!resourceMonitorCard) throw new Error('Missing Resource Monitor card');
+      expect(resourceMonitorCard.textContent).not.toContain('Update available');
+
+      await act(async () => { resourceMonitorCard.click(); });
+      expect(container.textContent).not.toContain('Update available');
+      expect(hasButton('Update')).toBe(false);
+
+      const back = container.querySelector<HTMLButtonElement>('button[aria-label="Back to extensions"]');
+      if (!back) throw new Error('Missing Extensions back button');
+      await act(async () => { back.click(); });
+    }
+    expect(requests).not.toContain('POST /api/guests/resource-monitor/update');
+  });
+
+  test('shows a newer Git update in the grid and runs it from the detail action', async () => {
+    await renderCatalog([builtIn, installed, withUpdate('1.4.2')], 'newer-resource-monitor');
+    const resourceMonitorCard = card(resourceMonitor.id);
+    if (!resourceMonitorCard) throw new Error('Missing Resource Monitor card');
+    expect(resourceMonitorCard.textContent).toContain('Update available');
+    expect(resourceMonitorCard.textContent).toContain('1.4.2');
+
+    await act(async () => { resourceMonitorCard.click(); });
+    expect(container.textContent).toContain('Update available');
+    expect(container.textContent).toContain('1.4.2');
+    const updateButton = button('Update');
+    await act(async () => {
+      updateButton.click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(requests).toContain('POST /api/guests/resource-monitor/update');
   });
 
   test('places its token card in Built-in integrations, not Extension accounts', async () => {

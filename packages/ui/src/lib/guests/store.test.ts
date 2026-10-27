@@ -43,16 +43,34 @@ describe('useGuestsStore', () => {
     expect(useGuestsStore.getState().runtimeKey).toBe('instance-b');
   });
 
-  test('marks vscode and mobile as unsupported, not an empty ready catalog', () => {
+  test('marks VS Code unsupported rather than an empty ready catalog', () => {
     resetStore();
     useGuestsStore.getState().resetForRuntimeSwitch('vscode-a');
     useGuestsStore.getState().markUnsupported('vscode-a');
     expect(useGuestsStore.getState().status).toBe('unsupported');
     expect(useGuestsStore.getState().guests).toEqual([]);
 
-    useGuestsStore.getState().markUnsupported('other');
+    useGuestsStore.getState().markUnsupported('another-runtime');
     expect(useGuestsStore.getState().status).toBe('unsupported');
     expect(useGuestsStore.getState().runtimeKey).toBe('vscode-a');
+  });
+
+  test('accepts the curated Resource Monitor mobile catalog as ready', () => {
+    resetStore();
+    const mobileMonitor: InstalledGuest = {
+      ...hello,
+      id: 'resource-monitor',
+      name: 'Resource Monitor',
+      version: '1.4.1',
+      service: { runtime: 'host', granted: true },
+      capabilities: { requested: ['service'], granted: ['service'] },
+    };
+    useGuestsStore.getState().resetForRuntimeSwitch('mobile-a');
+    useGuestsStore.getState().replaceCatalog([mobileMonitor], 'mobile-a');
+
+    expect(useGuestsStore.getState().status).toBe('ready');
+    expect(useGuestsStore.getState().guests).toEqual([mobileMonitor]);
+    expect(useGuestsStore.getState().runtimeKey).toBe('mobile-a');
   });
 
   test('keeps a ready catalog when a later fetch on the same instance fails', () => {

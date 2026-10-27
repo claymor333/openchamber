@@ -234,4 +234,36 @@ describe('settings search', () => {
     });
     expect(results.some((result) => result.id === 'integrations.guests')).toBe(false);
   });
+
+  test('mobile Settings search exposes only Resource Monitor setup and management', () => {
+    const results = buildSettingsSearchResults({
+      query: 'resource monitor',
+      runtimeCtx: { ...runtimeCtx, isMobile: true },
+      visiblePageSlugs: ['integrations', 'extensions'],
+      t,
+      getPageTitle: (page) => page,
+    });
+
+    expect(results.map((result) => result.id)).toEqual([
+      'integrations.extensions.resource-monitor',
+      'extensions.resource-monitor',
+    ]);
+
+    for (const query of ['extension', 'zip', 'community', 'git identity']) {
+      const mobileResults = buildSettingsSearchResults({
+        query,
+        runtimeCtx: { ...runtimeCtx, isMobile: true },
+        visiblePageSlugs: ['integrations', 'extensions'],
+        t,
+        getPageTitle: (page) => page,
+      });
+      expect(mobileResults.some((result) => [
+        'integrations.guests',
+        'integrations.extensions.excalidraw',
+        'extensions.add',
+        'extensions.browse',
+        'extensions.gitIdentity',
+      ].includes(result.id))).toBe(false);
+    }
+  });
 });

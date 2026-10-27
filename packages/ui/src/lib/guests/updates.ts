@@ -33,6 +33,79 @@ type UpdateGuestResult =
   | { ok: true; guest: InstalledGuest }
   | { ok: false; code: UpdateGuestErrorCode; required?: string };
 
+type GuestSemver = {
+  major: number;
+  minor: number;
+  patch: number;
+  prerelease: string[] | null;
+};
+
+const GUEST_SEMVER_PATTERN = /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/;
+
+const parseGuestSemver = (value: string): GuestSemver | null => {
+  const match = GUEST_SEMVER_PATTERN.exec(value.trim());
+  if (!match) return null;
+
+  return {
+    major: Number(match[1]),
+    minor: Number(match[2]),
+    patch: Number(match[3]),
+    prerelease: match[4] ? match[4].split('.') : null,
+  };
+};
+
+const compareSemverIdentifier = (left: string, right: string): number => {
+  const leftNumeric = /^\d+$/.test(left);
+  const rightNumeric = /^\d+$/.test(right);
+  if (leftNumeric && rightNumeric) {
+    const leftNumber = Number(left);
+    const rightNumber = Number(right);
+    return leftNumber === rightNumber ? 0 : leftNumber < rightNumber ? -1 : 1;
+  }
+  if (leftNumeric) return -1;
+  if (rightNumeric) return 1;
+  return left === right ? 0 : left < right ? -1 : 1;
+};
+
+const compareGuestSemver = (left: string, right: string): number | null => {
+  const leftVersion = parseGuestSemver(left);
+  const rightVersion = parseGuestSemver(right);
+  if (!leftVersion || !rightVersion) return null;
+
+  for (const [leftPart, rightPart] of [
+    [leftVersion.major, rightVersion.major],
+    [leftVersion.minor, rightVersion.minor],
+    [leftVersion.patch, rightVersion.patch],
+  ]) {
+    if (leftPart !== rightPart) return leftPart < rightPart ? -1 : 1;
+  }
+
+  if (!leftVersion.prerelease && !rightVersion.prerelease) return 0;
+  if (!leftVersion.prerelease) return 1;
+  if (!rightVersion.prerelease) return -1;
+
+  const length = Math.min(leftVersion.prerelease.length, rightVersion.prerelease.length);
+  for (let index = 0; index < length; index += 1) {
+    const order = compareSemverIdentifier(
+      leftVersion.prerelease[index] ?? '',
+      rightVersion.prerelease[index] ?? '',
+    );
+    if (order !== 0) return order;
+  }
+  return Math.sign(leftVersion.prerelease.length - rightVersion.prerelease.length);
+};
+
+/**
+ * The server's cached update is advisory. UI surfaces expose it only while it
+ * still names a strictly newer version of an installed Git extension.
+ */
+export const getNewerGuestUpdate = (
+  guest: Pick<InstalledGuest, 'source' | 'version' | 'update'>,
+): GuestUpdate | undefined => {
+  if (guest.source !== 'git' || !guest.version || !guest.update?.version) return undefined;
+  return compareGuestSemver(guest.update.version, guest.version) === 1 ? guest.update : undefined;
+};
+
 /**
  * Ask the server to compare every git install with its origin. The server
  * answers from a one-hour cache unless `force`. Failure is distinct from

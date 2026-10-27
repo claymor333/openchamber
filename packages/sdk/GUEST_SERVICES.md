@@ -123,7 +123,7 @@ Server routes (authenticated UI session):
 
 The panel never receives `OPENCHAMBER_SERVICE_TOKEN` and never dials the port itself. Opaque iframe origin stays. Only the host proxy talks to loopback.
 
-VS Code and mobile stay `unsupported` for the guest catalog. They do not spawn services.
+VS Code stays `unsupported` for the guest catalog. Mobile filters to the curated Resource Monitor panel and proxies its approved service through the same authenticated host route. The service process runs on the connected OpenChamber server, never on the phone; other guest extensions and services remain unsupported on mobile.
 
 ## Service process contract
 

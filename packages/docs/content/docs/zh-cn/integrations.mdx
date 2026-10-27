@@ -118,11 +118,11 @@ Excalidraw 让你直接在 Files 中绘制 `.excalidraw` 文件和 Obsidian 的 
 
 ## Resource Monitor
 
-Resource Monitor 显示本机使用了多少 CPU 和内存，以及其中有多少用在 OpenChamber、OpenCode、它们启动的所有进程，以及在它们下面运行的开发服务器上。它是一个 OpenChamber 扩展，列在同一页面的 **OpenChamber extensions** 下。
+Resource Monitor 显示已连接的 OpenChamber 主机的 CPU 和内存使用情况，以及 OpenChamber、OpenCode、它们启动的进程和开发服务器的占用。在移动端，这些数据来自服务器，不是手机。它是一个 OpenChamber 扩展，列在同一页面的 **OpenChamber extensions** 下。
 
 1. 打开 **Settings → Integrations**，在 Resource Monitor 卡片上选择 **Install**。
-2. 在 **Settings → Extensions** 中批准它的本地服务。数据来自 OpenChamber 在面板旁启动的一个小进程。它只在面板或 **Resources** 部分显示在屏幕上时采样。
-3. 从右侧栏打开 **Resource Monitor**。Work Status 面板的 **Resources** 下也会显示简短摘要。
+2. 在 **Settings → Extensions** 中批准它的服务。服务运行在已连接的 OpenChamber 主机上，并且只在面板或 **Resources** 部分可见时采样；它不会读取手机资源。
+3. 在网页版和桌面版中从右侧栏打开 **Resource Monitor**，在移动端从右侧工作区打开。Work Status 面板中的 **Resources** 摘要仅在网页版和桌面版提供。
 
 开发服务器或任务上的 Stop 会结束该命令及其启动的所有进程，因此 watcher 无法重新拉起服务器。Terminal 组中的 **Stop all** 会结束终端和 project actions 中运行的所有内容，终端标签页保持打开。OpenChamber 本身和 OpenCode 服务器没有 Stop。
 

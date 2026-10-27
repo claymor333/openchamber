@@ -118,11 +118,11 @@ Kart, yeni bir sürüm çıktığında uzantıyı günceller, duraklattıysanız
 
 ## Resource Monitor
 
-Resource Monitor, bilgisayarınızın ne kadar CPU ve bellek kullandığını ve bunun ne kadarının OpenChamber'a, OpenCode'a, onların başlattığı her şeye ve altlarında çalışan geliştirme sunucularına gittiğini gösterir. Bir OpenChamber uzantısıdır ve aynı sayfada **OpenChamber extensions** altında listelenir.
+Resource Monitor, bağlı OpenChamber ana makinesinin CPU ve bellek kullanımını — mobilde telefonun değil sunucunun kaynaklarını — ayrıca OpenChamber, OpenCode, başlattıkları süreçler ve geliştirme sunucularının kullanımını gösterir. Bir OpenChamber uzantısıdır ve aynı sayfada **OpenChamber extensions** altında listelenir.
 
 1. **Settings → Integrations** sayfasını açın ve Resource Monitor kartında **Install** seçeneğini seçin.
-2. Yerel hizmetini **Settings → Extensions** içinde onaylayın. Sayılar, OpenChamber'ın panelin yanında başlattığı küçük bir süreçten gelir. Bu süreç yalnızca panel veya **Resources** bölümü ekrandayken ölçer.
-3. Sağdaki çubuktan **Resource Monitor**'ı açın. Work Status panelinde **Resources** altında kısa bir özet de görünür.
+2. Hizmetini **Settings → Extensions** içinde onaylayın. Bağlı OpenChamber ana makinesinde çalışır ve yalnızca panel veya **Resources** bölümü görünürken ölçüm yapar; telefon kaynaklarını okumaz.
+3. Web ve masaüstünde sağ çubuktan, mobilde sağ çalışma alanından **Resource Monitor**'ı açın. Work Status panelindeki **Resources** özeti yalnızca web ve masaüstünde kullanılabilir.
 
 Bir geliştirme sunucusunda veya işte Stop, o komutu başlattığı her şeyle birlikte sonlandırır; böylece bir watcher sunucuyu yeniden başlatamaz. Terminal grubundaki **Stop all**, terminalde ve project actions içinde çalışan her şeyi sonlandırır ve terminal sekmelerini açık bırakır. OpenChamber'ın kendisinde ve OpenCode sunucusunda Stop yoktur.
 

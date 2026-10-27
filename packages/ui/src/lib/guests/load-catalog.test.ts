@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, spyOn, test } from 'bun:test';
+import { Window } from 'happy-dom';
 
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { loadGuestCatalog } from './load-catalog';
@@ -46,6 +47,43 @@ describe('catalog request diagnostics', () => {
       expect(state.guests).toEqual([hello]);
       expect(state.unreadable).toEqual([{ id: 'newer', name: 'Newer', builtIn: false }]);
     } finally { fetch.mockRestore(); }
+  });
+
+  test('mobile loads only the curated Resource Monitor row and keeps a successful filtered catalog ready', async () => {
+    useGuestsStore.getState().resetForRuntimeSwitch(getRuntimeKey());
+    const previousWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
+    const browserWindow = new Window();
+    Object.defineProperty(browserWindow, '__OPENCHAMBER_SURFACE__', { configurable: true, writable: true, value: 'mobile' });
+    Object.defineProperty(globalThis, 'window', { configurable: true, writable: true, value: browserWindow });
+    const resourceMonitor = {
+      id: 'resource-monitor',
+      name: 'Resource Monitor',
+      icon: 'pulse',
+      version: '1.4.1',
+      service: { runtime: 'host', granted: true },
+      capabilities: { requested: ['service'], granted: ['service'] },
+    };
+    const unrelated = {
+      id: 'other-extension',
+      name: 'Other extension',
+      icon: 'apps',
+      capabilities: { requested: [], granted: [] },
+    };
+    const newer = { ...unrelated, id: 'other-newer', capabilities: { requested: ['future'], granted: [] } };
+    const fetch = spyOn(globalThis, 'fetch').mockResolvedValue(Response.json({ guests: [resourceMonitor, unrelated, newer] }));
+    try {
+      await loadGuestCatalog();
+      const state = useGuestsStore.getState();
+      expect(state.status).toBe('ready');
+      expect(state.failure).toBeNull();
+      expect(state.guests.map((guest) => guest.id)).toEqual(['resource-monitor']);
+      expect(state.unreadable).toEqual([]);
+    } finally {
+      fetch.mockRestore();
+      await browserWindow.happyDOM.close();
+      if (previousWindow) Object.defineProperty(globalThis, 'window', previousWindow);
+      else Reflect.deleteProperty(globalThis, 'window');
+    }
   });
 
   test('late failures cannot contaminate the next runtime', async () => {

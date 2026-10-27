@@ -45,14 +45,16 @@ import { getGitIdentities, getGlobalGitIdentity } from '@/lib/gitApi';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import type { GitIdentityProfile } from '@/stores/useGitIdentitiesStore';
 import { IdentityDropdown } from '@/components/views/git/GitHeader';
-import { checkGuestUpdates, updateGuest } from '@/lib/guests/updates';
+import { checkGuestUpdates, getNewerGuestUpdate, updateGuest } from '@/lib/guests/updates';
 import type { GuestSource, InstalledGuest, UnreadableGuest } from '@/lib/guests/types';
 import { useGuestsStore } from '@/lib/guests/store';
+import { RESOURCE_MONITOR_GUEST_ID } from '@/lib/guests/mobile-support';
 import { useI18n, type I18nKey, type Locale } from '@/lib/i18n';
 import { getRuntimeUrlResolver } from '@/lib/runtime-url';
 import { cn } from '@/lib/utils';
 import { openExternalUrl } from '@/lib/url';
 import { canRequestNativeDirectoryAccess, pathForDroppedFile, requestDirectoryAccess, requestFileAccess } from '@/lib/desktop';
+import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
 import type { PublicSocketBinding } from '@openchamber/sdk';
 
 
@@ -236,7 +238,7 @@ const extensionState = (guest: InstalledGuest) => {
     canRemove: Boolean(guest.source && guest.source !== 'bundled'),
     sourceUrl: getGuestSourceUrl(guest),
     // Only a git install can move forward; folder and zip installs never do.
-    update: guest.source === 'git' ? guest.update : undefined,
+    update: getNewerGuestUpdate(guest),
     statusKey,
     statusTone,
   };
@@ -298,6 +300,7 @@ const ExtensionCard: React.FC<ExtensionHandlers & { guest: InstalledGuest; onOpe
   ];
   return (
     <SettingsCard
+      settingsItem={`extensions.${guest.id}`}
       icon={<GuestIcon icon={resolveGuestIconName(guest.icon)} iconSrc={iconSrc} className="size-5 text-foreground" />}
       title={guest.name}
       badges={(
@@ -345,6 +348,8 @@ const ExtensionDetail: React.FC<ExtensionHandlers & { guest: InstalledGuest; onB
   const permissions = servicePermissionList(guest);
   const location = guest.path || guest.id;
   const hasPermissions = Boolean(permissions) || Boolean(guest.service);
+  const mobile = isMobileSurfaceRuntime();
+  const mobileTargetClass = mobile ? 'min-h-11' : undefined;
 
   return (
     <SettingsPageLayout
@@ -362,6 +367,7 @@ const ExtensionDetail: React.FC<ExtensionHandlers & { guest: InstalledGuest; onB
             <Button
               type="button"
               size="sm"
+              className={mobileTargetClass}
               variant={state.enabled ? 'outline' : 'default'}
               disabled={busy}
               aria-label={state.enabled
@@ -377,7 +383,7 @@ const ExtensionDetail: React.FC<ExtensionHandlers & { guest: InstalledGuest; onB
               type="button"
               size="sm"
               variant="ghost"
-              className="text-[var(--status-error)] hover:text-[var(--status-error)]"
+              className={cn(mobileTargetClass, 'text-[var(--status-error)] hover:text-[var(--status-error)]')}
               disabled={busy}
               aria-label={t('settings.extensions.remove.aria', { name: guest.name })}
               onClick={() => void onRemove(guest.id, guest.name).then(onBack)}
@@ -402,6 +408,7 @@ const ExtensionDetail: React.FC<ExtensionHandlers & { guest: InstalledGuest; onB
               <Button
                 type="button"
                 size="sm"
+                className={mobileTargetClass}
                 disabled={busy}
                 aria-label={t('settings.extensions.review.aria', { name: guest.name })}
                 onClick={() => onReview(guest)}
@@ -418,6 +425,7 @@ const ExtensionDetail: React.FC<ExtensionHandlers & { guest: InstalledGuest; onB
               <Button
                 type="button"
                 size="sm"
+                className={mobileTargetClass}
                 disabled={busy}
                 aria-label={t('settings.extensions.update.action.aria', { name: guest.name, version: state.update.version })}
                 onClick={() => void onUpdate(guest)}
@@ -438,7 +446,7 @@ const ExtensionDetail: React.FC<ExtensionHandlers & { guest: InstalledGuest; onB
           <SettingsFieldRow label={t('settings.extensions.detail.field.source')}>
             <span className="typography-ui-label text-foreground">{t(sourceKey(guest.source))}</span>
             {state.sourceUrl ? (
-              <Button type="button" size="sm" variant="ghost" onClick={() => void openExternalUrl(state.sourceUrl ?? '')}>
+              <Button type="button" size="sm" variant="ghost" className={mobileTargetClass} onClick={() => void openExternalUrl(state.sourceUrl ?? '')}>
                 <Icon name="external-link" className="size-3.5" />
                 {t('settings.extensions.actions.openSource')}
               </Button>
@@ -524,6 +532,7 @@ const UnreadableExtensionCard: React.FC<{
 
 export const ExtensionsPage: React.FC = () => {
   const { t, locale } = useI18n();
+  const mobile = isMobileSurfaceRuntime();
   const guests = useGuestsStore((state) => state.guests);
   const unreadable = useGuestsStore((state) => state.unreadable);
   const status = useGuestsStore((state) => state.status);
@@ -541,6 +550,7 @@ export const ExtensionsPage: React.FC = () => {
   const enterpriseMode = useEnterpriseMode();
   const [busy, setBusy] = React.useState(false);
   const [checking, setChecking] = React.useState(false);
+  const [retryingCatalog, setRetryingCatalog] = React.useState(false);
   const checkedOnOpen = React.useRef(false);
   const [reinstall, setReinstall] = React.useState<{ source: InstallSource; name: string } | null>(null);
   const [approval, setApproval] = React.useState<InstalledGuest | null>(null);
@@ -553,6 +563,10 @@ export const ExtensionsPage: React.FC = () => {
   // Desktop on its own machine can hand the server a path; every other
   // runtime that shows this page (web, remote desktop instance) uploads.
   const nativePaths = canRequestNativeDirectoryAccess();
+  const visibleGuests = mobile ? guests.filter((guest) => guest.id === RESOURCE_MONITOR_GUEST_ID) : guests;
+  const visibleUnreadable = mobile
+    ? unreadable.filter((guest) => guest.id === RESOURCE_MONITOR_GUEST_ID)
+    : unreadable;
 
   React.useEffect(() => {
     void loadGuestCatalog();
@@ -566,14 +580,14 @@ export const ExtensionsPage: React.FC = () => {
     setReinstall(null);
     setApproval(null);
     checkedOnOpen.current = false;
-    if (unsupported) return;
+    if (unsupported || mobile) return;
     void Promise.all([getGitIdentities(), getGlobalGitIdentity()]).then(([profiles, global]) => {
       if (!cancelled) setIdentityData({ runtimeKey, profiles, global });
     }).catch(() => {
       if (!cancelled) setIdentityLoadFailed(true);
     });
     return () => { cancelled = true; };
-  }, [runtimeKey, unsupported]);
+  }, [mobile, runtimeKey, unsupported]);
 
   const identities = React.useMemo<GitIdentityProfile[]>(() => {
     const data = identityData?.runtimeKey === runtimeKey ? identityData : null;
@@ -610,6 +624,15 @@ export const ExtensionsPage: React.FC = () => {
     useGuestsStore.getState().applyUpdates(result.updates, runtimeKey);
     if (Object.keys(result.updates).length === 0) {
       toast.success(t('settings.extensions.toast.upToDate'));
+    }
+  };
+
+  const retryCatalog = async () => {
+    setRetryingCatalog(true);
+    try {
+      await loadGuestCatalog();
+    } finally {
+      setRetryingCatalog(false);
     }
   };
 
@@ -869,7 +892,7 @@ export const ExtensionsPage: React.FC = () => {
     onSetEnabled: setEnabled,
     onUpdate: update,
   };
-  const selectedGuest = selectedId ? guests.find((guest) => guest.id === selectedId) ?? null : null;
+  const selectedGuest = selectedId ? visibleGuests.find((guest) => guest.id === selectedId) ?? null : null;
 
   const dialogs = (
     <>
@@ -1036,17 +1059,17 @@ export const ExtensionsPage: React.FC = () => {
     );
   }
 
-  const hasItems = guests.length > 0 || unreadable.length > 0;
+  const hasItems = visibleGuests.length > 0 || visibleUnreadable.length > 0;
 
   return (
     <>
       <SettingsPageLayout
         title={t('settings.page.extensions.title')}
-        description={t('settings.page.extensions.description')}
+    description={mobile ? t('settings.extensions.unsupported') : t('settings.page.extensions.description')}
         headerEnd={unsupported ? null : (
           <div className="flex items-center gap-2">
             {/* Enterprise mode installs only from approved repositories, so the public list stays out of it. */}
-            {enterpriseMode ? null : (
+            {enterpriseMode || mobile ? null : (
               <Button
                 type="button"
                 variant="outline"
@@ -1065,7 +1088,7 @@ export const ExtensionsPage: React.FC = () => {
               type="button"
               variant="ghost"
               size="icon"
-              className="h-9 w-9 shrink-0 text-muted-foreground"
+              className={cn(mobile ? 'h-11 w-11' : 'h-9 w-9', 'shrink-0 text-muted-foreground')}
               data-settings-item="extensions.updates.check"
               disabled={busy || checking || status !== 'ready'}
               aria-label={t('settings.extensions.updates.check.aria')}
@@ -1078,7 +1101,7 @@ export const ExtensionsPage: React.FC = () => {
         )}
       >
         {/* The whole grid takes a dropped folder or ZIP, not only the dialog. */}
-        <div className="relative" {...(unsupported ? {} : dropHandlers)}>
+        <div className="relative" {...(unsupported || mobile ? {} : dropHandlers)}>
           {dropActive && !addOpen ? (
             <span className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-xl border border-dashed border-primary bg-background/80 typography-ui-label text-primary">
               {t('settings.extensions.add.drop.active')}
@@ -1086,25 +1109,40 @@ export const ExtensionsPage: React.FC = () => {
           ) : null}
 
           {status === 'error' || catalogFailure ? (
-            <p className="mb-4 typography-meta whitespace-pre-line text-destructive">
-              {t('settings.extensions.toast.loadFailed')}
-              {catalogFailure ? `\n${describeGuestRequestFailure(catalogFailure, t)}` : ''}
-            </p>
+            <div role="alert" className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-lg bg-[var(--status-error)]/10 p-3">
+              <p className="min-w-0 flex-1 typography-meta whitespace-pre-line text-destructive">
+                {t('settings.extensions.toast.loadFailed')}
+                {catalogFailure ? `\n${describeGuestRequestFailure(catalogFailure, t)}` : ''}
+              </p>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className={mobile ? 'min-h-11' : undefined}
+                disabled={retryingCatalog || status === 'loading'}
+                onClick={() => void retryCatalog()}
+              >
+                {retryingCatalog ? <Icon name="loader-4" className="size-3.5 animate-spin" /> : null}
+                {t('settings.projects.setup.retry')}
+              </Button>
+            </div>
           ) : null}
           {unsupported ? (
             <p className="typography-meta text-muted-foreground">{t('settings.extensions.unsupported')}</p>
           ) : (
             <div className={SETTINGS_CARD_GRID_CLASS}>
-              <SettingsAddCard
-                label={t('settings.extensions.grid.addTitle')}
-                hint={t('settings.extensions.grid.addHint')}
-                onClick={() => setAddOpen(true)}
-                settingsItem="extensions.add"
-              />
-              {guests.map((guest) => (
+              {mobile ? null : (
+                <SettingsAddCard
+                  label={t('settings.extensions.grid.addTitle')}
+                  hint={t('settings.extensions.grid.addHint')}
+                  onClick={() => setAddOpen(true)}
+                  settingsItem="extensions.add"
+                />
+              )}
+              {visibleGuests.map((guest) => (
                 <ExtensionCard key={guest.id} guest={guest} onOpen={() => setSelectedId(guest.id)} {...handlers} />
               ))}
-              {unreadable.map((guest, index) => (
+              {visibleUnreadable.map((guest, index) => (
                 <UnreadableExtensionCard
                   key={guest.id ?? `unreadable-${index}`}
                   guest={guest}

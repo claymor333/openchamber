@@ -14,6 +14,7 @@ import { Icon } from '@/components/icon/Icon';
 import type { IconName } from '@/components/icon/icons';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import type { InstalledGuest } from '@/lib/guests/types';
+import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
 
 const CAPABILITY_ROWS = {
   prompt: { icon: 'chat-1', titleKey: 'settings.extensions.capability.prompt', detailKey: 'settings.extensions.capability.prompt.detail' },
@@ -43,6 +44,7 @@ type GuestApprovalDialogProps = {
  */
 export const GuestApprovalDialog: React.FC<GuestApprovalDialogProps> = ({ guest, busy, onApprove, onDecline, onDismiss }) => {
   const { t } = useI18n();
+  const mobile = isMobileSurfaceRuntime();
   const requested = guest?.capabilities.requested ?? [];
   const filesystemPatterns = guest?.filesystem ?? [];
   const origins = guest?.origins ?? [];
@@ -133,6 +135,7 @@ export const GuestApprovalDialog: React.FC<GuestApprovalDialogProps> = ({ guest,
           <Button
             size="sm"
             variant="ghost"
+            className={mobile ? 'min-h-11' : undefined}
             disabled={busy}
             onClick={() => guest && onDecline(guest)}
           >
@@ -140,6 +143,7 @@ export const GuestApprovalDialog: React.FC<GuestApprovalDialogProps> = ({ guest,
           </Button>
           <Button
             size="sm"
+            className={mobile ? 'min-h-11' : undefined}
             disabled={busy}
             onClick={() => guest && onApprove(guest)}
           >

@@ -4,6 +4,22 @@ One directory per Settings page. `shared/` holds the page chrome and controls
 every page is built from; see `.agents/skills/settings-ui-patterns/SKILL.md` for
 which primitive to reach for.
 
+## Guest extensions on mobile
+
+The mobile Settings surface exposes **Extensions** only for the curated
+Resource Monitor integration from `claymor333/openchamber-resource-monitor`.
+Its catalog card lives in Settings → Integrations; install, enable/disable and
+service approval use the existing authenticated guest routes. Installing never
+grants the service automatically. An existing guest from another origin is not
+migrated: remove it through the existing Settings flow, then install the catalog
+copy and approve its service again. The mobile Extensions page filters to
+Resource Monitor and hides arbitrary folder, ZIP, URL and community installs. A
+failed catalog read remains an error with Retry, not an empty “not installed”
+state. Other guest packages stay available on web/desktop and are not enabled by
+this exception. The server's Git update check is cached, so the candidate may lag
+after a separate install; Integrations and Extensions expose update controls
+only while the candidate semver is newer than the installed bundle.
+
 ## Autosave on the OpenCode configuration pages
 
 `agents/`, `commands/`, `skills/`, `mcp/`, `plugins/` and `behavior/` edit files

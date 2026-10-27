@@ -16,6 +16,7 @@
  */
 import type { IconName } from '@/components/icon/icons';
 import type { I18nKey } from '@/lib/i18n';
+import { RESOURCE_MONITOR_MOBILE_SOURCE_URL } from '@/lib/guests/mobile-support';
 
 /** Card groups behind the category filter chips. */
 export type CatalogCategory = 'product' | 'openchamber' | 'code' | 'design' | 'cloud' | 'data' | 'quality' | 'ai' | 'other';
@@ -2497,15 +2498,15 @@ export const CATALOG_ENTRIES: readonly CatalogEntry[] = [
   {
     id: 'resource-monitor',
     name: 'Resource Monitor',
-    publisher: 'OpenChamber',
-    verified: true,
+    publisher: 'claymor333',
+    verified: false,
     descriptionKey: 'integrationsCatalog.entry.resource-monitor.description',
     detailsKey: 'integrationsCatalog.entry.resource-monitor.details',
     categories: ['openchamber'],
     icon: 'pulse',
-    homepage: 'https://github.com/openchamber/openchamber-resource-monitor',
+    homepage: RESOURCE_MONITOR_MOBILE_SOURCE_URL,
     status: 'stable',
-    components: [{ kind: 'extension', guestId: 'resource-monitor', gitUrl: 'https://github.com/openchamber/openchamber-resource-monitor' }],
+    components: [{ kind: 'extension', guestId: 'resource-monitor', gitUrl: RESOURCE_MONITOR_MOBILE_SOURCE_URL }],
   },
 ];
 

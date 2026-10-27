@@ -118,11 +118,11 @@ Excalidraw を使うと、`.excalidraw` ファイルや Obsidian の `.excalidra
 
 ## Resource Monitor
 
-Resource Monitor は、マシン全体の CPU とメモリの使用量と、そのうち OpenChamber、OpenCode、それらが起動したすべてのプロセス、その下で動く開発サーバーが使っている量を表示します。OpenChamber 拡張機能で、同じページの **OpenChamber extensions** に表示されます。
+Resource Monitor は、接続中の OpenChamber ホスト全体の CPU とメモリ、そのうち OpenChamber、OpenCode、それらが起動したプロセス、配下の開発サーバーが使っている量を表示します。モバイルではサーバーの数値であり、スマートフォンのものではありません。OpenChamber 拡張機能で、同じページの **OpenChamber extensions** に表示されます。
 
 1. **Settings → Integrations** を開き、Resource Monitor カードで **Install** を選びます。
-2. **Settings → Extensions** でローカルサービスを承認します。数値は OpenChamber がパネルの横で起動する小さなプロセスから届きます。このプロセスは、パネルか **Resources** セクションが画面に表示されている間だけ計測します。
-3. 右側のレールから **Resource Monitor** を開きます。Work Status パネルの **Resources** にも短い概要が表示されます。
+2. **Settings → Extensions** でサービスを承認します。サービスは接続中の OpenChamber ホストで動き、パネルか **Resources** セクションが表示されている間だけ計測します。スマートフォンのリソースは読み取りません。
+3. Web とデスクトップでは右側のレールから、モバイルでは右側のワークスペースから **Resource Monitor** を開きます。Work Status パネルの **Resources** にある概要は Web とデスクトップのみで利用できます。
 
 開発サーバーやジョブの Stop は、そのコマンドと、それが起動したすべてのプロセスを終了します。そのため watcher がサーバーを再起動することはありません。Terminal グループの **Stop all** は、ターミナルと project actions で動いているものをすべて終了し、ターミナルのタブは開いたまま残します。OpenChamber 本体と OpenCode サーバーには Stop はありません。
 

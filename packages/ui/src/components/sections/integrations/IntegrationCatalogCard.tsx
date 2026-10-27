@@ -4,11 +4,12 @@ import { Icon } from '@/components/icon/Icon';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { cn } from '@/lib/utils';
 
-export type IntegrationCatalogStatusTone = 'success' | 'warning' | 'neutral';
+export type IntegrationCatalogStatusTone = 'success' | 'warning' | 'error' | 'neutral';
 
 const STATUS_TONE_CLASS = {
   success: 'bg-[var(--status-success)]/15 text-[var(--status-success)]',
   warning: 'bg-[var(--status-warning)]/15 text-[var(--status-warning)]',
+  error: 'bg-destructive/10 text-destructive',
   neutral: 'oc-tile-inset text-muted-foreground',
 } satisfies Record<IntegrationCatalogStatusTone, string>;
 

@@ -4,6 +4,7 @@ import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 
 import { useGuestBadgeStore } from './badge-store.ts';
+import { filterMobileGuestCatalog } from './mobile-support.ts';
 import { parseGuestCatalogJson } from './parse.ts';
 import { useGuestsStore } from './store.ts';
 
@@ -37,10 +38,12 @@ const loadGuestCatalogOnce = async (runtimeKey: string): Promise<void> => {
   alignCatalogRuntime(runtimeKey);
 
   const store = useGuestsStore.getState();
-  if (isVSCodeRuntime() || isMobileSurfaceRuntime()) {
+  if (isVSCodeRuntime()) {
     store.markUnsupported(runtimeKey);
     return;
   }
+
+  const mobileSurface = isMobileSurfaceRuntime();
 
   store.markLoading();
   try {
@@ -61,7 +64,8 @@ const loadGuestCatalogOnce = async (runtimeKey: string): Promise<void> => {
       store.markFailed(runtimeKey, { method: 'GET', path: '/api/guests', kind: 'invalid-response', status: response.status });
       return;
     }
-    useGuestsStore.getState().replaceCatalog(catalog.guests, runtimeKey, catalog.unreadable);
+    const visibleCatalog = mobileSurface ? filterMobileGuestCatalog(catalog) : catalog;
+    useGuestsStore.getState().replaceCatalog(visibleCatalog.guests, runtimeKey, visibleCatalog.unreadable);
   } catch {
     useGuestsStore.getState().markFailed(runtimeKey, { method: 'GET', path: '/api/guests', kind: 'network' });
   }

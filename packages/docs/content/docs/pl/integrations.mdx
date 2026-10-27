@@ -118,11 +118,11 @@ Karta aktualizuje rozszerzenie, gdy pojawi się nowa wersja, włącza je ponowni
 
 ## Resource Monitor
 
-Resource Monitor pokazuje, ile procesora i pamięci zużywa komputer i ile z tego przypada na OpenChamber, OpenCode, wszystko, co uruchomiły, oraz serwery deweloperskie działające pod nimi. To rozszerzenie OpenChamber, widoczne w sekcji **OpenChamber extensions** na tej samej stronie.
+Resource Monitor pokazuje użycie procesora i pamięci przez połączony host OpenChamber — na urządzeniu mobilnym są to zasoby serwera, a nie telefonu — oraz przez OpenChamber, OpenCode, uruchomione przez nie procesy i ich serwery deweloperskie. To rozszerzenie OpenChamber, widoczne w sekcji **OpenChamber extensions** na tej samej stronie.
 
 1. Otwórz **Settings → Integrations** i wybierz **Install** na karcie Resource Monitor.
-2. Zatwierdź jego lokalną usługę w **Settings → Extensions**. Liczby pochodzą z małego procesu, który OpenChamber uruchamia obok panelu. Proces mierzy tylko wtedy, gdy na ekranie jest panel albo sekcja **Resources**.
-3. Otwórz **Resource Monitor** z prawego paska. Krótkie podsumowanie pojawia się też w sekcji **Resources** panelu Work Status.
+2. Zatwierdź usługę w **Settings → Extensions**. Działa ona na połączonym hoście OpenChamber i mierzy tylko wtedy, gdy panel lub sekcja **Resources** jest widoczna; nie odczytuje zasobów telefonu.
+3. Otwórz **Resource Monitor** z prawego paska w wersji webowej i desktopowej albo z prawego obszaru roboczego na urządzeniu mobilnym. Podsumowanie **Resources** w Work Status jest dostępne tylko w wersji webowej i desktopowej.
 
 Stop przy serwerze deweloperskim lub zadaniu kończy to polecenie razem ze wszystkim, co uruchomiło, więc watcher nie postawi serwera ponownie. **Stop all** w grupie Terminal kończy wszystko, co działa w terminalu i w project actions, a karty terminala zostają otwarte. Sam OpenChamber i serwer OpenCode nie mają przycisku Stop.
 

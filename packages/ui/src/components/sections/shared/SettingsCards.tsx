@@ -59,6 +59,8 @@ export interface SettingsCardAction {
 interface SettingsCardProps {
   icon: React.ReactNode;
   title: string;
+  /** Stable anchor for Settings search results. */
+  settingsItem?: string;
   /** Monospace second line: an id, command or URL. */
   subtitle?: string;
   /** Plain text under the title saying what the item is; up to two lines. */
@@ -84,7 +86,7 @@ const ActionLabel: React.FC<{ action: SettingsCardAction }> = ({ action }) => (
   </>
 );
 
-export const SettingsCard: React.FC<SettingsCardProps> = ({ icon, title, subtitle, description, badges, footer, muted, onOpen, actions, actionsLabel }) => {
+export const SettingsCard: React.FC<SettingsCardProps> = ({ icon, title, settingsItem, subtitle, description, badges, footer, muted, onOpen, actions, actionsLabel }) => {
   const hasActions = (actions?.length ?? 0) > 0;
   const body = (
     <>
@@ -120,6 +122,7 @@ export const SettingsCard: React.FC<SettingsCardProps> = ({ icon, title, subtitl
     <button
       type="button"
       onClick={onOpen}
+      data-settings-item={settingsItem}
       className={cn(
         CARD_CLASS,
         'oc-tile oc-tile-hover h-full w-full',
@@ -128,7 +131,7 @@ export const SettingsCard: React.FC<SettingsCardProps> = ({ icon, title, subtitl
       {body}
     </button>
   ) : (
-    <div className={cn(CARD_CLASS, 'oc-tile h-full')}>{body}</div>
+    <div data-settings-item={settingsItem} className={cn(CARD_CLASS, 'oc-tile h-full')}>{body}</div>
   );
 
   if (!hasActions || !actions) return card;

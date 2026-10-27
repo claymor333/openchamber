@@ -44,7 +44,7 @@ Use this doc when you ask an agent to change tool/header/description behavior.
   - The lookup always gets the **full** tool name OpenCode reported (`mcp.jira.search`); `normalizeToolName` still feeds every built-in switch, so built-in behavior is untouched when there is no rule.
   - Hook points, each falling back to today's code when the rule is `null` or silent on that field: icon (`getToolIcon`), header title (`title` template, else `name`, else `getToolMetadata`), header subtitle (`subtitle` template replaces both the description and the justification text), and the expanded body (`output`: `text` / `code` / `json` / `markdown` / `table`, checked at the top of `renderResultContent` and inside `ToolScrollableTextOutput`; `auto` keeps detection). A `table` whose output is not an array or `{ items: [] }` falls through to detection.
   - `GuestToolTable.tsx` draws a tool-output table with bounded, wrapping cells, capped at 200 rows with a count line.
-  - VS Code and mobile mark the guest catalog unsupported, so the registry is empty and nothing changes there.
+  - VS Code marks the guest catalog unsupported. Mobile loads only Resource Monitor, which declares no tool contributions, so the registry remains empty there.
 
 - `toolRenderUtils.ts`
   - Core classification helpers:

@@ -1522,7 +1522,7 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     titleKey: 'settings.integrations.extensionCatalog.title',
     descriptionKey: 'settings.integrations.extensionCatalog.info',
     keywords: ['extension', 'install', 'update', 'remove', 'openchamber'],
-    isAvailable: (ctx) => !ctx.isVSCode && !ctx.isMobile,
+    isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
     id: 'integrations.extensions.excalidraw',
@@ -1538,7 +1538,7 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     titleKey: 'settings.integrations.extensionCatalog.resourceMonitor.name',
     descriptionKey: 'settings.integrations.extensionCatalog.resourceMonitor.description',
     keywords: ['resource', 'monitor', 'cpu', 'memory', 'ram', 'process', 'activity', 'task manager', 'dev server', 'port', 'performance'],
-    isAvailable: (ctx) => !ctx.isVSCode && !ctx.isMobile,
+    isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
     id: 'integrations.guests',
@@ -1546,7 +1546,7 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     titleKey: 'settings.integrations.guests.title',
     descriptionKey: 'settings.integrations.guests.info',
     keywords: ['guest', 'extension', 'oauth', 'clickup', 'gitlab', 'panel', 'connect'],
-    isAvailable: (ctx) => !ctx.isVSCode,
+    isAvailable: (ctx) => !ctx.isVSCode && !ctx.isMobile,
   },
   {
     id: 'extensions.add',
@@ -1573,11 +1573,19 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     isAvailable: (ctx) => !ctx.isVSCode && !ctx.isMobile,
   },
   {
+    id: 'extensions.resource-monitor',
+    page: 'extensions',
+    titleKey: 'settings.integrations.extensionCatalog.resourceMonitor.name',
+    descriptionKey: 'settings.integrations.extensionCatalog.resourceMonitor.description',
+    keywords: ['resource', 'monitor', 'cpu', 'memory', 'server', 'process', 'mobile'],
+    isAvailable: (ctx) => !ctx.isVSCode && ctx.isMobile,
+  },
+  {
     id: 'extensions.updates.check',
     page: 'extensions',
     titleKey: 'settings.extensions.updates.check',
     keywords: ['update', 'upgrade', 'version', 'git', 'extension', 'guest', 'refresh'],
-    isAvailable: (ctx) => !ctx.isVSCode && !ctx.isMobile,
+    isAvailable: (ctx) => !ctx.isVSCode,
   },
 ] as const;
 

@@ -118,11 +118,11 @@ Mit Excalidraw zeichnest du in `.excalidraw`-Dateien und Obsidian-Zeichnungen im
 
 ## Resource Monitor
 
-Resource Monitor zeigt, wie viel CPU und Arbeitsspeicher dein Rechner nutzt und wie viel davon auf OpenChamber, OpenCode, alles, was sie gestartet haben, und die darunter laufenden Dev-Server entfällt. Es ist eine OpenChamber-Erweiterung und steht auf derselben Seite unter **OpenChamber extensions**.
+Resource Monitor zeigt die CPU- und Arbeitsspeicherauslastung des verbundenen OpenChamber-Hosts – in der mobilen App also des Servers, nicht des Telefons – sowie OpenChamber, OpenCode, ihre gestarteten Prozesse und die darunter laufenden Dev-Server. Es ist eine OpenChamber-Erweiterung und steht auf derselben Seite unter **OpenChamber extensions**.
 
 1. Öffne **Settings → Integrations** und wähle **Install** auf der Resource-Monitor-Karte.
-2. Erlaube den lokalen Dienst unter **Settings → Extensions**. Die Zahlen kommen von einem kleinen Prozess, den OpenChamber neben dem Panel startet. Er misst nur, solange das Panel oder der Abschnitt **Resources** zu sehen ist.
-3. Öffne **Resource Monitor** in der rechten Leiste. Eine kurze Übersicht erscheint außerdem unter **Resources** im Work-Status-Panel.
+2. Genehmige den Dienst unter **Settings → Extensions**. Er läuft auf dem verbundenen OpenChamber-Host und misst nur, solange das Panel oder der Abschnitt **Resources** sichtbar ist; Telefondaten werden nicht erfasst.
+3. Öffne **Resource Monitor** im Web und auf dem Desktop über die rechte Leiste, in der mobilen App über den rechten Workspace. Die **Resources**-Übersicht im Work-Status-Panel gibt es nur im Web und auf dem Desktop.
 
 Stop bei einem Dev-Server oder einem Job beendet diesen Befehl mit allem, was er gestartet hat, damit ein Watcher den Server nicht neu startet. **Stop all** in der Gruppe Terminal beendet alles, was im Terminal und in Project Actions läuft, und lässt die Terminal-Tabs offen. OpenChamber selbst und der OpenCode-Server haben kein Stop.
 

@@ -15,6 +15,8 @@ import {
 } from '@/components/ui/dialog';
 import { toast } from '@/components/ui';
 import { guestNeedsApproval } from '@/lib/guests/capabilities';
+import { describeGuestRequestFailure } from '@/lib/guests/request-failure';
+import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
 import { installGuest, setGuestEnabled, uninstallGuest } from '@/lib/guests/install';
 import { loadGuestCatalog } from '@/lib/guests/load-catalog';
 import { useGuestsStore } from '@/lib/guests/store';
@@ -25,7 +27,7 @@ import { getRuntimeKey } from '@/lib/runtime-switch';
 import { openExternalUrl } from '@/lib/url';
 import { useUIStore } from '@/stores/useUIStore';
 import {
-  CATALOG_EXTENSIONS,
+  catalogExtensionsForSurface,
   getCatalogExtensionState,
   type CatalogExtensionDefinition,
   type CatalogExtensionState,
@@ -43,16 +45,20 @@ interface CatalogExtensionsSectionProps {
 /**
  * OpenChamber extensions the team publishes (Excalidraw, Resource Monitor), offered with a
  * one-click Git install. The installed extension is an ordinary entry in
- * Settings → Extensions; these cards read the same catalog. Hidden where the
- * runtime loads no extensions (VS Code, mobile).
+ * Settings → Extensions; these cards read the same catalog. Mobile lists only
+ * the curated Resource Monitor entry; VS Code remains unsupported.
  */
 export const CatalogExtensionsSection: React.FC<CatalogExtensionsSectionProps> = ({ divider = true }) => {
   const { t } = useI18n();
+  const mobile = isMobileSurfaceRuntime();
   const guests = useGuestsStore((state) => state.guests);
+  const unreadable = useGuestsStore((state) => state.unreadable);
   const catalogStatus = useGuestsStore((state) => state.status);
+  const catalogFailure = useGuestsStore((state) => state.failure);
   const [pending, setPending] = React.useState<{ guestId: string; action: PendingAction } | null>(null);
   const [openIds, setOpenIds] = React.useState<ReadonlySet<string>>(() => new Set());
   const [removeTarget, setRemoveTarget] = React.useState<CatalogExtensionDefinition | null>(null);
+  const [retryingCatalog, setRetryingCatalog] = React.useState(false);
 
   React.useEffect(() => {
     void loadGuestCatalog();
@@ -138,6 +144,16 @@ export const CatalogExtensionsSection: React.FC<CatalogExtensionsSectionProps> =
         return { status: t('settings.integrations.extensionCatalog.status.needsApproval'), tone: 'warning' };
       case 'paused':
         return { status: t('settings.integrations.extensionCatalog.status.paused'), tone: 'neutral' };
+      case 'mobile-reinstall-required':
+        return {
+          status: t('settings.integrations.extensionCatalog.status.mobileReinstallRequired'),
+          tone: 'warning',
+        };
+      case 'mobile-update-required':
+        return {
+          status: t('settings.integrations.extensionCatalog.status.mobileUpdateRequired', { version: state.minimumVersion }),
+          tone: 'warning',
+        };
       case 'update-available':
         return { status: t('settings.integrations.thirdParty.status.updateAvailable', { version: state.version }), tone: 'warning' };
       case 'installed':
@@ -151,16 +167,28 @@ export const CatalogExtensionsSection: React.FC<CatalogExtensionsSectionProps> =
   };
 
   const renderCard = (definition: CatalogExtensionDefinition) => {
-    const state = getCatalogExtensionState(guests, definition);
+    const state = getCatalogExtensionState(guests, definition, mobile);
+    const unreadableGuest = unreadable.find((guest) => guest.id === definition.guestId);
     // Until the catalog answers, "not installed" would be a guess.
     const catalogLoading = catalogStatus === 'idle' || catalogStatus === 'loading';
-    const { status, tone } = catalogLoading ? { status: t('common.loading'), tone: 'neutral' as const } : describeState(state);
-    const busy = pending?.guestId === definition.guestId || catalogLoading;
+    const catalogUnavailable = catalogStatus === 'error' || catalogFailure !== null;
+    const { status, tone } = catalogLoading
+      ? { status: t('common.loading'), tone: 'neutral' as const }
+      : catalogUnavailable
+        ? { status: t('settings.extensions.toast.loadFailed'), tone: 'error' as const }
+        : unreadableGuest
+          ? { status: t('settings.extensions.status.unreadable'), tone: 'error' as const }
+          : describeState(state);
+    const busy = pending?.guestId === definition.guestId || catalogLoading || catalogUnavailable;
     const open = openIds.has(definition.guestId);
     const spinner = <Icon name="loader-4" className="size-3.5 animate-spin" />;
 
-    const primary = state.kind === 'not-installed'
+    const primary = catalogLoading || catalogUnavailable || unreadableGuest ? null : state.kind === 'not-installed'
       ? { label: t('settings.integrations.thirdParty.actions.install'), onClick: () => void install(definition), variant: 'default' as const }
+      : state.kind === 'mobile-reinstall-required'
+        ? { label: t('settings.integrations.extensionCatalog.actions.manage'), onClick: openExtensionsPage, variant: 'outline' as const }
+        : state.kind === 'mobile-update-required'
+          ? { label: t('settings.integrations.extensionCatalog.actions.manage'), onClick: openExtensionsPage, variant: 'outline' as const }
       : state.kind === 'update-available'
         ? { label: t('settings.integrations.thirdParty.actions.update'), onClick: () => void update(definition), variant: 'default' as const }
         : state.kind === 'paused'
@@ -190,17 +218,17 @@ export const CatalogExtensionsSection: React.FC<CatalogExtensionsSectionProps> =
       >
         <div className="flex flex-wrap items-center gap-2">
           {primary ? (
-            <Button type="button" size="sm" variant={primary.variant} onClick={primary.onClick} disabled={busy}>
+            <Button type="button" size="sm" className={mobile ? 'min-h-11' : undefined} variant={primary.variant} onClick={primary.onClick} disabled={busy}>
               {busy ? spinner : null}
               {primary.label}
             </Button>
           ) : null}
-          <Button type="button" size="sm" variant="secondary" onClick={() => void openExternalUrl(definition.homepage)}>
+          <Button type="button" size="sm" className={mobile ? 'min-h-11' : undefined} variant="secondary" onClick={() => void openExternalUrl(definition.homepage)}>
             <Icon name="external-link" className="size-3.5" />
             {t('settings.integrations.thirdParty.actions.docs')}
           </Button>
-          {state.kind !== 'not-installed' ? (
-            <Button type="button" size="sm" variant="destructive" onClick={() => setRemoveTarget(definition)} disabled={busy}>
+          {!catalogLoading && !catalogUnavailable && (unreadableGuest || state.kind !== 'not-installed') ? (
+            <Button type="button" size="sm" className={mobile ? 'min-h-11' : undefined} variant="destructive" onClick={() => setRemoveTarget(definition)} disabled={busy}>
               <Icon name="delete-bin" className="size-3.5" />
               {t('settings.integrations.thirdParty.actions.remove')}
             </Button>
@@ -212,6 +240,15 @@ export const CatalogExtensionsSection: React.FC<CatalogExtensionsSectionProps> =
 
   if (catalogStatus === 'unsupported') return null;
 
+  const retryCatalog = async () => {
+    setRetryingCatalog(true);
+    try {
+      await loadGuestCatalog();
+    } finally {
+      setRetryingCatalog(false);
+    }
+  };
+
   return (
     <>
       <SettingsSection
@@ -221,7 +258,26 @@ export const CatalogExtensionsSection: React.FC<CatalogExtensionsSectionProps> =
         settingsItem="integrations.extensions"
         contentClassName="space-y-3"
       >
-        {CATALOG_EXTENSIONS.map(renderCard)}
+        {catalogStatus === 'error' || catalogFailure ? (
+          <div role="alert" className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-[var(--status-error)]/10 p-3">
+            <p className="min-w-0 flex-1 typography-meta whitespace-pre-line text-destructive">
+              {t('settings.extensions.toast.loadFailed')}
+              {catalogFailure ? `\n${describeGuestRequestFailure(catalogFailure, t)}` : ''}
+            </p>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className={mobile ? 'min-h-11' : undefined}
+              disabled={retryingCatalog || catalogStatus === 'loading'}
+              onClick={() => void retryCatalog()}
+            >
+              {retryingCatalog ? <Icon name="loader" className="size-3.5 animate-spin" /> : null}
+              {t('settings.projects.setup.retry')}
+            </Button>
+          </div>
+        ) : null}
+         {catalogExtensionsForSurface(mobile).map(renderCard)}
       </SettingsSection>
 
       <Dialog open={removeTarget !== null} onOpenChange={(next) => !next && setRemoveTarget(null)}>
@@ -235,10 +291,10 @@ export const CatalogExtensionsSection: React.FC<CatalogExtensionsSectionProps> =
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button type="button" size="sm" variant="ghost" onClick={() => setRemoveTarget(null)}>
+            <Button type="button" size="sm" className={mobile ? 'min-h-11' : undefined} variant="ghost" onClick={() => setRemoveTarget(null)}>
               {t('settings.common.actions.cancel')}
             </Button>
-            <Button type="button" size="sm" variant="destructive" onClick={() => void remove()}>
+            <Button type="button" size="sm" className={mobile ? 'min-h-11' : undefined} variant="destructive" onClick={() => void remove()}>
               {t('settings.integrations.thirdParty.actions.remove')}
             </Button>
           </DialogFooter>

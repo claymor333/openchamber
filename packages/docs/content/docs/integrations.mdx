@@ -118,11 +118,11 @@ The card updates the extension when a new version is out, turns it back on if yo
 
 ## Resource Monitor
 
-Resource Monitor shows how much CPU and memory your machine uses and how much of it goes to OpenChamber, OpenCode, everything they started, and the dev servers running under them. It's an OpenChamber extension, listed under **OpenChamber extensions** on the same page.
+Resource Monitor shows CPU and memory for the connected OpenChamber host—on mobile, the server, not the phone—plus OpenChamber, OpenCode, the processes they started, and their dev servers. It's an OpenChamber extension, listed under **OpenChamber extensions** on the same page.
 
 1. Open **Settings → Integrations** and choose **Install** on the Resource Monitor card.
-2. Approve its local service in **Settings → Extensions**. The numbers come from a small process OpenChamber starts next to the panel. It measures only while the panel or the **Resources** section is on screen.
-3. Open **Resource Monitor** from the right-hand rail. A short readout also appears under **Resources** in the Work Status panel.
+2. Approve its service in **Settings → Extensions**. The service runs on the connected OpenChamber host and samples only while the panel or the **Resources** section is visible; it never reads phone resources.
+3. Open **Resource Monitor** from the right rail on web and desktop, or from the right workspace on mobile. The **Resources** readout in Work Status is available on web and desktop only.
 
 Stop on a dev server or a job ends that command with everything it started, so a watcher can't bring the server back. **Stop all** in the Terminal group ends everything running in the terminal and project actions and leaves the terminal tabs open. OpenChamber itself and the OpenCode server have no Stop.
 

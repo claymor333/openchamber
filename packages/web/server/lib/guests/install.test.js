@@ -16,7 +16,7 @@ import {
   parseInstallRequest,
   uninstallGuest,
 } from './install.js';
-import { guestCopiesDir, readExtensionStore } from './persist.js';
+import { guestCopiesDir, readExtensionStore, updateExtensionStore } from './persist.js';
 import { runGuestStorage } from './storage.js';
 
 const writeGuest = async (root, id) => {
@@ -65,6 +65,10 @@ describe('installGuestFromPath', () => {
     const firstStorageId = (await readExtensionStore(persistPath)).storageIds['clone-hello'];
     expect(firstStorageId).toMatch(/^[0-9a-f-]{36}$/);
     await runGuestStorage(persistPath, 'clone-hello', { op: 'set', key: 'kept', value: 1 }, async () => {});
+    await updateExtensionStore(persistPath, (store) => ({
+      ...store,
+      capabilityGrants: { ...store.capabilityGrants, 'clone-hello': ['service'] },
+    }));
 
     const again = await installGuestFromPath(guestRoot, persistPath);
     expect(again).toEqual({ ok: false, code: 'already-installed', id: 'clone-hello' });
@@ -76,6 +80,7 @@ describe('installGuestFromPath', () => {
     }
     expect(replacedSame.replaced).toBe(true);
     expect((await readExtensionStore(persistPath)).storageIds['clone-hello']).toBe(firstStorageId);
+    expect((await readExtensionStore(persistPath)).capabilityGrants['clone-hello']).toEqual(['service']);
 
     const otherRoot = path.join(dir, 'other');
     await writeGuest(otherRoot, 'clone-hello');
@@ -90,6 +95,7 @@ describe('installGuestFromPath', () => {
     expect(replacedOther.replaced).toBe(true);
     expect(replacedOther.guest.path).toBe(await fs.realpath(otherRoot));
     expect((await readExtensionStore(persistPath)).storageIds['clone-hello']).toBe(firstStorageId);
+    expect((await readExtensionStore(persistPath)).capabilityGrants['clone-hello']).toBeUndefined();
     expect(await runGuestStorage(persistPath, 'clone-hello', { op: 'get', key: 'kept' }, async () => {})).toMatchObject({ found: false });
 
     const relative = await installGuestFromPath('clone', persistPath);
@@ -280,6 +286,61 @@ describe('installGuestFromGitSource', () => {
     expect(await fs.stat(path.join(repo, 'package.json')).then((stat) => stat.isFile())).toBe(true);
 
     await fs.rm(dir, { recursive: true, force: true });
+  });
+
+  test('replacing a different Git origin clears grants and records the new origin', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-ext-origin-'));
+    const persistPath = path.join(dir, 'extensions.json');
+    const repoA = path.join(dir, 'origin-a');
+    const repoB = path.join(dir, 'origin-b');
+
+    const createRepo = async (repo, revision) => {
+      await writeGuest(repo, 'git-origin-switch');
+      await fs.writeFile(path.join(repo, 'origin-marker.txt'), revision);
+      const git = (args) => {
+        const result = spawnSync('git', args, {
+          cwd: repo,
+          encoding: 'utf8',
+          env: {
+            PATH: process.env.PATH,
+            HOME: repo,
+            GIT_CONFIG_GLOBAL: '/dev/null',
+            GIT_CONFIG_NOSYSTEM: '1',
+            GIT_TERMINAL_PROMPT: '0',
+          },
+        });
+        if (result.status !== 0) throw new Error(result.stderr || 'git failed');
+      };
+      git(['init', '--template=']);
+      git(['add', '.']);
+      git(['-c', 'user.name=test', '-c', 'user.email=test@example.com', 'commit', '-m', revision]);
+    };
+
+    try {
+      await createRepo(repoA, 'origin-a');
+      await createRepo(repoB, 'origin-b');
+
+      const installed = await installGuestFromGitSource(repoA, persistPath);
+      expect(installed.ok).toBe(true);
+      await updateExtensionStore(persistPath, (store) => ({
+        ...store,
+        capabilityGrants: { ...store.capabilityGrants, 'git-origin-switch': ['service'] },
+        capabilityScopes: { ...store.capabilityScopes, 'git-origin-switch': { service: 'origin-a' } },
+      }));
+
+      const replaced = await installGuestFromGitSource(repoB, persistPath, { replace: true });
+      expect(replaced.ok).toBe(true);
+      if (!replaced.ok) throw new Error('expected Git-origin replacement');
+
+      const store = await readExtensionStore(persistPath);
+      const guest = (await listInstalledGuests({ persistPath })).find((entry) => entry.id === 'git-origin-switch');
+      expect(guest?.gitOrigin?.url).toBe(repoB);
+      expect(store.gitOrigins?.[store.paths[0]]).toEqual({ url: repoB });
+      expect(store.capabilityGrants?.['git-origin-switch']).toBeUndefined();
+      expect(store.capabilityScopes?.['git-origin-switch']).toBeUndefined();
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
   });
 });
 

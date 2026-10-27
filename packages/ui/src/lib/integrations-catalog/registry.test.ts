@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
+import { RESOURCE_MONITOR_MOBILE_SOURCE_URL } from '@/lib/guests/mobile-support';
 import {
   CATALOG_CATEGORY_ORDER,
   CATALOG_ENTRIES,
@@ -11,6 +12,16 @@ import {
 } from './registry';
 
 describe('integrations catalog registry', () => {
+  test('Resource Monitor uses the owned repository source and identifies its fork publisher', () => {
+    const entry = getCatalogEntry('resource-monitor');
+    const resourceMonitor = entry?.components.find((component) => component.kind === 'extension');
+
+    expect(entry?.homepage).toBe(RESOURCE_MONITOR_MOBILE_SOURCE_URL);
+    expect(entry?.publisher).toBe('claymor333');
+    expect(entry?.verified).toBe(false);
+    expect(resourceMonitor?.kind === 'extension' ? resourceMonitor.gitUrl : undefined).toBe(RESOURCE_MONITOR_MOBILE_SOURCE_URL);
+  });
+
   test('ids are unique and kebab-case', () => {
     const ids = CATALOG_ENTRIES.map((entry) => entry.id);
     expect(new Set(ids).size).toBe(ids.length);

@@ -1,6 +1,6 @@
 # Integrations catalog
 
-The Integrations page (sidebar header, next to Archive) offers a hand-picked list of outside services. Each entry installs at user scope through the same routes Settings uses: MCP config, npm plugins, the skills-catalog installer, extensions. The catalog only points at vendor material; every install downloads it from the vendor's own source onto the user's machine. The only vendor material in this repository is the logo each tile shows.
+The Integrations page (sidebar header, next to Archive) offers a hand-picked list of outside services and selected first-party extensions. Each entry installs at user scope through the same routes Settings uses: MCP config, npm plugins, the skills-catalog installer, extensions. The catalog points at the owning source; each install downloads that material onto the user's machine. The only external vendor material in this repository is the logo each tile shows.
 
 ## Files
 
@@ -27,7 +27,7 @@ An entry earns its place when all of these hold:
 - **Work-team use.** Engineering, product, design, data or ops work in a company. Consumer services (music, travel, fitness, finance apps) stay out.
 - **Vendor-run.** The server, plugin or skill is published by the service itself (`verified: true` means exactly this). Community wrappers of someone else's API stay out.
 
-OpenChamber's own extensions and OpenCode plugins belong too, in the `openchamber` category, with OpenChamber as the publisher. Their Settings cards stay where they are; the catalog is one more place to find them.
+OpenChamber's own extensions and OpenCode plugins belong too, in the `openchamber` category, with OpenChamber as the publisher. Their Settings cards stay where they are; the catalog is one more place to find them. Resource Monitor is installed from the curated `claymor333/openchamber-resource-monitor` fork. Existing upstream installations are not migrated automatically; switch by removing the old copy and installing from the catalog, which asks for service approval again.
 - **Installs from the catalog.** One-click OAuth, a token field, or a local command the user's machine can run. A service that first needs an app registered by us or by the user is not suitable yet (see Not suitable yet).
 - **Licensed to install.** Skills and plugins come from sources with an open license (MIT, Apache-2.0, ISC, MPL-2.0). Vendor terms instead of a license go in `termsUrl`, which the detail page links. A skill repository with no license is acceptable only when the vendor plainly publishes it for installation (a `skills.sh.json` or install instructions); otherwise leave it out.
 
