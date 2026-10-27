@@ -118,6 +118,20 @@ The float existed because collapsing straight back into the layout squeezed
 the chat to nothing and the transcript measured its rows at that width; with
 the chat column never below its minimum that cannot happen.
 
+### Why the mobile shell uses the shared rail only on roomy tablets
+
+The tablet shell mounts `ContextPanelRail`, all three `ContextPanel` zones and
+`ContextSurfacePanes` when its existing roomy-layout check passes. This keeps
+surface ordering, placement, and keep-alive panes on the same store contracts
+as desktop. Phones and narrower tablet layouts keep the mobile workspace
+drawer, which leaves enough room for chat and preserves its touch navigation.
+The fit arbiter folds the tablet shell's local sessions sidebar without changing
+the desktop sidebar preference.
+When the existing roomy-layout boundary is crossed with a surface open, the
+shell transfers the active choice (including file/diff targets) to the other
+layout and closes shared zones while the drawer owns the surface. Per-directory
+tabs and placements stay in the shared store.
+
 ## Adding a surface
 
 1. Built-in: add a `ContextPanelMode` value in `packages/ui/src/lib/surfaces/modes.ts`
@@ -132,8 +146,11 @@ the chat column never below its minimum that cannot happen.
    the desktop/web chat + menu that opens `plugin:${id}`. `"dialog"` opens a
    host window around the same iframe so the guest can pick an item and call
    `attach`. New Worktree also opens that window for dialog guests. The guest
-   still owns the list and HTTP. VS Code and mobile omit the row. Do not add
-   a built-in mode for that guest.
+    still owns the list and HTTP. VS Code omits the row. Mobile loads only the
+    curated Resource Monitor package; its compatible, approved panel appears
+    in the tablet context rail and phone workspace drawer, while all other guest
+    surfaces and attach rows remain unavailable. Do not add a built-in mode for
+    that guest.
 
 ## Tracker
 
@@ -227,8 +244,10 @@ chat/palette go through the `openContext*` actions in `useUIStore`.
   Escape closes the zone it was pressed in: the frame and each keep-alive pane
   run the same handler (`zoneEscape.ts`), since a pane's React events do not
   pass through its frame.
-- Runtime scope: desktop/web `MainLayout` only. VS Code and the dedicated
-  mobile shell have their own layouts and do not consume this registry.
+- Runtime scope: desktop/web `MainLayout` and the dedicated mobile shell's roomy
+  tablet layout. Phones and narrow tablets keep the mobile workspace drawer;
+  VS Code does not consume this registry. Mobile catalogs are filtered to the
+  approved Resource Monitor panel before guest surfaces reach this rail.
   Trackers have no rail surface: their items list on the issues and PRs board
   (`components/sourceBoard`). A Linear tab persisted by an older version is
   dropped on load, like any unknown mode.

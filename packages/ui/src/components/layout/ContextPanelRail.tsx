@@ -80,6 +80,7 @@ type RailItemProps = {
   badgeDescription?: string | null;
   orderNumber?: number | null;
   showOrderNumber?: boolean;
+  touchTargets: boolean;
   onSelect: (surface: ContextSurfaceDescriptor) => void;
 };
 
@@ -98,6 +99,7 @@ const ContextPanelRailItem: React.FC<RailItemProps> = ({
   badgeDescription,
   orderNumber,
   showOrderNumber,
+  touchTargets,
   onSelect,
 }) => {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
@@ -127,6 +129,7 @@ const ContextPanelRailItem: React.FC<RailItemProps> = ({
             data-context-surface={surface.id}
             className={cn(
               'flex h-7 w-7 touch-none select-none items-center justify-center rounded-md transition-colors',
+              touchTargets && 'h-11 w-11',
               isActive
                 ? 'text-primary'
                 : 'text-muted-foreground hover:text-foreground',
@@ -204,7 +207,7 @@ const trackerRailIcon = (descriptor: SourceControlProviderDescriptor | null): Ra
   return sprite ? { icon: sprite } : { icon: PROVIDER_FALLBACK_ICON, iconSrc: providerIconSrc(descriptor) };
 };
 
-export const ContextPanelRail: React.FC = () => {
+export const ContextPanelRail: React.FC<{ touchTargets?: boolean }> = ({ touchTargets = false }) => {
   const { t } = useI18n();
   const effectiveDirectory = useEffectiveDirectory();
   const directoryKey = effectiveDirectory ? normalizeContextPanelDirectoryKey(effectiveDirectory) : '';
@@ -468,6 +471,7 @@ export const ContextPanelRail: React.FC = () => {
                   : null}
                 orderNumber={index + 1}
                 showOrderNumber={revealNumbers}
+                touchTargets={touchTargets}
                 onSelect={(selected) => {
                   if (isPluginContextPanelMode(selected.mode)) clearGuestBadge(pluginIdFromMode(selected.mode));
                   openContextSurface(directoryKey, selected.mode);
@@ -485,7 +489,10 @@ export const ContextPanelRail: React.FC = () => {
             type="button"
             aria-label={t('contextRail.configure.open')}
             onClick={() => setIsSurfacesDialogOpen(true)}
-            className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground/70 transition-colors hover:text-foreground"
+            className={cn(
+              'flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground/70 transition-colors hover:text-foreground',
+              touchTargets && 'h-11 w-11',
+            )}
           >
             <Icon name="equalizer-2" className="h-[18px] w-[18px]" />
           </button>

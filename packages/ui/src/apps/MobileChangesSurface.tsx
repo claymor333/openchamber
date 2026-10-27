@@ -158,6 +158,14 @@ type MobileChangesSurfaceProps = {
   visible?: boolean;
   /** The drawer closes here so a conflict handed to chat lands on the chat. */
   onNavigatedToChat?: () => void;
+  /** Latest per-file diff route, scoped so the tablet handoff cannot cross projects or runtimes. */
+  onNavigationChange?: (navigation: MobileChangesNavigation) => void;
+};
+
+export type MobileChangesNavigation = {
+  directory: string;
+  runtimeKey: string;
+  diff: { path: string; staged: boolean } | null;
 };
 
 export const MobileChangesSurface: React.FC<MobileChangesSurfaceProps> = (props) => {
@@ -181,7 +189,7 @@ interface MobileChangesPaneProps extends MobileChangesSurfaceProps {
 }
 
 /** Repository-scoped navigation and actions, separate from session directory resolution. */
-export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirectory, repository, onClose, initialDiff, visible = true, onNavigatedToChat }) => {
+export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirectory, repository, onClose, initialDiff, visible = true, onNavigatedToChat, onNavigationChange }) => {
   const { t } = useI18n();
   const { git, sourceControl } = useRuntimeAPIs();
   // When the root is not itself a repository, changes come from the resolved
@@ -247,6 +255,7 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
   const ownerKey = JSON.stringify([runtimeKey, currentDirectory]);
   const ownerKeyRef = React.useRef(ownerKey);
   ownerKeyRef.current = ownerKey;
+  const reportedOwnerKeyRef = React.useRef<string | null>(null);
   const [navigation, setNavigation] = React.useState<ChangesNavigation>(() => ({
     ownerKey,
     mode: 'working',
@@ -254,14 +263,30 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
   }));
   const mode = navigation.ownerKey === ownerKey ? navigation.mode : 'working';
   const route = navigation.ownerKey === ownerKey ? navigation.route : LIST_ROUTE;
+  const reportNavigation = React.useCallback((nextRoute: ChangesRoute) => {
+    onNavigationChange?.({
+      directory: rootDirectory,
+      runtimeKey,
+      diff: nextRoute.type === 'diff' ? { path: nextRoute.path, staged: nextRoute.staged } : null,
+    });
+  }, [onNavigationChange, rootDirectory, runtimeKey]);
+  const reportNavigationRef = React.useRef(reportNavigation);
+  reportNavigationRef.current = reportNavigation;
+  React.useEffect(() => {
+    if (reportedOwnerKeyRef.current === ownerKey) return;
+    reportedOwnerKeyRef.current = ownerKey;
+    reportNavigation(route);
+  }, [ownerKey, reportNavigation, route]);
   const [modeMenuOpen, setModeMenuOpen] = React.useState(false);
   const changeMode = React.useCallback((nextMode: ChangesMode) => {
     setNavigation({ ownerKey, mode: nextMode, route: LIST_ROUTE });
+    reportNavigation(LIST_ROUTE);
     setModeMenuOpen(false);
-  }, [ownerKey]);
+  }, [ownerKey, reportNavigation]);
   const setRoute = React.useCallback((nextRoute: ChangesRoute) => {
     setNavigation((current) => ({ ownerKey, mode: current.ownerKey === ownerKey ? current.mode : 'working', route: nextRoute }));
-  }, [ownerKey]);
+    reportNavigation(nextRoute);
+  }, [ownerKey, reportNavigation]);
 
   React.useEffect(() => {
     setNavigation((current) => current.ownerKey === ownerKey ? current : { ownerKey, mode: 'working', route: LIST_ROUTE });
@@ -276,7 +301,9 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
     if (!initialDiff?.path) return;
     // A new external target is a working-tree diff, regardless of the last
     // comparison mode. Changing directories alone must not replay this target.
-    setNavigation({ ownerKey: ownerKeyRef.current, mode: 'working', route: { type: 'diff', path: initialDiff.path, staged: initialDiff.staged } });
+    const nextRoute = { type: 'diff', path: initialDiff.path, staged: initialDiff.staged } as const;
+    setNavigation({ ownerKey: ownerKeyRef.current, mode: 'working', route: nextRoute });
+    reportNavigationRef.current(nextRoute);
   }, [initialDiff]);
   const [syncAction, setSyncAction] = React.useState<SyncAction>(null);
   const [commitAction, setCommitAction] = React.useState<CommitAction>(null);

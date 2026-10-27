@@ -44,6 +44,10 @@ import { useOpenUntilSettled, useOpenWhenSettled } from './useOpenUntilSettled';
 import { isZoneExposed, ZoneInteractiveContext } from './zoneInteractiveContext';
 import { PauseClock } from '@/components/ui/pause-clock';
 import { DockedPanelSurfaceContext } from '@/hooks/usePageColors';
+import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
+import { RESOURCE_MONITOR_GUEST_ID } from '@/lib/guests/mobile-support';
+import { RESOURCE_MONITOR_WORKSPACE_TAB } from '@/lib/mobileWorkspaceTabs';
+import type { MobileResourceMonitorSurfaceState } from './MobileResourceMonitorPane';
 
 // Heavy views stay on-demand (same as MainLayout): importing DiffView/FilesView
 // or the walkthrough statically pulls the CodeMirror and @pierre/diffs stacks
@@ -53,6 +57,7 @@ const DiffView = lazyWithChunkRecovery(() => import('@/components/views/DiffView
 const FilesView = lazyWithChunkRecovery(() => import('@/components/views/FilesView').then((m) => ({ default: m.FilesView })));
 const PluginPane = React.lazy(() => import('./PluginPane').then((module) => ({ default: module.PluginPane })));
 const GuestSurfacePane = React.lazy(() => import('./GuestSurfacePane').then((module) => ({ default: module.GuestSurfacePane })));
+const MobileResourceMonitorPane = React.lazy(() => import('./MobileResourceMonitorPane').then((module) => ({ default: module.MobileResourceMonitorPane })));
 
 // How an extension page sits beside its shared surface: flex direction puts
 // the page first on top/left and last on bottom/right; the page's size is
@@ -241,9 +246,10 @@ const ZonePane: React.FC<{
   /** The zone's frame is inert at opacity 0 (`contentHidden`). */
   hidden: boolean;
   directoryKey: string;
+  hostOverride?: HTMLElement | null;
   className?: string;
   children: React.ReactNode;
-}> = ({ zone, isOpen, interactive, hidden, directoryKey, className, children }) => {
+}> = ({ zone, isOpen, interactive, hidden, directoryKey, hostOverride, className, children }) => {
   const closeContextZone = useUIStore((state) => state.closeContextZone);
   const handleKeyDownCapture = React.useCallback((event: React.KeyboardEvent<HTMLElement>) => {
     closeZoneOnEscape(event, isOpen, () => {
@@ -253,7 +259,7 @@ const ZonePane: React.FC<{
   // A closed zone keeps its panes mounted at opacity 0; their spinners,
   // blinks and counters stand still until it opens again.
   return (
-    <MovablePane zone={zone}>
+    <MovablePane zone={zone} hostOverride={hostOverride}>
       <div className={className} onKeyDownCapture={handleKeyDownCapture}>
         <DockedPanelSurfaceContext.Provider value>
           <ZoneInteractiveContext.Provider value={interactive}>
@@ -275,7 +281,15 @@ const ZonePane: React.FC<{
  * refs and begin their layout animation in layout effects, both of which have
  * to run before the panes attach and the settle step queues behind them.
  */
-export const ContextSurfacePanes: React.FC = () => {
+export const ContextSurfacePanes: React.FC<{
+  enabled?: boolean;
+  externalFileEditor?: boolean;
+  onFileEditorSlotChange?: (host: HTMLElement | null) => void;
+  onFileEditorVisibleChange?: (visible: boolean) => void;
+  onFileEditorInteractiveChange?: (interactive: boolean) => void;
+  registerFileEditorCloseHandler?: (handler: ((path: string) => void) | null) => void;
+  mobileResourceMonitor?: MobileResourceMonitorSurfaceState;
+}> = ({ enabled = true, externalFileEditor = false, onFileEditorSlotChange, onFileEditorVisibleChange, onFileEditorInteractiveChange, registerFileEditorCloseHandler, mobileResourceMonitor }) => {
   const { t } = useI18n();
   const effectiveDirectory = useEffectiveDirectory() ?? '';
   const directoryKey = React.useMemo(
@@ -313,10 +327,10 @@ export const ContextSurfacePanes: React.FC = () => {
     const viewOf = (zone: ContextZone) => {
       const activeTab = panelState ? resolveZoneActiveTab(panelState, placement, zone) : null;
       const covered = zone === 'bottom' && chatCovered;
-      return { activeTab, isOpen: Boolean(panelState && getZoneView(panelState, zone).isOpen && activeTab) && !covered };
+      return { activeTab, isOpen: enabled && Boolean(panelState && getZoneView(panelState, zone).isOpen && activeTab) && !covered };
     };
     return { left: viewOf('left'), right: viewOf('right'), bottom: viewOf('bottom') };
-  }, [chatCovered, panelState, placement]);
+  }, [chatCovered, enabled, panelState, placement]);
 
   // A closing zone's content leaves the document (the editor's `detached`)
   // only once its animation has settled. The zone frame runs the same hook
@@ -373,50 +387,62 @@ export const ContextSurfacePanes: React.FC = () => {
   // a screenshot of it. The tab appears in the strip of the calling session's
   // project, which is not always the project on screen, and belongs to that
   // session.
-  React.useEffect(() => registerBrowserOpener((url, context) => {
+  React.useEffect(() => {
+    if (!enabled) return undefined;
+    return registerBrowserOpener((url, context) => {
     const directory = context.directory ? normalizeContextPanelDirectoryKey(context.directory) : directoryKey;
     if (!directory) return null;
     const tabId = openAgentBrowserTab(directory, url, context.sessionId);
     if (tabId) wakeBrowserTab(directory, tabId);
     return tabId;
-  }), [directoryKey, openAgentBrowserTab, wakeBrowserTab]);
+    });
+  }, [directoryKey, enabled, openAgentBrowserTab, wakeBrowserTab]);
   // Lets an agent close a tab it opened. controlClient has already checked the
   // tab belongs to the calling session; this only performs the panel close, so
   // the strip, the zone, and the webview process all settle the way a click on
   // the tab's own close button does.
-  React.useEffect(() => registerBrowserCloser((directory, tabId) => {
-    const tabs = useUIStore.getState().contextPanelByDirectory[directory]?.tabs;
-    if (!tabs?.some((tab) => tab.id === tabId && tab.mode === 'browser')) return false;
-    closeContextPanelTab(directory, tabId);
-    return true;
-  }), [closeContextPanelTab]);
+  React.useEffect(() => {
+    if (!enabled) return undefined;
+    return registerBrowserCloser((directory, tabId) => {
+      const tabs = useUIStore.getState().contextPanelByDirectory[directory]?.tabs;
+      if (!tabs?.some((tab) => tab.id === tabId && tab.mode === 'browser')) return false;
+      closeContextPanelTab(directory, tabId);
+      return true;
+    });
+  }, [closeContextPanelTab, enabled]);
   // The agent asked for a file to be shown. It opens in front of whatever tab
   // the user had, on purpose: the agent is pointing at a result, and the prior
   // tab is one click away.
-  React.useEffect(() => subscribeOpenchamberEvents((event) => {
+  React.useEffect(() => {
+    if (!enabled) return undefined;
+    return subscribeOpenchamberEvents((event) => {
     if (event.type !== 'file-open-request') return;
     const directory = event.directory ?? effectiveDirectory;
     if (!directory) return;
     openContextFile(directory, event.path);
-  }), [effectiveDirectory, openContextFile]);
+    });
+  }, [effectiveDirectory, enabled, openContextFile]);
   // The agent asked for a saved plan to be shown: it opens in place in the
   // Project knowledge panel, as a click in its Plans list does, in the strip
   // of the asking session's project.
-  React.useEffect(() => subscribeOpenchamberEvents((event) => {
+  React.useEffect(() => {
+    if (!enabled) return undefined;
+    return subscribeOpenchamberEvents((event) => {
     if (event.type !== 'plan-open-request') return;
     const directory = event.directory ?? effectiveDirectory;
     const projectRef = resolvePlanRequestOwner(directory, event.projectId);
     if (!directory || !projectRef) return;
     useUIStore.getState().openProjectKnowledgePlan(directory, resolveProjectContextId(projectRef), event.planId);
-  }), [effectiveDirectory]);
+    });
+  }, [effectiveDirectory, enabled]);
 
   // Tells agent browser control which project is on screen and which browser
   // tab the user last had in front of them there; a session without a tab of
   // its own may use that tab only when it is the user's and in its project.
   const shownBrowserTabId = browserZone.activeTab?.mode === 'browser' ? browserZone.activeTab.id : null;
   React.useEffect(() => {
-    setShownBrowserTab(directoryKey, shownBrowserTabId);
-  }, [directoryKey, shownBrowserTabId]);
+    setShownBrowserTab(directoryKey, enabled ? shownBrowserTabId : null);
+  }, [directoryKey, enabled, shownBrowserTabId]);
 
   const fileActiveTab = fileZone.activeTab;
   React.useEffect(() => {
@@ -445,6 +471,13 @@ export const ContextSurfacePanes: React.FC = () => {
   const handleCloseEditorFile = React.useCallback((filePath: string) => {
     if (directoryKey) closeContextFile(directoryKey, filePath);
   }, [closeContextFile, directoryKey]);
+  const setFileEditorSlotRef = React.useCallback((element: HTMLDivElement | null) => {
+    onFileEditorSlotChange?.(element);
+  }, [onFileEditorSlotChange]);
+  React.useEffect(() => {
+    registerFileEditorCloseHandler?.(fileActiveTab?.mode === 'file' ? handleCloseEditorFile : null);
+    return () => registerFileEditorCloseHandler?.(null);
+  }, [fileActiveTab?.mode, handleCloseEditorFile, registerFileEditorCloseHandler]);
 
   const chatActiveTab = chatZone.isOpen && chatZone.activeTab?.mode === 'chat' ? chatZone.activeTab : null;
   const activeChatSessionID = chatActiveTab ? getSessionIDFromDedupeKey(chatActiveTab.dedupeKey) : null;
@@ -589,6 +622,14 @@ export const ContextSurfacePanes: React.FC = () => {
 
   // The header slot goes to the pane on screen in its zone only.
   const headerSlotFor = (zone: ContextZone, active: boolean): HTMLElement | null => (active ? headerSlots[zone] : null);
+  const fileEditorVisible = enabled && !contentHidden(fileZone.zone) && isFileTabActive && showsEditor;
+  const fileEditorInteractive = enabled && interactive[fileZone.zone];
+  React.useEffect(() => {
+    onFileEditorVisibleChange?.(fileEditorVisible);
+  }, [fileEditorVisible, onFileEditorVisibleChange]);
+  React.useEffect(() => {
+    onFileEditorInteractiveChange?.(fileEditorInteractive);
+  }, [fileEditorInteractive, onFileEditorInteractiveChange]);
 
   return (
     <>
@@ -607,7 +648,13 @@ export const ContextSurfacePanes: React.FC = () => {
             // Hidden rather than unmounted so a hidden editor keeps its state.
             <div className={cn('h-full min-w-0 flex-1', hasOpenEditorFile && !showsEditor && 'hidden')}>
               {hasOpenEditorFile ? (
-                <React.Suspense fallback={null}><FilesView mode="editor-only" visible={!contentHidden(fileZone.zone) && isFileTabActive && showsEditor} onCloseFile={handleCloseEditorFile} /></React.Suspense>
+                externalFileEditor ? (
+                  <div ref={setFileEditorSlotRef} className="h-full min-w-0 flex-1" />
+                ) : (
+                  <React.Suspense fallback={null}>
+                    <FilesView mode="editor-only" visible={fileEditorVisible} onCloseFile={handleCloseEditorFile} />
+                  </React.Suspense>
+                )
               ) : (
                 <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
                   <Icon name="file-code" className="h-12 w-12 text-muted-foreground/50" />
@@ -753,6 +800,7 @@ export const ContextSurfacePanes: React.FC = () => {
         // panel iframe.
         const guestId = pluginIdFromMode(tab.mode);
         const sharedSurface = surfaceGuestIds.has(guestId);
+        const mobileResourceMonitorSurface = isMobileSurfaceRuntime() && guestId === RESOURCE_MONITOR_GUEST_ID;
         const docking = surfaceDockings.get(guestId);
         const shown = pluginZone.activeTab?.id === tab.id;
         const surfaceMounted = shown && pluginZone.isOpen;
@@ -768,7 +816,16 @@ export const ContextSurfacePanes: React.FC = () => {
             className={cn('absolute inset-0', shown ? 'block' : 'hidden')}
           >
             <React.Suspense fallback={null}>
-              {!sharedSurface ? (
+              {mobileResourceMonitorSurface ? (
+                mobileResourceMonitor ? (
+                  <MobileResourceMonitorPane
+                    key={`${mobileResourceMonitor.runtimeKey}:${tab.id}`}
+                    {...mobileResourceMonitor}
+                    workspaceOpen={surfaceMounted && !contentHidden(pluginZone.zone)}
+                    tab={RESOURCE_MONITOR_WORKSPACE_TAB}
+                  />
+                ) : null
+              ) : !sharedSurface ? (
                 <PluginPane mode={tab.mode} />
               ) : !docking ? (
                 <GuestSurfacePane mode={tab.mode} />

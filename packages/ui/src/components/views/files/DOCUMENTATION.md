@@ -51,6 +51,16 @@ Hidden surfaces retain drafts, loaded content and scroll state. They stop
 directory and file metadata polling; reopening checks freshness once before
 normal polling resumes. Autosave is independent of visibility.
 
+The mobile shell has one `FilesView` owner across its drawer and tablet context
+panel. The drawer's `MobileFilesSurface` and the context file pane hand the
+owner a host; `MovablePane` reparents its stable DOM node rather than unmounting
+the editor. A resize, orientation change, fold or software-keyboard fallback
+therefore does not save or discard its local buffer, cancel a pending autosave,
+or reset editor selection/focus. The handoff uses the existing runtime-scoped
+file-tabs state and current content root; it does not add a shared draft cache.
+Standalone desktop context panels and non-mobile `FilesView` hosts keep their
+existing owner and close-file behavior.
+
 Background polling never supersedes an in-flight directory read. Explicit
 refresh after file mutations does. Each directory failure remains local and
 preserves its previous successful snapshot.
@@ -359,7 +369,8 @@ built-in preview: a text editor only text files, a binary editor
 surface="file"` with a per-mount channel (`lib/guests/file-editor-channel.ts`)
 holding the draft at mount; the frame gets the file on `hello` / load, answers
 snapshot requests within `GUEST_REQUEST_TIMEOUT_MS`, and reports changes. VS
-Code and mobile keep the extension catalog empty, so there nothing matches.
+Code is unsupported, and the mobile catalog includes only Resource Monitor,
+which declares no file editors, so no extension editor matches there.
 
 The contract is one-directional content. The frame reads the file it was
 handed at mount, so `FilesView` remounts it with a `key` of path plus

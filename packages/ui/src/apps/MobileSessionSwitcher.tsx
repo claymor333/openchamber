@@ -183,7 +183,7 @@ export const MobileSessionSwitcher: React.FC<{
   if (!shouldRender) return null;
 
   return (
-    <div ref={wrapperRef} className="fixed inset-x-0 bottom-0 top-[calc(var(--oc-safe-area-top,0px)+var(--oc-header-height,56px))] z-20 pointer-events-none">
+    <div ref={wrapperRef} className="fixed inset-x-0 bottom-0 top-[calc(var(--oc-safe-area-top,0px)+var(--oc-header-height,56px))] z-40 pointer-events-none">
       <div
         ref={panelRef}
         role="dialog"

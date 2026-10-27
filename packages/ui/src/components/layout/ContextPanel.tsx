@@ -55,13 +55,14 @@ import { useOpenWhenSettled } from './useOpenUntilSettled';
 import { isZoneExposed } from './zoneInteractiveContext';
 import { DockedPanelSurfaceContext } from '@/hooks/usePageColors';
 import { REPOSITORY_KIND_ICONS } from '@/components/references/referencePickerItems';
+import { ContextPanelResizeHandle } from './ContextPanelResizeHandle';
+import { useContextPanelResize } from './useContextPanelResize';
 
 const CONTEXT_PANEL_MIN_WIDTH = 320;
 // The panel has no absolute pixel ceiling: on large monitors the user may
 // want it nearly full-width (side-by-side diffs with the chat open). The
 // only limit during a drag is leaving the chat column this much width.
 const CONTEXT_CHAT_MIN_WIDTH = 320;
-const RESIZE_FOLLOW_INTERVAL_MS = 100;
 const CONTEXT_TAB_LABEL_MAX_CHARS = 24;
 type TranslateFn = ReturnType<typeof useI18n>['t'];
 
@@ -358,21 +359,18 @@ const ZONE_GEOMETRY = {
     axis: 'x',
     gutter: 'mb-2 ms-2 me-1.5',
     gutterSize: '0.875rem',
-    handle: 'absolute bottom-2 inset-s-1 top-0 z-50 w-2 cursor-col-resize',
     sizeVariable: '--oc-context-panel-width',
   },
   left: {
     axis: 'x',
     gutter: 'mb-2 ms-1.5 me-2',
     gutterSize: '0.875rem',
-    handle: 'absolute bottom-2 inset-e-1 top-0 z-50 w-2 cursor-col-resize',
     sizeVariable: '--oc-context-panel-width',
   },
   bottom: {
     axis: 'y',
     gutter: 'mb-2 mt-2',
     gutterSize: '1rem',
-    handle: 'absolute inset-x-0 top-1 z-50 h-2 cursor-row-resize',
     sizeVariable: '--oc-context-panel-height',
   },
 } as const;
@@ -395,7 +393,7 @@ const maxPanelHeight = (availableHeight: number | null): number => {
  * size and the surfaces that remount on every switch. The keep-alive
  * surfaces are portalled into its body from `ContextSurfacePanes`.
  */
-export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' }) => {
+export const ContextPanel: React.FC<{ zone?: ContextZone; touchTargets?: boolean }> = ({ zone = 'right', touchTargets = false }) => {
   const geometry = ZONE_GEOMETRY[zone];
   const layoutAnimationMs = useLayoutAnimationMs();
   const isVertical = geometry.axis === 'y';
@@ -433,7 +431,9 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
     setHeaderSlotEl(element);
     setZoneHeaderSlot(zone, element);
   }, [zone]);
+  const bodyRef = React.useRef<HTMLDivElement | null>(null);
   const registerBody = React.useCallback((element: HTMLDivElement | null) => {
+    bodyRef.current = element;
     setZoneBody(zone, element);
   }, [zone]);
 
@@ -551,14 +551,36 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
   }, [showsChatTabs, tabs]);
   const sessionTitleById = useSessionTitleMap(chatSessionIDs);
 
-  const [isResizing, setIsResizing] = React.useState(false);
-  const startPointerRef = React.useRef(0);
-  const startSizeRef = React.useRef(size);
-  const resizingSizeRef = React.useRef<number | null>(null);
-  const activeResizePointerIDRef = React.useRef<number | null>(null);
   const panelRef = React.useRef<HTMLElement | null>(null);
+  const handleRef = React.useRef<HTMLDivElement | null>(null);
   const focusSinkRef = React.useRef<HTMLDivElement | null>(null);
   const wasOpenRef = React.useRef(false);
+  const clampSizeForDrag = React.useCallback((nextSize: number, available: number | null) => {
+    const clamped = isTreeOnly ? clampContextEditorTreeWidth(nextSize) : clampSize(nextSize, available);
+    return available === null ? clamped : Math.min(clamped, Math.max(1, available));
+  }, [clampSize, isTreeOnly]);
+  const {
+    isResizing,
+    isImmediateResize,
+    onPointerDown: handleResizeStart,
+  } = useContextPanelResize({
+    zone,
+    touchTargets,
+    isOpen,
+    isExpanded,
+    isVertical,
+    isTreeOnly,
+    directoryKey,
+    size,
+    sizeVariable: geometry.sizeVariable,
+    panelRef,
+    handleRef,
+    otherSideRef,
+    clampSizeForDrag,
+    setContextZoneSize,
+    setContextEditorTreeWidth,
+    isRtl,
+  });
 
   React.useLayoutEffect(() => {
     const parent = isVertical
@@ -614,135 +636,6 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
     wasOpenRef.current = true;
     return () => window.cancelAnimationFrame(frame);
   }, [isOpen]);
-
-  // Deferred resize: reflowing the chat column and the active surface (xterm,
-  // editor, embedded chat iframes) on every drag frame is unavoidably janky,
-  // so the zone follows the pointer lazily: the real size is re-applied at
-  // most every RESIZE_FOLLOW_INTERVAL_MS and the size transition smooths each
-  // step, VS Code-style.
-  const resizeAvailableSizeRef = React.useRef<number | null>(null);
-  const resizeFollowTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const applyFollowSize = React.useCallback(() => {
-    resizeFollowTimerRef.current = null;
-    const panel = panelRef.current;
-    const next = resizingSizeRef.current;
-    if (!panel || next === null) {
-      return;
-    }
-    panel.style.setProperty(geometry.sizeVariable, `${next}px`);
-  }, [geometry.sizeVariable]);
-
-  React.useEffect(() => () => {
-    if (resizeFollowTimerRef.current !== null) {
-      clearTimeout(resizeFollowTimerRef.current);
-    }
-  }, []);
-
-  const clampSizeForDrag = React.useCallback((nextSize: number) => {
-    const available = resizeAvailableSizeRef.current;
-    const clamped = isTreeOnly ? clampContextEditorTreeWidth(nextSize) : clampSize(nextSize, available);
-    return available === null ? clamped : Math.min(clamped, Math.max(1, available));
-  }, [clampSize, isTreeOnly]);
-
-  const handleResizeStart = React.useCallback((event: React.PointerEvent) => {
-    if (!isOpen || isExpanded || !directoryKey) {
-      return;
-    }
-
-    activeResizePointerIDRef.current = event.pointerId;
-    setIsResizing(true);
-    startPointerRef.current = isVertical ? event.clientY : event.clientX;
-    startSizeRef.current = size;
-    resizingSizeRef.current = size;
-    // Measure once per drag; no layout reads happen during pointermove.
-    // The same area the ceiling uses: the row less the other side.
-    const available = isVertical
-      ? panelRef.current?.parentElement?.clientHeight
-      : (panelRef.current?.closest<HTMLElement>('[data-workspace-row]')?.clientWidth ?? 0) - otherSideRef.current;
-    resizeAvailableSizeRef.current = available && available > 0 ? available : null;
-    document.documentElement.style.cursor = isVertical ? 'row-resize' : 'col-resize';
-    event.preventDefault();
-  }, [directoryKey, isExpanded, isOpen, isVertical, size]);
-
-  const finishResize = React.useCallback(() => {
-    // Apply the final size once, letting the size transition carry the zone
-    // to the release position.
-    const finalSize = clampSizeForDrag(resizingSizeRef.current ?? size);
-    resizingSizeRef.current = null;
-    resizeAvailableSizeRef.current = null;
-    if (resizeFollowTimerRef.current !== null) {
-      clearTimeout(resizeFollowTimerRef.current);
-      resizeFollowTimerRef.current = null;
-    }
-    document.documentElement.style.cursor = '';
-    if (isTreeOnly) {
-      setContextEditorTreeWidth(finalSize);
-    } else if (directoryKey) {
-      setContextZoneSize(directoryKey, zone, finalSize);
-    }
-    setIsResizing(false);
-    activeResizePointerIDRef.current = null;
-  }, [clampSizeForDrag, directoryKey, isTreeOnly, setContextEditorTreeWidth, setContextZoneSize, size, zone]);
-
-  // Window-level drag listeners: tracking the pointer via the thin handle and
-  // pointer capture is unreliable (capture can fail over iframes and a missed
-  // pointerup leaves the drag stuck), so while resizing the whole window
-  // tracks the pointer and any release/cancel/blur ends the drag.
-  React.useEffect(() => {
-    if (!isResizing) {
-      return;
-    }
-
-    const handleMove = (event: PointerEvent) => {
-      if (activeResizePointerIDRef.current !== event.pointerId) {
-        return;
-      }
-      // The zone grows away from its window edge, toward the chat.
-      const pointer = isVertical ? event.clientY : event.clientX;
-      // A side zone's handle faces the chat, so in RTL, where the zones swap
-      // sides, the same drag direction means the opposite width change.
-      const towardChat = zone === 'left' ? pointer - startPointerRef.current : startPointerRef.current - pointer;
-      const delta = !isVertical && isRtl ? -towardChat : towardChat;
-      const nextSize = clampSizeForDrag(startSizeRef.current + delta);
-      if (resizingSizeRef.current === nextSize) {
-        return;
-      }
-      resizingSizeRef.current = nextSize;
-      if (resizeFollowTimerRef.current === null) {
-        resizeFollowTimerRef.current = setTimeout(applyFollowSize, RESIZE_FOLLOW_INTERVAL_MS);
-      }
-    };
-
-    const handleUp = (event: PointerEvent) => {
-      if (activeResizePointerIDRef.current !== event.pointerId) {
-        return;
-      }
-      finishResize();
-    };
-
-    const handleWindowBlur = () => {
-      finishResize();
-    };
-
-    window.addEventListener('pointermove', handleMove);
-    window.addEventListener('pointerup', handleUp);
-    window.addEventListener('pointercancel', handleUp);
-    window.addEventListener('blur', handleWindowBlur);
-    return () => {
-      window.removeEventListener('pointermove', handleMove);
-      window.removeEventListener('pointerup', handleUp);
-      window.removeEventListener('pointercancel', handleUp);
-      window.removeEventListener('blur', handleWindowBlur);
-    };
-  }, [applyFollowSize, clampSizeForDrag, finishResize, isResizing, isRtl, isVertical, zone]);
-
-  React.useEffect(() => {
-    if (!isResizing) {
-      resizingSizeRef.current = null;
-      document.documentElement.style.cursor = '';
-    }
-  }, [isResizing]);
 
   const handleClose = React.useCallback(() => {
     if (!directoryKey) {
@@ -935,7 +828,10 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
   const header = (
     <header
       ref={setHeaderEl}
-      className="group/panel-header flex min-h-10 select-none items-stretch border-b border-border"
+      className={cn(
+        'group/panel-header flex min-h-10 select-none items-stretch border-b border-border',
+        touchTargets && 'relative z-[60]',
+      )}
     >
       {isMultiInstanceMode ? (
         <SortableTabsStrip
@@ -1096,38 +992,65 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
   // client is on (a screen reader, or any app that reads other windows,
   // common on macOS); removing it costs a few ms. After the layout effect
   // above, which begins the animation.
-  const contentHidden = !isZoneExposed(isOpen, useOpenWhenSettled(isOpen), activeTab?.mode);
+  const settledOpen = useOpenWhenSettled(isOpen);
+  // Keep the slot clipped until its opening animation settles. Once open, the
+  // touch target can straddle the card edge without covering the chat early.
+  const touchResizeActive = touchTargets && isOpen && settledOpen && !isExpanded;
+  const contentHidden = !isZoneExposed(isOpen, settledOpen, activeTab?.mode);
   const panelStyle: React.CSSProperties = {
     [geometry.sizeVariable]: `${size}px`,
     ...(isVertical
       ? { height: slotSize, maxHeight: '100%' }
       : { width: slotSize, maxWidth: '100%' }),
-    transitionDuration: coverChanged ? '0ms' : `${layoutAnimationMs}ms`,
+    transitionDuration: coverChanged || isImmediateResize ? '0ms' : `${layoutAnimationMs}ms`,
     transitionTimingFunction: LAYOUT_ANIMATION_EASING,
   };
 
   // Less the gutters the aside reserves for the card.
   const cardSize = `calc(var(${geometry.sizeVariable}) - ${geometry.gutterSize})`;
+  const resizeHandle = (
+    <ContextPanelResizeHandle
+      ref={handleRef}
+      zone={zone}
+      touchTargets={touchTargets}
+      active={isOpen && !isExpanded}
+      onPointerDown={handleResizeStart}
+      ariaLabel={t('contextPanel.actions.resizePanelAria')}
+    />
+  );
+  const cardContent = (
+    <DockedPanelSurfaceContext.Provider value>
+      {header}
+      {/* Keep-alive surfaces (ContextSurfacePanes) are portalled in here and
+          take the docked surface from their own pane (ZonePane). */}
+      <div
+        ref={registerBody}
+        className={cn('relative min-h-0 flex-1 overflow-hidden', isResizing && 'pointer-events-none')}
+      >
+        {activeTab && isRemountedSurface(activeTab.mode) ? activeNonChatContent : null}
+      </div>
+    </DockedPanelSurfaceContext.Provider>
+  );
 
   return (
-    <aside
-      ref={panelRef}
-      data-context-panel="true"
-      data-context-zone={zone}
-      data-right-slot={zone === 'right' ? '' : undefined}
-      data-context-panel-open={isOpen ? 'true' : 'false'}
-      tabIndex={-1}
-      className={cn(
+    <>
+      <aside
+        ref={panelRef}
+        data-context-panel="true"
+        data-context-zone={zone}
+        data-right-slot={zone === 'right' ? '' : undefined}
+        data-context-panel-open={isOpen ? 'true' : 'false'}
+        tabIndex={-1}
+        className={cn(
         // `overflow-clip` on both axes, never `hidden`: a `hidden` axis makes
         // the slot a scroll container, and an `overflow-x: clip` beside an
         // `overflow-y: hidden` computes to `hidden` too. The closed panel's
         // content is wider than the card's column, so a `scrollIntoView`
         // inside it (the tab strip revealing its active tab on mount)
         // scrolled the slot sideways and dragged the card left, clipped.
-        // No padding: the card's own margins are the gutter (see the card),
-        // so a closed zone at zero size clips them away with the card and only
-        // the size ever animates.
-        'flex min-h-0 flex-col overflow-clip bg-background',
+        // Only an active tablet touch handle may escape this clip.
+        'flex min-h-0 flex-col bg-background',
+        touchResizeActive ? 'z-20 overflow-visible' : 'overflow-clip',
         // Its own stacking context: the resize handle's z-50 orders it above
         // the card only, and the session sidebar shown over the chat on hover
         // (z-25) covers the zone handle and all.
@@ -1139,8 +1062,8 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
         'motion-reduce:transition-none',
       )}
       onKeyDownCapture={handlePanelKeyDownCapture}
-      style={panelStyle}
-    >
+        style={panelStyle}
+      >
       {/* Where focus goes as the zone opens (see the open effect). Outside
           the card, which is still inert then. */}
       <div ref={focusSinkRef} tabIndex={-1} className="absolute size-0 overflow-hidden outline-none" />
@@ -1149,18 +1072,7 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
       {zone === 'right' ? (
         <div ref={setWorkStatusHost} className={cn('absolute inset-y-0 inset-e-0 z-0 flex', chatCovered && 'invisible')} />
       ) : null}
-      {isOpen && !isExpanded && (
-        // In the gutter facing the chat, along the card's edge. Nothing paints
-        // on hover or drag: the cursor says it is draggable, and the card edge
-        // itself moves on release.
-        <div
-          className={geometry.handle}
-          onPointerDown={handleResizeStart}
-          role="separator"
-          aria-orientation={isVertical ? 'horizontal' : 'vertical'}
-          aria-label={t('contextPanel.actions.resizePanelAria')}
-        />
-      )}
+      {!touchTargets ? resizeHandle : null}
       <div
         data-zone-card=""
         className={cn(
@@ -1176,7 +1088,8 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
           // than a divider running the length of the window.
           // The dropdown's hairline ring (`oc-panel-edge`), shared with the
           // work-status card.
-          'oc-panel-edge overflow-hidden rounded-[10px] bg-background',
+          'oc-panel-edge rounded-[10px] bg-background',
+          touchTargets ? 'overflow-visible' : 'overflow-hidden',
           // Size animates in sync with the zone (surface switches, resize
           // release).
           isVertical ? 'transition-[height,opacity]' : 'transition-[width,opacity]',
@@ -1185,24 +1098,28 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
         )}
         style={{
           ...(isVertical
-            ? { height: cardSize, width: `calc(100% - ${(leftZoneShown ? 0 : 0.5) + (rightSlotFilled ? 0 : 0.375)}rem)` }
-            : { width: cardSize }),
-          transitionDuration: `${layoutAnimationMs}ms`,
+            ? {
+              height: cardSize,
+              width: `calc(100% - ${(leftZoneShown ? 0 : 0.5) + (rightSlotFilled ? 0 : 0.375)}rem)`,
+            }
+            : {
+              width: cardSize,
+            }),
+          transitionDuration: isImmediateResize ? '0ms' : `${layoutAnimationMs}ms`,
           transitionTimingFunction: LAYOUT_ANIMATION_EASING,
         }}
         // inert alone: it already takes the subtree out of the accessibility
         // tree, and aria-hidden on top cost a second pass when it flipped.
         inert={contentHidden || undefined}
       >
-      <DockedPanelSurfaceContext.Provider value>
-      {header}
-      {/* Keep-alive surfaces (ContextSurfacePanes) are portalled in here and
-          take the docked surface from their own pane (ZonePane). */}
-      <div ref={registerBody} className={cn('relative min-h-0 flex-1 overflow-hidden', isResizing && 'pointer-events-none')}>
-        {activeTab && isRemountedSurface(activeTab.mode) ? activeNonChatContent : null}
-      </div>
-      </DockedPanelSurfaceContext.Provider>
-      </div>
-    </aside>
+        {touchTargets ? (
+          <div className="flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden rounded-[10px]">
+            {cardContent}
+          </div>
+        ) : cardContent}
+        {touchTargets ? resizeHandle : null}
+        </div>
+      </aside>
+    </>
   );
 };

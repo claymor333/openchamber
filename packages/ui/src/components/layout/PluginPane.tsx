@@ -50,6 +50,7 @@ import { useConfigStore } from '@/stores/useConfigStore';
 import { openGuestCommit, readCurrentBranch } from '@/lib/guests/open-commit';
 import { openGuestSurface } from '@/lib/guests/open-surface';
 import { openGuestUrl } from '@/lib/guests/open-url';
+import { RESOURCE_MONITOR_GUEST_ID, RESOURCE_MONITOR_MOBILE_FRAME_NAME } from '@/lib/guests/mobile-support';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
@@ -1037,6 +1038,9 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
       <iframe
       ref={iframeRef}
       key={frameKey}
+      name={isMobileSurfaceRuntime() && guest.id === RESOURCE_MONITOR_GUEST_ID
+        ? RESOURCE_MONITOR_MOBILE_FRAME_NAME
+        : undefined}
       title={guest.name}
       src={src || undefined}
       srcDoc={srcDoc}

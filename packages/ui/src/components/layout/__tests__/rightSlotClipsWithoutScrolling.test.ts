@@ -47,4 +47,10 @@ describe('right slot cannot be scrolled sideways', () => {
   test('the slot style sets no per-axis overflow that would turn clip into hidden', () => {
     expect(/overflow[XY]?\s*:/.test(panelStyle())).toBe(false);
   });
+
+  test('the touch handle escapes the slot clip only after opening settles', () => {
+    expect(source).toContain('const settledOpen = useOpenWhenSettled(isOpen);');
+    expect(source).toContain('const touchResizeActive = touchTargets && isOpen && settledOpen && !isExpanded;');
+    expect(source).toContain('const contentHidden = !isZoneExposed(isOpen, settledOpen, activeTab?.mode);');
+  });
 });

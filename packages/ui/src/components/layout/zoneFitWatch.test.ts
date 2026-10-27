@@ -1,13 +1,13 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { useUIStore } from '@/stores/useUIStore';
-import { watchZoneFit, type SidebarFoldReason } from './zoneFitWatch';
+import { watchZoneFit, type SidebarFoldReason, type ZoneFitSidebar } from './zoneFitWatch';
 
 const directory = '/repo';
 let rowWidth = 1600;
 let stops: Array<() => void> = [];
 
-const watch = (folded: { current: SidebarFoldReason | null } = { current: null }) => {
-  stops.push(watchZoneFit({ directoryKey: directory, folded, readRowWidth: () => rowWidth }));
+const watch = (folded: { current: SidebarFoldReason | null } = { current: null }, sidebar?: ZoneFitSidebar) => {
+  stops.push(watchZoneFit({ directoryKey: directory, folded, readRowWidth: () => rowWidth, sidebar }));
   return folded;
 };
 const store = () => useUIStore.getState();
@@ -88,5 +88,48 @@ describe('watchZoneFit with an expanded zone', () => {
     store().openContextPanelTab(directory, { mode: 'terminal' });
     toggleExpanded();
     expect(sidebar()).toEqual({ open: true, foldedForExpanded: false });
+  });
+
+  test('a shell-owned tablet sidebar folds for a zone without changing the desktop sidebar store', () => {
+    rowWidth = 500;
+    let tabletSidebarOpen = true;
+    const control: ZoneFitSidebar = {
+      isOpen: () => tabletSidebarOpen,
+      width: () => 280,
+      setOpen: (open) => { tabletSidebarOpen = open; },
+      subscribeToUserChanges: () => () => {},
+    };
+    store().moveContextSurfaceToZone('terminal', 'left');
+    watch({ current: null }, control);
+
+    store().openContextSurface(directory, 'terminal');
+    expect(tabletSidebarOpen).toBe(false);
+    expect(store().isSidebarOpen).toBe(true);
+    expect(store().sidebarFoldedForExpandedZone).toBe(false);
+
+    store().closeContextZone(directory, 'left');
+    expect(tabletSidebarOpen).toBe(false);
+    expect(store().contextPanelByDirectory[directory]?.isOpen).toBe(true);
+    store().closeContextZone(directory, 'right');
+    expect(tabletSidebarOpen).toBe(true);
+    expect(store().isSidebarOpen).toBe(true);
+  });
+
+  test('shared zones already open when the tablet enters roomy mode fit its local sidebar', () => {
+    rowWidth = 500;
+    let tabletSidebarOpen = true;
+    const control: ZoneFitSidebar = {
+      isOpen: () => tabletSidebarOpen,
+      width: () => 280,
+      setOpen: (open) => { tabletSidebarOpen = open; },
+      subscribeToUserChanges: () => () => {},
+    };
+
+    watch({ current: null }, control);
+    expect(tabletSidebarOpen).toBe(false);
+    expect(store().isSidebarOpen).toBe(true);
+
+    store().closeContextZone(directory, 'right');
+    expect(tabletSidebarOpen).toBe(true);
   });
 });

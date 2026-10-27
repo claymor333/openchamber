@@ -406,11 +406,32 @@ export const useNativeMobileLifecycle = (onResume: () => void): void => {
     if (!isCapacitorMobileApp()) return;
 
     let disposed = false;
+    let appStateEventVersion = 0;
+    let nativeAppActive = false;
+    let readAppIsActive: (() => Promise<boolean>) | null = null;
     const cleanup: Array<() => void> = [];
+    const updateNativeActiveClass = () => {
+      document.documentElement.classList.toggle(
+        'oc-native-app-active',
+        nativeAppActive && document.visibilityState === 'visible',
+      );
+    };
     const resumeAfterInactive = () => {
       if (!wasInactiveRef.current) return;
       wasInactiveRef.current = false;
       onResume();
+    };
+    const refreshNativeActivity = () => {
+      if (!readAppIsActive) {
+        updateNativeActiveClass();
+        return;
+      }
+      void readAppIsActive().then((isActive) => {
+        if (disposed) return;
+        nativeAppActive = isActive;
+        updateNativeActiveClass();
+        if (isActive) resumeAfterInactive();
+      }).catch(() => undefined);
     };
 
     // Belt-and-suspenders resume detection. Capacitor's `appStateChange` is the
@@ -420,35 +441,47 @@ export const useNativeMobileLifecycle = (onResume: () => void): void => {
     const handleVisibility = () => {
       if (document.visibilityState === 'hidden') {
         wasInactiveRef.current = true;
+        updateNativeActiveClass();
         return;
       }
-      resumeAfterInactive();
+      refreshNativeActivity();
     };
+    document.documentElement.classList.remove('oc-native-app-active');
     document.addEventListener('visibilitychange', handleVisibility);
     cleanup.push(() => document.removeEventListener('visibilitychange', handleVisibility));
 
     void import('@capacitor/app').then(async ({ App }) => {
       if (disposed) return;
+      readAppIsActive = async () => (await App.getState()).isActive;
       const state = await App.addListener('appStateChange', ({ isActive }) => {
-        document.documentElement.classList.toggle('oc-native-app-active', isActive);
+        appStateEventVersion += 1;
+        nativeAppActive = isActive;
+        updateNativeActiveClass();
         if (!isActive) {
           wasInactiveRef.current = true;
           return;
         }
         resumeAfterInactive();
       });
-      const resume = await App.addListener('resume', resumeAfterInactive);
+      const resume = await App.addListener('resume', refreshNativeActivity);
       if (disposed) {
         void state.remove();
         void resume.remove();
         return;
       }
       cleanup.push(() => void state.remove(), () => void resume.remove());
+      const versionBeforeRead = appStateEventVersion;
+      const initialState = await App.getState();
+      if (disposed || appStateEventVersion !== versionBeforeRead) return;
+      nativeAppActive = initialState.isActive;
+      if (!initialState.isActive) wasInactiveRef.current = true;
+      updateNativeActiveClass();
     }).catch(() => undefined);
 
     return () => {
       disposed = true;
       cleanup.forEach((remove) => remove());
+      document.documentElement.classList.remove('oc-native-app-active');
     };
   }, [onResume]);
 };

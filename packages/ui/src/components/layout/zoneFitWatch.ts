@@ -7,12 +7,21 @@ type Side = 'left' | 'right';
 export type SidebarFoldReason = Side | 'expanded';
 type UIState = ReturnType<typeof useUIStore.getState>;
 
+export type ZoneFitSidebar = {
+  isOpen: () => boolean;
+  width: () => number;
+  setOpen: (open: boolean) => void;
+  subscribeToUserChanges: (listener: () => void) => () => void;
+};
+
 type ZoneFitWatch = {
   directoryKey: string;
   /** What was folded and why, kept across calls so a project switch can undo it. */
   folded: { current: SidebarFoldReason | null };
   /** The workspace row's width now: left zone, chat and right zone. */
   readRowWidth: () => number | undefined;
+  /** A shell-owned sidebar, when the desktop sidebar store does not own it. */
+  sidebar?: ZoneFitSidebar;
 };
 
 /**
@@ -23,7 +32,9 @@ type ZoneFitWatch = {
  * folds the sidebar too and gives it back on collapse. Returns the
  * unsubscribe.
  */
-export const watchZoneFit = ({ directoryKey, folded, readRowWidth }: ZoneFitWatch): (() => void) => {
+export const watchZoneFit = ({ directoryKey, folded, readRowWidth, sidebar }: ZoneFitWatch): (() => void) => {
+  const sidebarIsOpen = (state: UIState) => sidebar?.isOpen() ?? state.isSidebarOpen;
+  const sidebarWidth = (state: UIState) => sidebar?.width() ?? state.sidebarWidth;
   const sidesShown = (state: UIState) => {
     const panel = state.contextPanelByDirectory[directoryKey];
     return {
@@ -60,20 +71,21 @@ export const watchZoneFit = ({ directoryKey, folded, readRowWidth }: ZoneFitWatc
 
   const setFoldReason = (reason: SidebarFoldReason | null) => {
     folded.current = reason;
-    useUIStore.getState().setSidebarFoldedForExpandedZone(reason === 'expanded');
+    if (!sidebar) useUIStore.getState().setSidebarFoldedForExpandedZone(reason === 'expanded');
   };
   const setSidebar = (open: boolean) => {
     settingSidebar = true;
-    useUIStore.getState().setSidebarOpen(open);
+    if (sidebar) sidebar.setOpen(open);
+    else useUIStore.getState().setSidebarOpen(open);
     settingSidebar = false;
   };
   const unfoldSidebar = () => {
     setFoldReason(null);
-    if (!useUIStore.getState().isSidebarOpen) setSidebar(true);
+    if (!sidebarIsOpen(useUIStore.getState())) setSidebar(true);
   };
 
   // A fold for an expanded zone saved before a restart.
-  if (!folded.current && useUIStore.getState().sidebarFoldedForExpandedZone) {
+  if (!sidebar && !folded.current && useUIStore.getState().sidebarFoldedForExpandedZone) {
     folded.current = 'expanded';
   }
   // The project switched to may not show what the sidebar folded for: the
@@ -83,7 +95,7 @@ export const watchZoneFit = ({ directoryKey, folded, readRowWidth }: ZoneFitWatc
     unfoldSidebar();
   }
   // A zone shown expanded there takes the sidebar's room.
-  if (!folded.current && previousExpanded && useUIStore.getState().isSidebarOpen) {
+  if (!folded.current && previousExpanded && sidebarIsOpen(useUIStore.getState())) {
     setFoldReason('expanded');
     setSidebar(false);
   }
@@ -95,10 +107,10 @@ export const watchZoneFit = ({ directoryKey, folded, readRowWidth }: ZoneFitWatc
     // row is planned as it will be then, the sidebar room this zone may take.
     const foldedForExpanded = folded.current === 'expanded';
     const plan = planZoneFit({
-      rowWidth: foldedForExpanded ? rowWidth - state.sidebarWidth : rowWidth,
+      rowWidth: foldedForExpanded ? rowWidth - sidebarWidth(state) : rowWidth,
       leftWidth: shownWidth(state, 'left', shown.left),
       rightWidth: shownWidth(state, 'right', shown.right),
-      sidebarWidth: state.isSidebarOpen || foldedForExpanded ? state.sidebarWidth : null,
+      sidebarWidth: sidebarIsOpen(state) || foldedForExpanded ? sidebarWidth(state) : null,
       opening,
     });
     if (plan.displace) {
@@ -109,7 +121,7 @@ export const watchZoneFit = ({ directoryKey, folded, readRowWidth }: ZoneFitWatc
       // Taken over from an expanded zone, the sidebar is already closed and
       // stays so when that zone collapses.
       setFoldReason(opening);
-      if (state.isSidebarOpen) setSidebar(false);
+      if (sidebarIsOpen(state)) setSidebar(false);
     }
     if (plan.displace) state.closeContextZone(directoryKey, plan.displace);
   };
@@ -136,9 +148,9 @@ export const watchZoneFit = ({ directoryKey, folded, readRowWidth }: ZoneFitWatc
     if (restore) useUIStore.getState().setActiveContextPanelTab(directoryKey, restore.tabId);
   };
 
-  return useUIStore.subscribe((state, prevState) => {
+  const unsubscribeStore = useUIStore.subscribe((state, prevState) => {
     // The user's own sidebar toggle is theirs to keep.
-    if (state.isSidebarOpen !== prevState.isSidebarOpen && !settingSidebar) setFoldReason(null);
+    if (!sidebar && state.isSidebarOpen !== prevState.isSidebarOpen && !settingSidebar) setFoldReason(null);
     const shown = sidesShown(state);
     const expanded = anyZoneExpanded(state);
     const before = previous;
@@ -164,11 +176,30 @@ export const watchZoneFit = ({ directoryKey, folded, readRowWidth }: ZoneFitWatc
     for (const side of opened) makeRoom(state, side, shown);
     // In the same notification as the expand, so the sidebar folds while
     // the zone grows and both animate together.
-    if (expanded && !expandedBefore && state.isSidebarOpen) {
+    if (expanded && !expandedBefore && sidebarIsOpen(state)) {
       setFoldReason('expanded');
       setSidebar(false);
     } else if (!expanded && expandedBefore && folded.current === 'expanded') {
       unfoldSidebar();
     }
   });
+  const unsubscribeSidebar = sidebar?.subscribeToUserChanges(() => setFoldReason(null));
+  // The mobile shell mounts this watcher when it enters the shared-panel
+  // layout. Reconcile zones already open from the previous roomy layout with
+  // its local sessions sidebar just as desktop does for zones opened live.
+  if (sidebar) {
+    const state = useUIStore.getState();
+    const shown = sidesShown(state);
+    const opening = (['left', 'right'] as const)
+      .filter((side) => shown[side])
+      .sort((a, b) => (
+        (resolveZoneActiveTab(state.contextPanelByDirectory[directoryKey], state.contextSurfaceZones, b)?.touchedAt ?? 0)
+        - (resolveZoneActiveTab(state.contextPanelByDirectory[directoryKey], state.contextSurfaceZones, a)?.touchedAt ?? 0)
+      ))[0];
+    if (opening) makeRoom(state, opening, shown);
+  }
+  return () => {
+    unsubscribeStore();
+    unsubscribeSidebar?.();
+  };
 };

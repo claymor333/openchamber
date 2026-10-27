@@ -8,18 +8,19 @@ import { McpIcon } from '@/components/icons/McpIcon';
 import { McpDropdownContent } from '@/components/mcp/McpDropdown';
 import { useMcpDirectory } from '@/components/mcp/useMcpDirectory';
 import { ProjectContextPanel } from '@/components/layout/RightSidebarTabs';
+import { MobileResourceMonitorPane, type MobileResourceMonitorSurfaceState } from '@/components/layout/MobileResourceMonitorPane';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 import { SortableTabsStrip, type SortableTabsStripItem } from '@/components/ui/sortable-tabs-strip';
 import { TerminalView } from '@/components/views/TerminalView';
 import { useI18n } from '@/lib/i18n';
-import { orderMobileWorkspaceTabs, stripMobileWorkspaceTabs, type MobileWorkspaceTab } from '@/lib/mobileWorkspaceTabs';
+import { orderMobileWorkspaceTabs, RESOURCE_MONITOR_WORKSPACE_TAB, stripMobileWorkspaceTabs, type MobileWorkspaceTab } from '@/lib/mobileWorkspaceTabs';
 import type { ProjectRef } from '@/lib/projectContextApi';
 import { cn } from '@/lib/utils';
 import { useMcpConfigStore } from '@/stores/useMcpConfigStore';
 import { useMcpStore } from '@/stores/useMcpStore';
 import { useUIStore } from '@/stores/useUIStore';
 
-import { MobileChangesSurface } from './MobileChangesSurface';
+import { MobileChangesSurface, type MobileChangesNavigation } from './MobileChangesSurface';
 import { MobileFilesSurface } from './MobileFilesSurface';
 import { useEdgeSwipe } from './useEdgeSwipe';
 import { isVimEditorEventTarget } from '@/lib/editorFocus';
@@ -90,7 +91,7 @@ const McpWorkspacePane: React.FC<{ onOpenMcpSettings: () => void; active: boolea
   );
 };
 
-/** The workspace surfaces as tabs (Changes / Files / Terminal / Notes / MCP).
+/** The workspace surfaces as tabs (Changes / Files / Terminal / Notes / MCP / Resource Monitor).
 
     Two hosts, same content and same state:
      - `drawer` (default) covers the app and slides in from the right edge —
@@ -108,14 +109,33 @@ export const MobileWorkspaceDrawer: React.FC<{
   onClose: () => void;
   tab: MobileWorkspaceTab;
   onTabChange: (tab: MobileWorkspaceTab) => void;
+  mobileResourceMonitor: MobileResourceMonitorSurfaceState;
   /** When set, the Changes tab opens directly into the per-file diff. */
   pendingChangesDiff: { path: string; staged: boolean } | null;
+  sharedFileEditor: boolean;
+  onFileEditorHostChange: (host: HTMLDivElement | null) => void;
+  onMobileFileChange: (path: string | null, root: string) => void;
+  onMobileFileOpen: (path: string, root: string) => void;
+  onMobileChangesNavigation: (navigation: MobileChangesNavigation) => void;
   /** Notes tab: opens a plan fullscreen (layered above the drawer). */
   onOpenPlan: (plan: { id: string; title: string; projectRef: ProjectRef }) => void;
   /** MCP tab: jump to the MCP settings page pre-seeded with a new server draft. */
   onOpenMcpSettings: () => void;
-  variant?: 'drawer' | 'panel';
-}> = ({ open, onClose, tab, onTabChange, pendingChangesDiff, onOpenPlan, onOpenMcpSettings, variant = 'drawer' }) => {
+}> = ({
+  open,
+  onClose,
+  tab,
+  onTabChange,
+  mobileResourceMonitor,
+  pendingChangesDiff,
+  sharedFileEditor,
+  onFileEditorHostChange,
+  onMobileFileChange,
+  onMobileFileOpen,
+  onMobileChangesNavigation,
+  onOpenPlan,
+  onOpenMcpSettings,
+}) => {
   const { t, direction } = useI18n();
   const rootRef = React.useRef<HTMLElement | null>(null);
   const drawerRef = React.useRef<HTMLElement>(null);
@@ -129,6 +149,7 @@ export const MobileWorkspaceDrawer: React.FC<{
   const tabOrder = useUIStore((state) => state.mobileWorkspaceTabOrder);
   const hiddenTabs = useUIStore((state) => state.mobileWorkspaceHiddenTabs);
   const setTabOrder = useUIStore((state) => state.setMobileWorkspaceTabOrder);
+  const resourceMonitorAvailable = mobileResourceMonitor.guestAvailable;
   const tabRef = React.useRef(tab);
   React.useEffect(() => {
     tabRef.current = tab;
@@ -136,11 +157,10 @@ export const MobileWorkspaceDrawer: React.FC<{
 
   // Swipe from the drawer's start edge back toward its end = close, the
   // reverse of the end-edge swipe that opened it from the chat. Only the
-  // full-cover drawer has an edge to grab; the tablet panel is closed from the
-  // header instead.
+  // full-cover drawer has an edge to grab.
   const closeFromEdge = () => onCloseRef.current();
   useEdgeSwipe(drawerRef, {
-    enabled: variant === 'drawer' && open,
+    enabled: open,
     ...(direction === 'rtl' ? { onRightEdgeSwipe: closeFromEdge } : { onLeftEdgeSwipe: closeFromEdge }),
   });
 
@@ -179,10 +199,8 @@ export const MobileWorkspaceDrawer: React.FC<{
 
   React.useEffect(() => {
     if (!open) return;
-    // Only the full-cover drawer owns the page scroll; the inline panel sits
-    // inside the shell and must leave the chat beside it scrollable.
     const previousOverflow = document.body.style.overflow;
-    if (variant === 'drawer') document.body.style.overflow = 'hidden';
+    document.body.style.overflow = 'hidden';
     const handleKeyDown = (event: KeyboardEvent) => {
       // The terminal owns Escape (it goes to the PTY) — don't hijack it.
       // The same goes for the file editor on the Vim keymap, where Escape
@@ -195,12 +213,12 @@ export const MobileWorkspaceDrawer: React.FC<{
     };
     document.addEventListener('keydown', handleKeyDown);
     return () => {
-      if (variant === 'drawer') document.body.style.overflow = previousOverflow;
+      document.body.style.overflow = previousOverflow;
       document.removeEventListener('keydown', handleKeyDown);
     };
-  }, [open, variant]);
+  }, [open]);
 
-  if (variant === 'drawer' && !rootRef.current) return null;
+  if (!rootRef.current) return null;
 
   const tabDefinitions = {
     changes: { id: 'changes', label: t('mobile.menu.git'), icon: <Icon name="git-branch" className="h-3.5 w-3.5" /> },
@@ -208,15 +226,22 @@ export const MobileWorkspaceDrawer: React.FC<{
     terminal: { id: 'terminal', label: t('mobile.menu.terminal'), icon: <Icon name="terminal" className="h-3.5 w-3.5" /> },
     notes: { id: 'notes', label: t('contextRail.surface.notes'), icon: <Icon name="sticky-note" className="h-3.5 w-3.5" /> },
     mcp: { id: 'mcp', label: t('mobile.menu.mcp'), icon: <McpIcon className="h-3.5 w-3.5" /> },
+    'resource-monitor': {
+      id: RESOURCE_MONITOR_WORKSPACE_TAB,
+      label: t('settings.integrations.extensionCatalog.resourceMonitor.name'),
+      icon: <Icon name="pulse" className="h-3.5 w-3.5" />,
+    },
   } satisfies Record<MobileWorkspaceTab, SortableTabsStripItem>;
   // The user's tabs in their order (Settings > General), plus a hidden one
   // while something opened it.
-  const stripTabs = stripMobileWorkspaceTabs(tabOrder, hiddenTabs, tab);
+  const allTabs = orderMobileWorkspaceTabs(tabOrder, resourceMonitorAvailable);
+  const activeTab = allTabs.includes(tab) ? tab : 'changes';
+  const stripTabs = stripMobileWorkspaceTabs(tabOrder, hiddenTabs, activeTab, resourceMonitorAvailable);
   const tabItems = stripTabs.map((id) => tabDefinitions[id]);
   const soleTab = tabItems.length === 1 ? tabItems[0] : null;
   // A long press on a tab drags it; the new order covers hidden tabs too.
   const reorderTabs = (activeId: string, overId: string) => {
-    const all = orderMobileWorkspaceTabs(tabOrder);
+    const all = orderMobileWorkspaceTabs(tabOrder, resourceMonitorAvailable);
     const from = all.findIndex((id) => id === activeId);
     const to = all.findIndex((id) => id === overId);
     if (from < 0 || to < 0) return;
@@ -239,7 +264,7 @@ export const MobileWorkspaceDrawer: React.FC<{
           ) : visible ? (
             <SortableTabsStrip
               items={tabItems}
-              activeId={tab}
+              activeId={activeTab}
               onSelect={(id) => {
                 const next = stripTabs.find((entry) => entry === id);
                 if (next) onTabChange(next);
@@ -281,6 +306,7 @@ export const MobileWorkspaceDrawer: React.FC<{
                 visible={open && tab === 'changes'}
                 initialDiff={pendingChangesDiff}
                 onNavigatedToChat={onClose}
+                onNavigationChange={onMobileChangesNavigation}
               />
             </ErrorBoundary>
           </div>
@@ -288,7 +314,13 @@ export const MobileWorkspaceDrawer: React.FC<{
         {visitedTabs.has('files') ? (
           <div className={cn('h-full', tab !== 'files' && 'hidden')}>
             <ErrorBoundary>
-              <MobileFilesSurface visible={open && tab === 'files'} />
+              <MobileFilesSurface
+                visible={open && tab === 'files'}
+                sharedEditor={sharedFileEditor}
+                onEditorHostChange={onFileEditorHostChange}
+                onActiveFileChange={onMobileFileChange}
+                onOpenFile={onMobileFileOpen}
+              />
             </ErrorBoundary>
           </div>
         ) : null}
@@ -313,17 +345,17 @@ export const MobileWorkspaceDrawer: React.FC<{
             </ErrorBoundary>
           </div>
         ) : null}
+        {visitedTabs.has(RESOURCE_MONITOR_WORKSPACE_TAB) ? (
+          <MobileResourceMonitorPane
+            key={`${mobileResourceMonitor.runtimeKey}:${RESOURCE_MONITOR_WORKSPACE_TAB}`}
+            {...mobileResourceMonitor}
+            workspaceOpen={open}
+            tab={activeTab}
+          />
+        ) : null}
       </div>
     </>
   );
-
-  if (variant === 'panel') {
-    // The caller animates the width; the content itself is plain flow so it
-    // never gets its own compositing layer (iOS clips those to the safe-area
-    // viewport, which is exactly what the drawer's settled `transform: none`
-    // avoids on the other host).
-    return <div className="flex h-full min-h-0 flex-col bg-background text-foreground">{body}</div>;
-  }
 
   return createPortal(
     <section

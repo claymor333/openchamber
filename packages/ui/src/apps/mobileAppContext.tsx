@@ -2,6 +2,8 @@
 import React from 'react';
 
 export type MobileAppActions = {
+  /** True only while MobileApp mounts the shared tablet context-panel layout. */
+  sharedContextPanelsAvailable: boolean;
   /** Open the Changes surface as a modal and (optionally) navigate it to a specific diff. */
   openChanges: (options?: { diffPath?: string | null; staged?: boolean }) => void;
   /** Open the Files surface as a modal. */

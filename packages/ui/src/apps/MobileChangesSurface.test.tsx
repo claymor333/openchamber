@@ -110,6 +110,8 @@ test('mobile comparisons drill into files, retry, resume, change source, and yie
   const { RuntimeAPIContext } = await import('@/contexts/runtimeAPIContext');
   const { createWebAPIs } = await import('../../../web/src/api/index');
   const { useGitStore } = await import('@/stores/useGitStore');
+  const { useUIStore } = await import('@/stores/useUIStore');
+  const { openMobileWorkspaceInContext } = await import('./mobileTabletContext');
   const { getSourceControlAuthKey, useSourceControlAuthStore } = await import('@/stores/useSourceControlAuthStore');
   useSourceControlAuthStore.setState({
     entries: { [getSourceControlAuthKey({ provider: 'github', instance: 'github.com' })]: { status: CONNECTED, isLoading: false, hasChecked: true } },
@@ -140,6 +142,7 @@ test('mobile comparisons drill into files, retry, resume, change source, and yie
   let directory = '/repo';
   let visible = true;
   let initialDiff: { path: string; staged: boolean } | null = null;
+  const latestNavigation = React.createRef<{ directory: string; runtimeKey: string; diff: { path: string; staged: boolean } | null }>();
   const container = document.createElement('div');
   document.body.append(container);
   const root = createRoot(container);
@@ -147,7 +150,8 @@ test('mobile comparisons drill into files, retry, resume, change source, and yie
     root.render(<SyncProvider sdk={SYNC_SDK} directory={directory}><I18nProvider><RuntimeAPIContext.Provider value={apis}>
       <MobileChangesPane rootDirectory={directory}
         repository={{ rootIsGitRepo: true, gitDirectory: directory, nestedRepos: null, nestedRepoSelection: null, repositoryOptions: null }}
-        visible={visible} initialDiff={initialDiff} />
+        visible={visible} initialDiff={initialDiff}
+        onNavigationChange={(navigation) => { latestNavigation.current = navigation; }} />
     </RuntimeAPIContext.Provider></I18nProvider></SyncProvider>);
   });
   const click = async (selector: string) => {
@@ -210,6 +214,7 @@ test('mobile comparisons drill into files, retry, resume, change source, and yie
     await render();
     expect(container.querySelector('h2')?.textContent).toBe('branch.png');
     await click('[aria-label="Back"]');
+    expect(latestNavigation.current?.diff).toBeNull();
     await click('[aria-label="Base branch"]');
     await click('[data-value="refs/heads/parent"]');
     expect(container.querySelector('[title="branch.png"]')).toBeNull();
@@ -252,6 +257,16 @@ test('mobile comparisons drill into files, retry, resume, change source, and yie
     expect(container.querySelector('[aria-label="Select change mode"]')?.textContent).toBe('Changes');
     expect(container.querySelector('[aria-label="Publish"]')).not.toBeNull();
     expect(checkoutControl()).toBeDefined();
+    const workingFileRow = container.querySelector<HTMLElement>('[title="working.png"]')?.closest<HTMLElement>('[role="button"]');
+    if (!workingFileRow) throw new Error('Missing staged working file row');
+    await act(async () => workingFileRow.click());
+    expect(latestNavigation.current).toMatchObject({ directory: '/repo', diff: { path: 'working.png', staged: true } });
+    useUIStore.getState().openContextDiff('/repo', '/repo/previous.ts', false);
+    const selectedDiff = latestNavigation.current;
+    if (!selectedDiff?.diff) throw new Error('The selected Changes diff was not reported for tablet handoff');
+    expect(openMobileWorkspaceInContext(selectedDiff.directory, 'changes', selectedDiff.diff)).toBe(true);
+    expect(useUIStore.getState().contextPanelByDirectory['/repo']?.tabs.find((tab) => tab.mode === 'diff'))
+      .toMatchObject({ targetPath: 'working.png', stagedDiff: true });
 
     // A nested-repository answer must not outlive the read that produced it.
     await act(async () => { seed('/repo', { ...status, isClean: false, files: [{ path: 'nested/', index: '?', working_dir: '?' }] }); });
@@ -272,6 +287,7 @@ test('mobile comparisons drill into files, retry, resume, change source, and yie
     initialDiff = { path: 'working.png', staged: true };
     await render();
     expect(container.querySelector('h2')?.textContent).toBe('working.png');
+    expect(latestNavigation.current).toMatchObject({ directory: '/repo', diff: { path: 'working.png', staged: true } });
 
     await act(async () => { seed('/repo-two'); });
     directory = '/repo-two';

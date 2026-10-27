@@ -7,6 +7,7 @@ import type { GuestCatalog, InstalledGuest } from './types.ts';
 export const RESOURCE_MONITOR_GUEST_ID = 'resource-monitor';
 export const RESOURCE_MONITOR_MOBILE_MIN_VERSION = '1.4.1';
 export const RESOURCE_MONITOR_MOBILE_SOURCE_URL = 'https://github.com/claymor333/openchamber-resource-monitor';
+export const RESOURCE_MONITOR_MOBILE_FRAME_NAME = 'openchamber-resource-monitor-mobile';
 
 /** Keep other installed guests out of the mobile guest surface and settings list. */
 export const filterMobileGuestCatalog = (catalog: GuestCatalog): GuestCatalog => ({

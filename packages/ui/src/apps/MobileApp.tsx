@@ -1,4 +1,5 @@
 import { OpenCodeCompatibilityGate } from '@/components/update/OpenCodeCompatibilityGate';
+import { FireworksProvider } from '@/contexts/FireworksContext';
 import React from 'react';
 
 import { AboutSettings } from '@/components/sections/openchamber/AboutSettings';
@@ -41,7 +42,9 @@ import { readTabletLayout, useOrientation, useTabletLayout } from '@/lib/device'
 import { useHardwareKeyboard } from '@/lib/hardwareKeyboard';
 import { useI18n } from '@/lib/i18n';
 import { subscribeOpenchamberEvents } from '@/lib/openchamberEvents';
-import { getRuntimeApiBaseUrl, subscribeRuntimeEndpointChanged, switchRuntimeEndpoint, MOBILE_DISCONNECTED_RUNTIME_KEY } from '@/lib/runtime-switch';
+import { getRuntimeApiBaseUrl, getRuntimeKey, subscribeRuntimeEndpointChanged, switchRuntimeEndpoint, MOBILE_DISCONNECTED_RUNTIME_KEY } from '@/lib/runtime-switch';
+import { RESOURCE_MONITOR_GUEST_ID, isResourceMonitorMobileReady } from '@/lib/guests/mobile-support';
+import { useGuestsStore } from '@/lib/guests/store';
 import { subscribeActiveRelayTunnelStatus } from '@/lib/relay/runtime-tunnel';
 import { isRelayLimitReached } from '@/lib/relay/tunnel-client';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
@@ -54,7 +57,7 @@ import { useSourceControlAuthStore } from '@/stores/useSourceControlAuthStore';
 import { useSourceControlProviderRegistry } from '@/lib/source-control/providers/registry';
 import { refreshTrackers } from '@/stores/useTrackerAuthStore';
 import { useMcpConfigStore, type McpDraft } from '@/stores/useMcpConfigStore';
-import { useUIStore } from '@/stores/useUIStore';
+import { normalizeContextPanelDirectoryKey, useUIStore } from '@/stores/useUIStore';
 import { closeTopmostBackLayer } from '@/lib/mobileBackLayers';
 import { useUpdateStore } from '@/stores/useUpdateStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
@@ -73,7 +76,8 @@ import { MobileSourceBoard } from '@/components/sourceBoard/SourceBoardView';
 import { OverviewPage } from '@/components/overview/OverviewView';
 import { ScheduledTasksView, type ScheduledTasksLeaveReason } from '@/components/session/ScheduledTasksDialog';
 import { MobileWorkspaceDrawer } from './MobileWorkspaceDrawer';
-import { shownMobileWorkspaceTabs, type MobileWorkspaceTab } from '@/lib/mobileWorkspaceTabs';
+import { MobileTabletContextWorkspace } from './MobileTabletContextWorkspace';
+import { resolveMobileWorkspaceTab, type MobileWorkspaceTab } from '@/lib/mobileWorkspaceTabs';
 import { DedicatedMobileAppProvider, type MobileAppActions } from './mobileAppContext';
 import { autoConnectLastInstance, getAutoConnectTargetLabel, logMobileConnectEvent, reprobeActiveConnection, suppressAutoConnectUntilManualConnect, type AutoConnectOutcome } from './mobileConnections';
 import { isCapacitorMobileApp, useNativeAndroidBackButton, useNativeMobileChrome, useNativeMobileLifecycle } from './mobileNativeChrome';
@@ -83,13 +87,26 @@ import { useFontsReady } from './useFontsReady';
 import { useDeepLinkHandlers, useDeepLinkSource } from './deepLinkNavigation';
 import { useEdgeSwipe } from './useEdgeSwipe';
 import { useNativePushRegistration } from './useNativePushRegistration';
+import { MobileWorkspaceActivityProvider, useMobileWorkspaceActivity } from '@/lib/mobileWorkspaceActivity';
 import { IpadSidebarResizeHandle } from './IpadSidebarResizeHandle';
 import {
   IPAD_LEFT_SIDEBAR_WIDTH,
-  IPAD_RIGHT_SIDEBAR_WIDTH,
-  IPAD_WORKSPACE_SIDEBAR_MAX_WIDTH,
   useIpadSidebarResize,
 } from './ipadSidebarResize';
+import type { ZoneFitSidebar } from '@/components/layout/zoneFitWatch';
+import { setChatCovered, useRightSlotStore } from '@/components/layout/rightSlot';
+import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
+import { CONTEXT_ZONE_DEFAULT_WIDTH, isZoneShown, resolveZoneActiveTab } from '@/lib/workspace/zones';
+import { panelContentDirectory } from '@/lib/spaces/space-creation-requests';
+import { useDraftSpaceTarget } from '@/lib/spaces/useDraftSpaceTarget';
+import { useGitStore } from '@/stores/useGitStore';
+import {
+  closeAllContextZones,
+  closeMostRecentContextZone,
+  mobileWorkspaceForOpenContext,
+  openMobileWorkspaceInContext,
+} from './mobileTabletContext';
+import type { MobileChangesNavigation } from './MobileChangesSurface';
 
 const MOBILE_SETTINGS_PAGES = [
   'general',
@@ -114,6 +131,7 @@ const MOBILE_SETTINGS_PAGES = [
   'usage',
   'voice',
   'integrations',
+  'extensions',
   'about',
 ] as const;
 
@@ -126,8 +144,10 @@ const NATIVE_RESUME_SYNC_EVENT_THROTTLE_MS = 1_000;
 /** The fullscreen app-level surfaces, reachable from the sessions drawer
     footer. Exactly one can be open at a time — opening another replaces it,
     closing returns to the chat. The sessions drawer and the workspace drawer
-    (Changes / Files / Terminal / Notes / MCP) are separate layers. */
+    (Changes / Files / Terminal / Notes / MCP / Resource Monitor) are separate layers. */
 type MobileSurface = 'archive' | 'board' | 'overview' | 'instances' | 'scheduled' | 'settings' | 'update' | 'usage';
+type MobileFileTarget = { runtimeKey: string; directoryKey: string; root: string; path: string };
+type ScopedMobileDiff = { runtimeKey: string; directoryKey: string; path: string; staged: boolean };
 
 const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onActiveConnectionDeleted }) => {
   const { t, direction } = useI18n();
@@ -143,41 +163,47 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
     }
   }), []);
   const runOverviewOpen = useUIStore((state) => state.runOverviewKey !== null);
+  const chatCovered = useRightSlotStore((state) => state.chatCovered);
   React.useEffect(() => {
     if (runOverviewOpen) setSessionsSheetOpen(false);
   }, [runOverviewOpen]);
   const [activeSurface, setActiveSurface] = React.useState<MobileSurface | null>(null);
-  // Phone right drawer with the workspace tabs; the tab persists across
-  // open/close so the right-edge swipe reopens where the user left off.
+  // Mobile workspace drawer tab; it persists across open/close so the
+  // right-edge swipe reopens where the user left off on narrow layouts.
   const [workspaceOpen, setWorkspaceOpen] = React.useState(false);
   const [workspaceTab, setWorkspaceTab] = React.useState<MobileWorkspaceTab>('changes');
-  // Opening the drawer itself lands on the last tab, unless the user has since
-  // hidden it in Settings; then on their first tab. A trigger that asks for a
-  // tab (a changed file in the chat) sets it on its own and opens it hidden or not.
-  const openWorkspace = React.useCallback(() => {
-    const { mobileWorkspaceTabOrder, mobileWorkspaceHiddenTabs } = useUIStore.getState();
-    const shown = shownMobileWorkspaceTabs(mobileWorkspaceTabOrder, mobileWorkspaceHiddenTabs);
-    setWorkspaceTab((current) => (shown.includes(current) ? current : shown[0]));
-    setWorkspaceOpen(true);
-  }, []);
+  const mobileWorkspaceTabOrder = useUIStore((state) => state.mobileWorkspaceTabOrder);
+  const mobileWorkspaceHiddenTabs = useUIStore((state) => state.mobileWorkspaceHiddenTabs);
+  const runtimeKey = getRuntimeKey();
+  const resourceMonitorCatalogReady = useGuestsStore((state) => state.status === 'ready' && state.runtimeKey === runtimeKey);
+  const resourceMonitorGuest = useGuestsStore((state) => (
+    state.status === 'ready' && state.runtimeKey === runtimeKey
+      ? state.guests.find((guest) => guest.id === RESOURCE_MONITOR_GUEST_ID)
+      : undefined
+  ));
+  const resourceMonitorAvailable = isResourceMonitorMobileReady(resourceMonitorGuest);
   // A plan opened from the workspace drawer's Notes tab, shown as a fullscreen
   // layer on top of it (back returns to the notes).
   const [openPlan, setOpenPlan] = React.useState<{ id: string; title: string; projectRef: ProjectRef } | null>(null);
   const [settingsInitialMobileStage, setSettingsInitialMobileStage] = React.useState<'nav' | 'page-content'>('nav');
-  // When set, the Changes surface opens directly into the per-file diff for this path.
-  const [pendingChangesDiff, setPendingChangesDiff] = React.useState<{ path: string; staged: boolean } | null>(null);
+  // This is the same FilesView host across the drawer, shared panels and fold transitions.
+  const [mobileFileEditorHost, setMobileFileEditorHost] = React.useState<HTMLDivElement | null>(null);
+  const [mobileFileTarget, setMobileFileTarget] = React.useState<MobileFileTarget | null>(null);
+  const [mobileChangesNavigation, setMobileChangesNavigation] = React.useState<MobileChangesNavigation & { directoryKey: string } | null>(null);
+  // External file-diff requests are scoped to their runtime/project before they can be replayed.
+  const [pendingChangesDiff, setPendingChangesDiff] = React.useState<ScopedMobileDiff | null>(null);
   const setSettingsPage = useUIStore((state) => state.setSettingsPage);
   const wideChatLayoutEnabled = useUIStore((state) => state.wideChatLayoutEnabled);
   const updateAvailable = useUpdateStore((state) => state.available);
   const updateRuntimeType = useUpdateStore((state) => state.runtimeType);
   const showCapacitorOnlyFeatures = React.useMemo(() => isCapacitorMobileApp(), []);
+  const lifecycleActivity = useMobileWorkspaceActivity(showCapacitorOnlyFeatures);
   const mcpServers = useMcpConfigStore((state) => state.mcpServers);
   const setMcpDraft = useMcpConfigStore((state) => state.setMcpDraft);
   const setSelectedMcp = useMcpConfigStore((state) => state.setSelectedMcp);
 
-  // NOTE: pendingChangesDiff is intentionally NOT cleared on close — it keys
-  // the persistent Changes pane in the workspace drawer, and clearing it would
-  // remount the pane (losing its navigation) on every close.
+  // NOTE: pendingChangesDiff is intentionally NOT cleared on close — it keeps
+  // the selected Changes target when switching between drawer and context modes.
   const closeSurface = React.useCallback(() => {
     setActiveSurface(null);
     setOpenPlan(null);
@@ -196,21 +222,55 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
     openSurface('settings');
   }, [openSurface]);
 
-  // Tablet: sessions live in a persistent full-height left sidebar instead of
-  // the phone's drawer. Everything else — the workspace drawer, the header, the
-  // app-level surfaces — is shared with phones.
+  // Tablets keep the sessions sidebar and use the desktop context surfaces when
+  // there is room beside chat. Phones and narrow tablet layouts keep the drawer.
   //
   // A SIZE class, not a device check: an unfolded book foldable is a tablet
   // until it is folded shut, and the shell keeps running across that change.
   const { enabled: isTabletLayout, roomyForPanels } = useTabletLayout();
+  const [retainTabletContext, setRetainTabletContext] = React.useState(() => readTabletLayout().enabled);
+  React.useEffect(() => {
+    if (isTabletLayout) setRetainTabletContext(true);
+  }, [isTabletLayout]);
+  const effectiveDirectory = useEffectiveDirectory();
+  const draftSpace = useDraftSpaceTarget();
+  const mobileFilesRoot = panelContentDirectory(draftSpace, effectiveDirectory) ?? '';
+  const currentRuntimeKey = useGitStore((state) => state.runtimeKey);
+  const directoryKey = effectiveDirectory ? normalizeContextPanelDirectoryKey(effectiveDirectory) : '';
+  const mobileFilesRootKey = mobileFilesRoot ? normalizeContextPanelDirectoryKey(mobileFilesRoot) : '';
+  const currentMobileFileTarget = mobileFileTarget
+    && mobileFileTarget.runtimeKey === currentRuntimeKey
+    && mobileFileTarget.directoryKey === directoryKey
+    && mobileFileTarget.root === mobileFilesRootKey
+    ? mobileFileTarget
+    : null;
+  const currentMobileChangesNavigation = mobileChangesNavigation
+    && mobileChangesNavigation.runtimeKey === currentRuntimeKey
+    && mobileChangesNavigation.directoryKey === directoryKey
+    && normalizeContextPanelDirectoryKey(mobileChangesNavigation.directory) === mobileFilesRootKey
+    ? mobileChangesNavigation
+    : null;
+  const currentPendingDiff = pendingChangesDiff
+    && pendingChangesDiff.runtimeKey === currentRuntimeKey
+    && pendingChangesDiff.directoryKey === directoryKey
+    ? { path: pendingChangesDiff.path, staged: pendingChangesDiff.staged }
+    : null;
+  const workspaceDiff = currentMobileChangesNavigation
+    ? currentMobileChangesNavigation.diff
+    : currentPendingDiff;
   const orientation = useOrientation();
   const isPortrait = orientation === 'portrait';
   const hasHardwareKeyboard = useHardwareKeyboard();
   const [sidebarOpen, setSidebarOpen] = React.useState(() => readTabletLayout().roomyForPanels);
+  const sidebarFitListeners = React.useRef(new Set<() => void>());
+  const notifySidebarFitListeners = React.useCallback(() => {
+    sidebarFitListeners.current.forEach((listener) => listener());
+  }, []);
 
   const toggleSidebar = React.useCallback(() => {
+    notifySidebarFitListeners();
     setSidebarOpen((current: boolean) => !current);
-  }, []);
+  }, [notifySidebarFitListeners]);
 
   // Folding shut (or losing the room for a side-by-side layout) must not leave
   // a sidebar open over a phone-width screen.
@@ -218,66 +278,269 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
     if (!isTabletLayout) setSidebarOpen(false);
   }, [isTabletLayout]);
 
+  const leftResize = useIpadSidebarResize('left', 'openchamber.ipad.leftSidebarWidth', IPAD_LEFT_SIDEBAR_WIDTH);
+  const sidebarFitState = React.useRef({ open: sidebarOpen, width: leftResize.width });
+  sidebarFitState.current = { open: sidebarOpen, width: leftResize.width };
+  const sidebarFit = React.useMemo<ZoneFitSidebar>(() => ({
+    isOpen: () => sidebarFitState.current.open,
+    width: () => sidebarFitState.current.width,
+    setOpen: setSidebarOpen,
+    subscribeToUserChanges: (listener) => {
+      sidebarFitListeners.current.add(listener);
+      return () => { sidebarFitListeners.current.delete(listener); };
+    },
+  }), []);
+  const openSidebarFromUser = React.useCallback(() => {
+    notifySidebarFitListeners();
+    setSidebarOpen(true);
+  }, [notifySidebarFitListeners]);
+  // Keep the existing roomy-layout threshold. The shared zones leave the chat
+  // beside them; smaller viewports use the mobile drawer.
+  const workspaceAsPanel = roomyForPanels && Boolean(effectiveDirectory);
+  const sidebarWidth = isTabletLayout && sidebarOpen ? leftResize.width : 0;
+  const workspaceSurfaceVisible = activeSurface === null
+    && openPlan === null
+    && !runOverviewOpen
+    && !chatCovered
+    && (isTabletLayout || !sessionsSheetOpen);
+  const workspaceActivity = React.useMemo(() => ({
+    ...lifecycleActivity,
+    workspaceSurfaceVisible,
+  }), [lifecycleActivity, workspaceSurfaceVisible]);
+  const mobileResourceMonitor = React.useMemo(() => ({
+    surfaceVisible: workspaceSurfaceVisible,
+    guestAvailable: resourceMonitorAvailable,
+    documentVisible: workspaceActivity.documentVisible,
+    nativeAppActive: workspaceActivity.nativeAppActive,
+    isNativeApp: showCapacitorOnlyFeatures,
+    runtimeKey,
+  }), [resourceMonitorAvailable, runtimeKey, showCapacitorOnlyFeatures, workspaceActivity.documentVisible, workspaceActivity.nativeAppActive, workspaceSurfaceVisible]);
+
+  React.useEffect(() => {
+    if (workspaceTab !== 'resource-monitor') return;
+    const nextTab = resolveMobileWorkspaceTab(
+      workspaceTab,
+      mobileWorkspaceTabOrder,
+      mobileWorkspaceHiddenTabs,
+      resourceMonitorAvailable,
+    );
+    if (nextTab !== workspaceTab) setWorkspaceTab(nextTab);
+  }, [mobileWorkspaceHiddenTabs, mobileWorkspaceTabOrder, resourceMonitorAvailable, workspaceTab]);
+
+  React.useEffect(() => {
+    if (!workspaceAsPanel || !directoryKey || !resourceMonitorCatalogReady || resourceMonitorAvailable) return;
+    const store = useUIStore.getState();
+    const panel = store.contextPanelByDirectory[directoryKey];
+    for (const zone of ['left', 'right', 'bottom'] as const) {
+      if (
+        isZoneShown(panel, store.contextSurfaceZones, zone)
+        && resolveZoneActiveTab(panel, store.contextSurfaceZones, zone)?.mode === `plugin:${RESOURCE_MONITOR_GUEST_ID}`
+      ) store.closeContextZone(directoryKey, zone);
+    }
+  }, [directoryKey, resourceMonitorAvailable, resourceMonitorCatalogReady, workspaceAsPanel]);
+  const handleMobileFileChange = React.useCallback((path: string | null, root: string) => {
+    const rootKey = root ? normalizeContextPanelDirectoryKey(root) : '';
+    if (!path) {
+      setMobileFileTarget((current) => (
+        current?.directoryKey === directoryKey && current.root === rootKey ? null : current
+      ));
+      return;
+    }
+    if (!directoryKey || !rootKey) return;
+    setMobileFileTarget((current) => {
+      if (
+        current?.runtimeKey === currentRuntimeKey
+        && current.directoryKey === directoryKey
+        && current.root === rootKey
+        && current.path === path
+      ) return current;
+      return { runtimeKey: currentRuntimeKey, directoryKey, root: rootKey, path };
+    });
+  }, [currentRuntimeKey, directoryKey]);
+
+  const handleMobileFileOpen = React.useCallback((path: string, root: string) => {
+    handleMobileFileChange(path, root);
+    if (retainTabletContext && effectiveDirectory) useUIStore.getState().openContextFile(effectiveDirectory, path);
+  }, [effectiveDirectory, handleMobileFileChange, retainTabletContext]);
+
+  const handleMobileChangesNavigation = React.useCallback((navigation: MobileChangesNavigation) => {
+    const next = { ...navigation, directoryKey: normalizeContextPanelDirectoryKey(navigation.directory) };
+    setMobileChangesNavigation((current) => {
+      const sameDiff = current?.diff === null && next.diff === null
+        || Boolean(current?.diff && next.diff
+          && current.diff.path === next.diff.path
+          && current.diff.staged === next.diff.staged);
+      return current?.runtimeKey === next.runtimeKey
+        && current.directoryKey === next.directoryKey
+        && sameDiff
+        ? current
+        : next;
+    });
+    if (!next.diff) {
+      setPendingChangesDiff((current) => (
+        current?.runtimeKey === next.runtimeKey && current.directoryKey === next.directoryKey ? null : current
+      ));
+    }
+  }, []);
+
+  const openWorkspaceInContext = React.useCallback((tab: MobileWorkspaceTab, diff: { path: string; staged: boolean } | null = null) => {
+    setWorkspaceTab(tab);
+    setWorkspaceOpen(false);
+    if (tab === 'mcp') {
+      setSettingsPage('mcp');
+      openSettingsSurface('page-content');
+      return;
+    }
+    if (tab === 'files' && currentMobileFileTarget && effectiveDirectory) {
+      useUIStore.getState().openContextFile(effectiveDirectory, currentMobileFileTarget.path);
+    }
+    openMobileWorkspaceInContext(effectiveDirectory, tab, diff, resourceMonitorAvailable);
+  }, [currentMobileFileTarget, effectiveDirectory, openSettingsSurface, resourceMonitorAvailable, setSettingsPage]);
+
+  // The drawer's last selected tab remains its entry point on phones and narrow
+  // tablets. On a roomy tablet the same button selects its shared context mode.
+  const openWorkspace = React.useCallback(() => {
+    const { mobileWorkspaceTabOrder, mobileWorkspaceHiddenTabs } = useUIStore.getState();
+    const selected = resolveMobileWorkspaceTab(
+      workspaceTab,
+      mobileWorkspaceTabOrder,
+      mobileWorkspaceHiddenTabs,
+      resourceMonitorAvailable,
+    );
+    setWorkspaceTab(selected);
+    if (workspaceAsPanel) openWorkspaceInContext(selected, selected === 'changes' ? workspaceDiff : null);
+    else setWorkspaceOpen(true);
+  }, [openWorkspaceInContext, resourceMonitorAvailable, workspaceAsPanel, workspaceDiff, workspaceTab]);
+
   const openFilesSurface = React.useCallback(() => {
     setPendingChangesDiff(null);
     setWorkspaceTab('files');
-    setWorkspaceOpen(true);
-  }, []);
-
-  // The agent asked for a file to be shown: open the files drawer and stage
-  // the path the way a chat file link does, so the surface routes to it.
-  React.useEffect(() => subscribeOpenchamberEvents((event) => {
-    if (event.type !== 'file-open-request') return;
-    const directory = event.directory ?? useDirectoryStore.getState().currentDirectory;
-    if (!directory) return;
-    useUIStore.getState().openContextFile(directory, event.path);
-    openFilesSurface();
-  }), [openFilesSurface]);
-
-  // The agent asked for a saved plan to be shown: the plan opens the way a tap
-  // on it in the Project knowledge drawer opens it.
-  React.useEffect(() => subscribeOpenchamberEvents((event) => {
-    if (event.type !== 'plan-open-request') return;
-    const projectRef = resolvePlanRequestOwner(event.directory ?? useDirectoryStore.getState().currentDirectory, event.projectId);
-    if (!projectRef) return;
-    setOpenPlan({ id: event.planId, title: event.title, projectRef });
-  }), []);
+    if (workspaceAsPanel) openWorkspaceInContext('files');
+    else setWorkspaceOpen(true);
+  }, [openWorkspaceInContext, workspaceAsPanel]);
 
   const openChangesSurface = React.useCallback((diff: { path: string; staged: boolean } | null = null) => {
-    setPendingChangesDiff(diff);
+    setPendingChangesDiff(diff ? { ...diff, runtimeKey: currentRuntimeKey, directoryKey } : null);
+    setMobileChangesNavigation(effectiveDirectory ? {
+      directory: effectiveDirectory,
+      directoryKey,
+      runtimeKey: currentRuntimeKey,
+      diff,
+    } : null);
     setWorkspaceTab('changes');
-    setWorkspaceOpen(true);
-  }, []);
+    if (workspaceAsPanel) openWorkspaceInContext('changes', diff);
+    else setWorkspaceOpen(true);
+  }, [currentRuntimeKey, directoryKey, effectiveDirectory, openWorkspaceInContext, workspaceAsPanel]);
 
-  const leftResize = useIpadSidebarResize('left', 'openchamber.ipad.leftSidebarWidth', IPAD_LEFT_SIDEBAR_WIDTH);
-  const rightResize = useIpadSidebarResize(
-    'right',
-    'openchamber.ipad.rightSidebarWidth',
-    IPAD_RIGHT_SIDEBAR_WIDTH,
-    IPAD_WORKSPACE_SIDEBAR_MAX_WIDTH,
-  );
-  // The workspace becomes a real side panel only where the screen can host the
-  // sidebar, the panel AND a readable chat at once. Everywhere else — a tablet
-  // in portrait, and an unfolded foldable in EITHER orientation, since its long
-  // side is barely wider than a tablet's short one — it stays the full-cover
-  // drawer, which is the layout that actually works at that width.
-  const workspaceAsPanel = roomyForPanels;
-  const workspacePanelWidth = workspaceAsPanel && workspaceOpen ? rightResize.width : 0;
-  const sidebarWidth = isTabletLayout && sidebarOpen ? leftResize.width : 0;
+  // On tablet width changes, hand the selected mobile tab to the shared store
+  // and restore a matching mobile drawer when the viewport narrows again.
+  const previousWorkspaceAsPanel = React.useRef(workspaceAsPanel);
+  React.useEffect(() => {
+    const wasRoomy = previousWorkspaceAsPanel.current;
+    previousWorkspaceAsPanel.current = workspaceAsPanel;
+    if (wasRoomy === workspaceAsPanel) return;
+
+    if (workspaceAsPanel) {
+      if (workspaceOpen) {
+        const selectedTab = resolveMobileWorkspaceTab(
+          workspaceTab,
+          mobileWorkspaceTabOrder,
+          mobileWorkspaceHiddenTabs,
+          resourceMonitorAvailable,
+        );
+        if (selectedTab === 'files' && currentMobileFileTarget && effectiveDirectory) {
+          useUIStore.getState().openContextFile(effectiveDirectory, currentMobileFileTarget.path);
+        }
+        openWorkspaceInContext(selectedTab, selectedTab === 'changes' ? workspaceDiff : null);
+      }
+      return;
+    }
+
+    if (!wasRoomy) return;
+    const fallback = mobileWorkspaceForOpenContext(effectiveDirectory);
+    closeAllContextZones(effectiveDirectory);
+    setMobileChangesNavigation(null);
+    if (!fallback) return;
+    setWorkspaceTab(fallback.tab);
+    setPendingChangesDiff(fallback.diff && effectiveDirectory
+      ? { ...fallback.diff, runtimeKey: currentRuntimeKey, directoryKey }
+      : null);
+    if (fallback.filePath && effectiveDirectory) {
+      useUIStore.getState().openContextFile(effectiveDirectory, fallback.filePath);
+    }
+    setWorkspaceOpen(true);
+  }, [currentMobileFileTarget, currentRuntimeKey, directoryKey, effectiveDirectory, mobileWorkspaceHiddenTabs, mobileWorkspaceTabOrder, openWorkspaceInContext, resourceMonitorAvailable, workspaceAsPanel, workspaceDiff, workspaceOpen, workspaceTab]);
+
+  // The shared pane system already handles these requests on roomy tablets.
+  // Phones and the narrow fallback keep their dedicated drawer navigation.
+  React.useEffect(() => {
+    if (workspaceAsPanel) return undefined;
+    return subscribeOpenchamberEvents((event) => {
+      if (event.type !== 'file-open-request') return;
+      const directory = event.directory ?? useDirectoryStore.getState().currentDirectory;
+      if (!directory) return;
+      useUIStore.getState().openContextFile(directory, event.path);
+      openFilesSurface();
+    });
+  }, [openFilesSurface, workspaceAsPanel]);
+
+  React.useEffect(() => {
+    if (workspaceAsPanel) return undefined;
+    return subscribeOpenchamberEvents((event) => {
+      if (event.type !== 'plan-open-request') return;
+      const projectRef = resolvePlanRequestOwner(event.directory ?? useDirectoryStore.getState().currentDirectory, event.projectId);
+      if (!projectRef) return;
+      setOpenPlan({ id: event.planId, title: event.title, projectRef });
+    });
+  }, [workspaceAsPanel]);
 
   // Publish the chat column's insets so overlays portaled to <body> (model
   // picker, directory picker, every MobileOverlayPanel) can center on the CHAT
-  // rather than on the window. Zero on phones, where the two are the same.
+  // rather than on the window. Context zones share the same logical layout as
+  // desktop, so their settled widths and the rail are included on tablets.
   React.useEffect(() => {
     if (typeof document === 'undefined') return;
     const root = document.documentElement;
-    root.style.setProperty('--oc-chat-inset-left', `${sidebarWidth}px`);
-    root.style.setProperty('--oc-chat-inset-right', `${workspacePanelWidth}px`);
+    const directoryKey = effectiveDirectory ? normalizeContextPanelDirectoryKey(effectiveDirectory) : '';
+    const writeInsets = () => {
+      const state = useUIStore.getState();
+      const panel = directoryKey ? state.contextPanelByDirectory[directoryKey] : undefined;
+      const zoneWidth = (zone: 'left' | 'right') => {
+        if (!workspaceAsPanel || !panel || !isZoneShown(panel, state.contextSurfaceZones, zone)) return 0;
+        const activeTab = resolveZoneActiveTab(panel, state.contextSurfaceZones, zone);
+        const hasOpenEditorFile = panel.tabs.some((tab) => tab.mode === 'file' && tab.targetPath);
+        const editorShown = hasOpenEditorFile && (state.contextEditorVisible || !state.contextEditorTreeVisible);
+        if (activeTab?.mode === 'file' && !editorShown) return state.contextEditorTreeWidth;
+        return panel.sizeByZone[zone] ?? CONTEXT_ZONE_DEFAULT_WIDTH;
+      };
+      const inlineStart = sidebarWidth + zoneWidth('left');
+      const inlineEnd = zoneWidth('right') + (workspaceAsPanel && directoryKey ? 44 : 0);
+      const left = direction === 'rtl' ? inlineEnd : inlineStart;
+      const right = direction === 'rtl' ? inlineStart : inlineEnd;
+      root.style.setProperty('--oc-chat-inset-left', `${left}px`);
+      root.style.setProperty('--oc-chat-inset-right', `${right}px`);
+    };
+    writeInsets();
+    const unsubscribe = useUIStore.subscribe((state, previous) => {
+      if (
+        state.contextSurfaceZones !== previous.contextSurfaceZones
+        || state.contextPanelByDirectory[directoryKey] !== previous.contextPanelByDirectory[directoryKey]
+        || state.contextEditorVisible !== previous.contextEditorVisible
+        || state.contextEditorTreeVisible !== previous.contextEditorTreeVisible
+        || state.contextEditorTreeWidth !== previous.contextEditorTreeWidth
+      ) writeInsets();
+    });
     return () => {
+      unsubscribe();
       root.style.removeProperty('--oc-chat-inset-left');
       root.style.removeProperty('--oc-chat-inset-right');
     };
-  }, [sidebarWidth, workspacePanelWidth]);
+  }, [direction, effectiveDirectory, sidebarWidth, workspaceAsPanel]);
+
+  React.useLayoutEffect(() => {
+    setChatCovered(workspaceAsPanel && runOverviewOpen);
+    return () => setChatCovered(false);
+  }, [runOverviewOpen, workspaceAsPanel]);
 
   // Wide chat layout: the shared chat columns key off this root class, but only
   // the desktop App set it — so on a tablet, where the chat column is finally
@@ -305,6 +568,7 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
 
   const mobileActions = React.useMemo<MobileAppActions>(
     () => ({
+      sharedContextPanelsAvailable: workspaceAsPanel,
       openChanges: ({ diffPath, staged } = {}) => {
         openChangesSurface(diffPath ? { path: diffPath, staged: staged === true } : null);
       },
@@ -312,7 +576,7 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
       openSettings: () => openSettingsSurface('nav'),
       openSourceBoard: () => openSurface('board'),
     }),
-    [openChangesSurface, openFilesSurface, openSettingsSurface, openSurface],
+    [openChangesSurface, openFilesSurface, openSettingsSurface, openSurface, workspaceAsPanel],
   );
 
   // Expose the shell's panel-opening actions to the deep-link layer so openchamber:// URLs
@@ -321,7 +585,7 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
   const deepLinkHandlers = React.useMemo(
     () => ({
       openSessions: () => {
-        if (isTabletLayout) setSidebarOpen(true);
+        if (isTabletLayout) openSidebarFromUser();
         else setSessionsSheetOpen(true);
       },
       openView: (target: 'files' | 'mcp' | 'instances' | 'update') => {
@@ -330,8 +594,11 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
           return;
         }
         if (target === 'mcp') {
-          setWorkspaceTab('mcp');
-          setWorkspaceOpen(true);
+          if (workspaceAsPanel) openWorkspaceInContext('mcp');
+          else {
+            setWorkspaceTab('mcp');
+            setWorkspaceOpen(true);
+          }
           return;
         }
         openSurface(target);
@@ -344,7 +611,7 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
         openSettingsSurface(section ? 'page-content' : 'nav');
       },
     }),
-    [isTabletLayout, openChangesSurface, openFilesSurface, openSettingsSurface, openSurface, setSettingsPage],
+    [isTabletLayout, openChangesSurface, openFilesSurface, openSettingsSurface, openSidebarFromUser, openSurface, openWorkspaceInContext, setSettingsPage, workspaceAsPanel],
   );
   useDeepLinkHandlers(deepLinkHandlers);
 
@@ -354,7 +621,7 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
   // LTR, mirrored in RTL.
   const chatMainRef = React.useRef<HTMLElement>(null);
   const openSessionsFromEdge = () => {
-    if (isTabletLayout) setSidebarOpen(true);
+    if (isTabletLayout) openSidebarFromUser();
     else setSessionsSheetOpen(true);
   };
   const openWorkspaceFromEdge = () => openWorkspace();
@@ -394,12 +661,15 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
       closeWorkspace();
       return true;
     }
+    if (workspaceAsPanel && closeMostRecentContextZone(effectiveDirectory)) {
+      return true;
+    }
     if (sessionsSheetOpen) {
       setSessionsSheetOpen(false);
       return true;
     }
     return false;
-  }, [activeSurface, closeSurface, closeWorkspace, openPlan, sessionsSheetOpen, workspaceOpen]);
+  }, [activeSurface, closeSurface, closeWorkspace, effectiveDirectory, openPlan, sessionsSheetOpen, workspaceAsPanel, workspaceOpen]);
 
   useNativeAndroidBackButton(handleNativeBack);
 
@@ -499,7 +769,19 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
     openSettingsSurface('page-content');
   }, [mcpServers, openSettingsSurface, setMcpDraft, setSelectedMcp, setSettingsPage]);
 
+  const chatContent = (
+    <main ref={chatMainRef} className="relative min-h-0 flex-1 overflow-hidden" data-page-scroll-lock="true">
+      <div className="h-full w-full">
+        <ErrorBoundary>
+          <ChatView />
+        </ErrorBoundary>
+      </div>
+      <ErrorBoundary><RunOverview /></ErrorBoundary>
+    </main>
+  );
+
   return (
+    <MobileWorkspaceActivityProvider activity={workspaceActivity}>
     <DedicatedMobileAppProvider actions={mobileActions}>
       <div
         className="oc-mobile-app-shell main-content-safe-area flex h-[100dvh] flex-row bg-background text-foreground"
@@ -574,14 +856,16 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
             onOpenWorkspace={openWorkspace}
             compactTitle={isTabletLayout}
           />
-          <main ref={chatMainRef} className="relative min-h-0 flex-1 overflow-hidden" data-page-scroll-lock="true">
-            <div className="h-full w-full">
-              <ErrorBoundary>
-                <ChatView />
-              </ErrorBoundary>
-            </div>
-            <ErrorBoundary><RunOverview /></ErrorBoundary>
-          </main>
+          <MobileTabletContextWorkspace
+            sidebar={sidebarFit}
+            enabled={workspaceAsPanel}
+            retainContextWorkspace={retainTabletContext}
+            mobileFileEditorHost={mobileFileEditorHost}
+            mobileFileEditorVisible={workspaceOpen && workspaceTab === 'files' && Boolean(currentMobileFileTarget)}
+            mobileResourceMonitor={mobileResourceMonitor}
+          >
+            {chatContent}
+          </MobileTabletContextWorkspace>
         </div>
 
         {/* Mounted permanently on phones (parked off-screen while closed) so
@@ -595,60 +879,25 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
           />
         ) : null}
 
-        {/* Keep the workspace in the same tree position across size classes.
-            Keyboard resizing and folding can both cross the tablet threshold;
-            neither should discard the open editor, its draft, or its focus.
-            Outside panel mode the drawer portals out and this aside stays at 0. */}
-        <aside
-          ref={rightResize.asideRef}
-          className={cn(
-            'relative flex h-full shrink-0 flex-col overflow-hidden border-s border-border/70 bg-background will-change-[width] motion-reduce:transition-none',
-            !workspacePanelWidth && 'border-s-0',
-          )}
-          style={{
-            width: workspacePanelWidth,
-            minWidth: workspacePanelWidth,
-            maxWidth: workspacePanelWidth,
-            ['--oc-ipad-sidebar-width' as string]: `${rightResize.width}px`,
-            overflowX: 'clip',
-            paddingTop: 'var(--oc-safe-area-top, 0px)',
-            transitionProperty: rightResize.isResizing ? 'none' : 'width, min-width, max-width',
-            transitionDuration: '200ms',
-            transitionTimingFunction: 'cubic-bezier(0.22, 1, 0.36, 1)',
-          }}
-          aria-hidden={!workspacePanelWidth}
-          data-page-scroll-lock="true"
-        >
-          <div
-            className={cn(
-              'flex h-full min-h-0 shrink-0 flex-col transition-opacity duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none',
-              rightResize.isResizing && 'pointer-events-none',
-              !workspacePanelWidth && 'pointer-events-none select-none opacity-0',
-            )}
-            style={{ width: 'var(--oc-ipad-sidebar-width)', overflowX: 'hidden' }}
-          >
-            <ErrorBoundary>
-              <MobileWorkspaceDrawer
-                open={workspaceOpen}
-                onClose={closeWorkspace}
-                tab={workspaceTab}
-                onTabChange={setWorkspaceTab}
-                pendingChangesDiff={pendingChangesDiff}
-                onOpenPlan={setOpenPlan}
-                onOpenMcpSettings={openMcpCreateSettings}
-                variant={workspaceAsPanel ? 'panel' : 'drawer'}
-              />
-            </ErrorBoundary>
-          </div>
-          {workspacePanelWidth ? (
-            <IpadSidebarResizeHandle
-              side="right"
-              isResizing={rightResize.isResizing}
-              ariaLabel={t('sidebar.resize.rightPanelAria')}
-              handleProps={rightResize.handleProps}
+        {!workspaceAsPanel ? (
+          <ErrorBoundary>
+            <MobileWorkspaceDrawer
+              open={workspaceOpen}
+              onClose={closeWorkspace}
+              tab={workspaceTab}
+              onTabChange={setWorkspaceTab}
+              mobileResourceMonitor={mobileResourceMonitor}
+              pendingChangesDiff={currentPendingDiff}
+              sharedFileEditor
+              onFileEditorHostChange={setMobileFileEditorHost}
+              onMobileFileChange={handleMobileFileChange}
+              onMobileFileOpen={handleMobileFileOpen}
+              onMobileChangesNavigation={handleMobileChangesNavigation}
+              onOpenPlan={setOpenPlan}
+              onOpenMcpSettings={openMcpCreateSettings}
             />
-          ) : null}
-        </aside>
+          </ErrorBoundary>
+        ) : null}
 
         {/* Layered above the workspace drawer's Notes tab, which opened it. */}
         {openPlan ? (
@@ -804,6 +1053,7 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
         ) : null}
       </div>
     </DedicatedMobileAppProvider>
+    </MobileWorkspaceActivityProvider>
   );
 };
 
@@ -1401,9 +1651,10 @@ function MobileAppContent({ apis }: MobileAppProps) {
 
   return (
     <ErrorBoundary>
-      <SyncProvider key={runtimeEndpointEpoch} sdk={opencodeClient.getSdkClient()} directory={currentDirectory || ''}>
-        <RuntimeAPIProvider apis={apis}>
-          <TooltipProvider delayDuration={300} skipDelayDuration={150}>
+        <SyncProvider key={runtimeEndpointEpoch} sdk={opencodeClient.getSdkClient()} directory={currentDirectory || ''}>
+          <RuntimeAPIProvider apis={apis}>
+          <FireworksProvider>
+            <TooltipProvider delayDuration={300} skipDelayDuration={150}>
             <div className="h-full bg-background text-foreground">
               {/* Cold-launch continuity: keep the boot logo up over the shell
                   until the last-session restore decides between session and
@@ -1424,8 +1675,9 @@ function MobileAppContent({ apis }: MobileAppProps) {
               <MobileToaster />
               {isInitialized ? <ConfigUpdateOverlay /> : null}
             </div>
-          </TooltipProvider>
-        </RuntimeAPIProvider>
+            </TooltipProvider>
+          </FireworksProvider>
+          </RuntimeAPIProvider>
       </SyncProvider>
     </ErrorBoundary>
   );

@@ -81,17 +81,30 @@ type MobileFilesSurfaceProps = {
   onClose?: () => void;
   /** The surface is on screen; file changes wait for it. */
   visible?: boolean;
+  /** Tablets host the shared FilesView here instead of mounting a second editor. */
+  sharedEditor?: boolean;
+  onEditorHostChange?: (host: HTMLDivElement | null) => void;
+  onActiveFileChange?: (path: string | null, root: string) => void;
+  onOpenFile?: (path: string, root: string) => void;
 };
 
-export const MobileFilesSurface: React.FC<MobileFilesSurfaceProps> = ({ onClose, visible = true }) => {
+export const MobileFilesSurface: React.FC<MobileFilesSurfaceProps> = ({ onClose, visible = true, ...sharedProps }) => {
   // A draft waiting for a new space lists the space, and nothing of this computer's until it runs.
   const draftSpace = useDraftSpaceTarget();
   const root = normalizePath(panelContentDirectory(draftSpace, useEffectiveDirectory()));
   if (draftSpace?.kind === 'preparing') return <SpacePreparing />;
-  return <MobileFilesSurfaceForRoot key={root} root={root} onClose={onClose} visible={visible} />;
+  return <MobileFilesSurfaceForRoot key={root} root={root} onClose={onClose} visible={visible} {...sharedProps} />;
 };
 
-const MobileFilesSurfaceForRoot: React.FC<MobileFilesSurfaceProps & { root: string; visible: boolean }> = ({ root, onClose, visible }) => {
+const MobileFilesSurfaceForRoot: React.FC<MobileFilesSurfaceProps & { root: string; visible: boolean }> = ({
+  root,
+  onClose,
+  visible,
+  sharedEditor = false,
+  onEditorHostChange,
+  onActiveFileChange,
+  onOpenFile,
+}) => {
   const { t } = useI18n();
   const { files } = useRuntimeAPIs();
   const showGitignored = useFilesViewShowGitignored();
@@ -108,6 +121,10 @@ const MobileFilesSurfaceForRoot: React.FC<MobileFilesSurfaceProps & { root: stri
   const currentDirectory = route.type === 'browser' ? route.directory : route.returnDirectory;
   const currentDirectoryRef = React.useRef(currentDirectory);
   currentDirectoryRef.current = currentDirectory;
+
+  React.useEffect(() => {
+    onActiveFileChange?.(route.type === 'file' ? route.path : null, root);
+  }, [onActiveFileChange, root, route]);
 
   // A background reload (a file change, not a navigation) keeps the listing
   // on screen when it fails.
@@ -211,6 +228,7 @@ const MobileFilesSurfaceForRoot: React.FC<MobileFilesSurfaceProps & { root: stri
   const openFile = (path: string) => {
     // FilesView (editor-only) reads its target from the files-view tabs store.
     setSelectedPath(root, path);
+    onOpenFile?.(path, root);
     setRoute({ type: 'file', path, returnDirectory: currentDirectory || root });
   };
 
@@ -226,11 +244,12 @@ const MobileFilesSurfaceForRoot: React.FC<MobileFilesSurfaceProps & { root: stri
     const target = normalizePath(pendingFileNavigation?.path ?? pendingFileFocusPath ?? '');
     if (!target || !root) return;
     setSelectedPath(root, target, { allowOutsideRoot: true });
+    onOpenFile?.(target, root);
     // From a file already open (the image preview's arrows), Back still leads
     // to the folder the user was browsing.
     setRoute((current) => ({ type: 'file', path: target, returnDirectory: current.type === 'file' ? current.returnDirectory : root }));
     if (pendingFileFocusPath) useUIStore.getState().setPendingFileFocusPath(null);
-  }, [pendingFileFocusPath, pendingFileNavigation, root, setSelectedPath]);
+  }, [onOpenFile, pendingFileFocusPath, pendingFileNavigation, root, setSelectedPath]);
 
   if (!root) {
     return <MobileFilesState message={t('mobile.files.empty.noDirectory')} />;
@@ -256,12 +275,16 @@ const MobileFilesSurfaceForRoot: React.FC<MobileFilesSurfaceProps & { root: stri
             <h2 className="truncate typography-ui-header text-foreground">{getNameFromPath(route.path)}</h2>
           </div>
         </header>
-        <div className="min-h-0 flex-1 overflow-hidden">
-          <ErrorBoundary>
-            <React.Suspense fallback={<MobileFilesState loading message={t('filesView.state.loading')} />}>
-              <LazyFilesEditor mode="editor-only" />
-            </React.Suspense>
-          </ErrorBoundary>
+          <div className="min-h-0 flex-1 overflow-hidden">
+          {sharedEditor && onEditorHostChange ? (
+            <div ref={onEditorHostChange} className="h-full min-h-0 w-full overflow-hidden" data-mobile-file-editor-host="" />
+          ) : (
+            <ErrorBoundary>
+              <React.Suspense fallback={<MobileFilesState loading message={t('filesView.state.loading')} />}>
+                <LazyFilesEditor mode="editor-only" />
+              </React.Suspense>
+            </ErrorBoundary>
+          )}
         </div>
       </div>
     );

@@ -2,16 +2,10 @@ import React from 'react';
 import { isRightToLeft } from '@/lib/i18n';
 
 export const IPAD_LEFT_SIDEBAR_WIDTH = 320;
-export const IPAD_RIGHT_SIDEBAR_WIDTH = 380;
 const IPAD_SIDEBAR_MIN_WIDTH = 280;
 const IPAD_SIDEBAR_MAX_WIDTH = 560;
-/** The workspace panel holds diffs, a file editor and a terminal, so it earns
-    far more room than the sessions list ever needs. */
-export const IPAD_WORKSPACE_SIDEBAR_MAX_WIDTH = 900;
 
-/** Drag-resize for the iPad sidebars: same live-width mechanics as the desktop
-    Sidebar (imperative styles during the drag, committed to state at the end),
-    but with a finger-sized grab strip instead of a 3px hover handle. */
+/** Drag-resize for the iPad sessions sidebar. The width commits only on release. */
 export function useIpadSidebarResize(
   side: 'left' | 'right',
   storageKey: string,

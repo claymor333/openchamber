@@ -17,13 +17,19 @@ type HostParent = HTMLElement & { moveBefore?: (node: Node, child: Node | null) 
  * The element is `display: contents`, so the pane's own wrapper is laid out
  * by the zone body as if it were a direct child.
  */
-export const MovablePane: React.FC<{ zone: ContextZone; children: React.ReactNode }> = ({ zone, children }) => {
+export const MovablePane: React.FC<{
+  zone: ContextZone;
+  /** A second presentation host; the pane's stable portal node moves, not its React tree. */
+  hostOverride?: HTMLElement | null;
+  children: React.ReactNode;
+}> = ({ zone, hostOverride, children }) => {
   const [node] = React.useState(() => {
     const element = document.createElement('div');
     element.style.display = 'contents';
     return element;
   });
-  const host = useZoneHostsStore((state) => state.body[zone]);
+  const zoneHost = useZoneHostsStore((state) => state.body[zone]);
+  const host = hostOverride === undefined ? zoneHost : hostOverride;
 
   React.useLayoutEffect(() => {
     // The frame registers its body from a ref, earlier in the same commit, so
