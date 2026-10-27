@@ -95,7 +95,7 @@ const installMinimalDom = () => {
   };
 };
 
-type Args = { isMobile: boolean; isVSCode: boolean };
+type Args = { isMobile: boolean; isVSCode: boolean; sharedContextPanelsAvailable?: boolean };
 
 /**
  * Renders the hook with a stand-in row node, attached through the returned
@@ -110,10 +110,11 @@ const renderVisibility = (args: Args, rowWidth: number) => {
     getBoundingClientRect: () => ({ width: rowWidth }),
     closest: () => null,
   } as unknown as HTMLDivElement;
-  const result = { visible: false, fits: false, roomy: false, renders: 0 };
+  const result = { available: false, visible: false, fits: false, roomy: false, renders: 0 };
 
   const Probe: React.FC = () => {
-    const { rowRef, visible, fits, roomy } = useWorkStatusVisibility(args);
+    const { rowRef, available, visible, fits, roomy } = useWorkStatusVisibility(args);
+    result.available = available;
     result.visible = visible;
     result.fits = fits;
     result.roomy = roomy;
@@ -387,5 +388,40 @@ describe('useWorkStatusVisibility', () => {
     );
     expect(vscode.result.visible).toBe(false);
     vscode.teardown();
+  });
+
+  test('allows the mobile tablet shell only while shared context panels are available', () => {
+    const hybrid = renderVisibility(
+      { isMobile: true, isVSCode: false, sharedContextPanelsAvailable: true },
+      REQUIRED,
+    );
+    expect(hybrid.result).toMatchObject({ available: true, visible: true, fits: true, roomy: true });
+    hybrid.teardown();
+
+    observed = [];
+    const phone = renderVisibility(
+      { isMobile: true, isVSCode: false, sharedContextPanelsAvailable: false },
+      REQUIRED * 2,
+    );
+    expect(phone.result).toMatchObject({ available: false, visible: false, fits: false, roomy: false });
+    phone.teardown();
+
+    observed = [];
+    const vscode = renderVisibility(
+      { isMobile: true, isVSCode: true, sharedContextPanelsAvailable: true },
+      REQUIRED * 2,
+    );
+    expect(vscode.result).toMatchObject({ available: false, visible: false, fits: false, roomy: false });
+    vscode.teardown();
+  });
+
+  test('keeps the right-slot column reserved while a shared context panel covers the card', () => {
+    panelByDirectory['/repo'] = { isOpen: true, tabs: [{ id: 'tab-1', mode: 'git' }], activeTabId: 'tab-1' };
+    const { result, teardown } = renderVisibility(
+      { isMobile: true, isVSCode: false, sharedContextPanelsAvailable: true },
+      REQUIRED,
+    );
+    expect(result).toMatchObject({ available: true, visible: false, fits: false, roomy: true });
+    teardown();
   });
 });

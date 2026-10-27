@@ -4,6 +4,7 @@ import { Icon } from '@/components/icon/Icon';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useUIStore } from '@/stores/useUIStore';
 import type { IconName } from '@/components/icon/icons';
+import { useMobileWorkspaceActivityContext } from '@/lib/mobileWorkspaceActivity';
 
 /**
  * Row/section vocabulary for the work-status panel.
@@ -20,9 +21,9 @@ import type { IconName } from '@/components/icon/icons';
  * prop would mean every group tracking what the groups above it decided to
  * render.
  */
-const SECTION_CLASS = cn(
+const sectionClass = (touchTargets: boolean) => cn(
   'flex flex-col',
-  '[&:not(:first-child)]:mt-5',
+  touchTargets ? '[&:not(:first-child)]:mt-2' : '[&:not(:first-child)]:mt-5',
 );
 
 const HEADING_CLASS = 'text-xs font-semibold text-foreground';
@@ -34,20 +35,23 @@ export const WorkStatusSection: React.FC<{
   /** Aggregate for the whole section; belongs on the heading, not on a row. */
   summary?: React.ReactNode;
   children: React.ReactNode;
-}> = ({ title, subject, summary, children }) => (
-  <section className={SECTION_CLASS}>
-    <div data-work-status-heading className="mb-0.5 flex items-center gap-2 px-1">
-      <h3 className={cn(HEADING_CLASS, 'min-w-0 flex-1 truncate')}>
-        {title}
-        {subject ? <span className="ms-1.5 font-normal text-muted-foreground">{subject}</span> : null}
-      </h3>
-      {summary !== undefined && summary !== null ? (
-        <span dir="auto" className="min-w-0 max-w-[60%] truncate text-end text-xs text-muted-foreground tabular-nums">{summary}</span>
-      ) : null}
-    </div>
-    {children}
-  </section>
-);
+}> = ({ title, subject, summary, children }) => {
+  const touchTargets = useMobileWorkspaceActivityContext() !== null;
+  return (
+    <section className={sectionClass(touchTargets)}>
+      <div data-work-status-heading className="mb-0.5 flex items-center gap-2 px-1">
+        <h3 className={cn(HEADING_CLASS, 'min-w-0 flex-1 truncate')}>
+          {title}
+          {subject ? <span className="ms-1.5 font-normal text-muted-foreground">{subject}</span> : null}
+        </h3>
+        {summary !== undefined && summary !== null ? (
+          <span dir="auto" className="min-w-0 max-w-[60%] truncate text-end text-xs text-muted-foreground tabular-nums">{summary}</span>
+        ) : null}
+      </div>
+      {children}
+    </section>
+  );
+};
 
 /**
  * Section whose body folds away. The chevron swaps on expand exactly as the
@@ -77,20 +81,22 @@ export const WorkStatusCollapsibleSection: React.FC<{
   collapsedContent?: React.ReactNode;
   children: React.ReactNode;
 }> = ({ id, title, icon, iconNode, iconColor, summary, action, actionLayout = 'inline', defaultExpanded = false, collapsedContent, children }) => {
+  const touchTargets = useMobileWorkspaceActivityContext() !== null;
   const stored = useUIStore(
     React.useCallback((state) => state.workStatusExpandedSections[id], [id]),
   );
   const setExpandedInStore = useUIStore((state) => state.setWorkStatusSectionExpanded);
   const expanded = stored ?? defaultExpanded;
   return (
-    <section data-work-status-section={id} className={SECTION_CLASS}>
-      <div data-work-status-heading className={cn('mb-0.5 flex items-center gap-1', actionLayout === 'inline' && 'h-6')}>
+    <section data-work-status-section={id} className={sectionClass(touchTargets)}>
+      <div data-work-status-heading className={cn('mb-0.5 flex items-center gap-1', actionLayout === 'inline' && !touchTargets && 'h-6', touchTargets && 'min-h-10')}>
         <button
           type="button"
           aria-expanded={expanded}
           onClick={() => setExpandedInStore(id, !expanded)}
           className={cn(
             'group/section flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-1 text-start',
+            touchTargets && 'min-h-10 py-1',
             // No hover fill anywhere in the panel: at this row density the blocks
             // of colour read as selection, not as affordance. Interactivity shows
             // through the text instead.

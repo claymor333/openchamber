@@ -190,6 +190,92 @@ describe('startStatusViewPolling', () => {
     poller.stop();
   });
 
+  test('pauses while native-inactive and resumes one poll chain', async () => {
+    const time = clock();
+    let reads = 0;
+    const poller = startStatusViewPolling({
+      read: async () => { reads += 1; return ok; }, interval: 2000, onRead: () => undefined,
+      visibility: visibilitySwitch().visibility, active: true, schedule: time.schedule, cancel: time.cancel,
+    });
+    await settle();
+    expect(reads).toBe(1);
+    expect(time.pending()).toEqual([2000]);
+
+    poller.setActive(false);
+    poller.setActive(false);
+    expect(time.pending()).toEqual([]);
+    poller.setActive(true);
+    poller.setActive(true);
+    await settle();
+    expect(reads).toBe(2);
+    expect(time.pending()).toEqual([2000]);
+    time.fire();
+    await settle();
+    expect(reads).toBe(3);
+    expect(time.pending()).toEqual([2000]);
+    poller.stop();
+    expect(time.pending()).toEqual([]);
+  });
+
+  test('drops a read completed while native-inactive and starts fresh on resume', async () => {
+    const time = clock();
+    const delivered: GuestStatusViewRead[] = [];
+    const releases: Array<() => void> = [];
+    let reads = 0;
+    const poller = startStatusViewPolling({
+      read: () => {
+        reads += 1;
+        return new Promise((resolve) => { releases.push(() => resolve(ok)); });
+      },
+      interval: 2000, onRead: (result) => delivered.push(result),
+      visibility: visibilitySwitch().visibility, active: true, schedule: time.schedule, cancel: time.cancel,
+    });
+    poller.setActive(false);
+    releases[0]?.();
+    await settle();
+    expect(delivered).toEqual([]);
+    expect(time.pending()).toEqual([]);
+
+    poller.setActive(true);
+    expect(reads).toBe(2);
+    releases[1]?.();
+    await settle();
+    expect(delivered).toEqual([ok]);
+    expect(time.pending()).toEqual([2000]);
+    poller.stop();
+  });
+
+  test('drops a pre-background read when resume precedes its answer, then starts once', async () => {
+    const time = clock();
+    const delivered: GuestStatusViewRead[] = [];
+    const releases: Array<() => void> = [];
+    let reads = 0;
+    const poller = startStatusViewPolling({
+      read: () => new Promise((resolve) => {
+        reads += 1;
+        const cpu = `${reads}%`;
+        releases.push(() => resolve({ ok: true, view: view(cpu) }));
+      }),
+      interval: 2000, onRead: (result) => delivered.push(result),
+      visibility: visibilitySwitch().visibility, active: true, schedule: time.schedule, cancel: time.cancel,
+    });
+    poller.setActive(false);
+    poller.setActive(true);
+    expect(reads).toBe(1);
+    releases[0]?.();
+    await settle();
+    expect(delivered).toEqual([]);
+    expect(reads).toBe(2);
+    releases[1]?.();
+    await settle();
+    expect(delivered).toHaveLength(1);
+    const newest = delivered[0];
+    if (!newest?.ok) throw new Error('The resumed read did not complete');
+    expect(newest.view.rows[1]).toMatchObject({ value: '2%' });
+    expect(time.pending()).toEqual([2000]);
+    poller.stop();
+  });
+
   test('drops an answer that arrives after stop', async () => {
     const time = clock();
     const seen: GuestStatusViewRead[] = [];

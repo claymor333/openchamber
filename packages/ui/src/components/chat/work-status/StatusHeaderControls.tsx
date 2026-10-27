@@ -3,6 +3,8 @@ import type React from 'react';
 
 import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
+import { useMobileWorkspaceActivityContext } from '@/lib/mobileWorkspaceActivity';
+import { cn } from '@/lib/utils';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -17,8 +19,9 @@ type Props = {
   layout: 'inline' | 'below';
 };
 
-export const StatusHeaderControls: React.FC<Props> = ({ controls, onActivate, layout }) => (
-  <div
+export const StatusHeaderControls: React.FC<Props> = ({ controls, onActivate, layout }) => {
+  const touchTargets = useMobileWorkspaceActivityContext() !== null;
+  return <div
     data-work-status-controls
     className={layout === 'below'
       ? 'grid grid-cols-2 gap-1 px-1 pb-1'
@@ -34,7 +37,7 @@ export const StatusHeaderControls: React.FC<Props> = ({ controls, onActivate, la
               aria-label={control.label}
               disabled={control.disabled}
               onClick={() => onActivate(control.id)}
-              className="max-w-[5rem]"
+              className={cn('max-w-[5rem]', touchTargets && 'min-h-10')}
             >
               <span className="truncate">{control.label}</span>
             </Button>
@@ -52,7 +55,7 @@ export const StatusHeaderControls: React.FC<Props> = ({ controls, onActivate, la
                 size="xs"
                 aria-label={`${control.label}: ${selectedOption?.label ?? control.value}`}
                 disabled={control.disabled}
-                className="max-w-[5rem] gap-1"
+                className={cn('max-w-[5rem] gap-1', touchTargets && 'min-h-10')}
               >
                 <span className="min-w-0 truncate">{selectedOption?.label ?? control.value}</span>
                 <Icon name="arrow-down-s" className="size-3 shrink-0" />
@@ -61,7 +64,7 @@ export const StatusHeaderControls: React.FC<Props> = ({ controls, onActivate, la
             <DropdownMenuContent data-work-status-popup align="end" className="min-w-32">
               <DropdownMenuRadioGroup value={control.value} onValueChange={(value) => onActivate(control.id, value)}>
                 {control.options.map((option) => (
-                  <DropdownMenuRadioItem key={option.value} value={option.value}>
+                  <DropdownMenuRadioItem key={option.value} value={option.value} className={touchTargets ? 'min-h-10' : undefined}>
                     <span className="truncate">{option.label}</span>
                   </DropdownMenuRadioItem>
                 ))}
@@ -71,5 +74,5 @@ export const StatusHeaderControls: React.FC<Props> = ({ controls, onActivate, la
         </div>
       );
     })}
-  </div>
-);
+  </div>;
+};

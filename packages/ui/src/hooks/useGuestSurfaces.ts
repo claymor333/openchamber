@@ -4,6 +4,8 @@ import { hasGuestPage, resolveAttachMode, type AttachMode } from '@openchamber/s
 import type { IconName } from '@/components/icon/icons';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
+import { isResourceMonitorMobileReady } from '@/lib/guests/mobile-support';
+import { useMobileAppActions } from '@/apps/mobileAppContext';
 import { guestActionEntries, type GuestActionEntry } from '@/lib/guests/actions';
 import { isGuestActive } from '@/lib/guests/capabilities';
 import { guestCommandEntries, type GuestCommandEntry } from '@/lib/guests/commands';
@@ -47,7 +49,8 @@ export const useGuestSurfaces = (): ContextSurfaceDescriptor[] => {
   const { guests, runtimeKey } = useGuestCatalog();
 
   return React.useMemo(() => {
-    return enabledGuestSurfaces(guests, getRuntimeUrlResolver().authenticatedAsset);
+    const visibleGuests = isMobileSurfaceRuntime() ? guests.filter(isResourceMonitorMobileReady) : guests;
+    return enabledGuestSurfaces(visibleGuests, getRuntimeUrlResolver().authenticatedAsset);
     // runtimeKey: the asset resolver answers for the active runtime, so a switch recomputes the list.
     // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, [guests, runtimeKey]);
@@ -64,25 +67,36 @@ export const useGuestPages = () => {
 const EMPTY_STATUS_SECTIONS: InstalledGuest[] = [];
 
 /**
- * Active guests that contribute a Work Status section. Empty on VS Code and
- * mobile, which never mount guests (the panel itself is web/desktop only).
+ * Active guests that contribute a Work Status section. Mobile is limited to
+ * the curated Resource Monitor source while the shared tablet panel is mounted;
+ * the catalog must belong to the active runtime and be authoritative first.
  * Reads the store only; the rail owns loading the catalog.
  */
 export const useGuestStatusSections = (): InstalledGuest[] => {
   const guests = useGuestsStore((state) => state.guests);
+  const status = useGuestsStore((state) => state.status);
+  const catalogRuntimeKey = useGuestsStore((state) => state.runtimeKey);
+  const sharedContextPanelsAvailable = useMobileAppActions()?.sharedContextPanelsAvailable ?? false;
+  const runtimeKey = getRuntimeKey();
   return React.useMemo(() => {
-    if (isVSCodeRuntime() || isMobileSurfaceRuntime()) return EMPTY_STATUS_SECTIONS;
+    if (isVSCodeRuntime()) return EMPTY_STATUS_SECTIONS;
+    if (isMobileSurfaceRuntime()) {
+      if (status !== 'ready' || catalogRuntimeKey !== runtimeKey || !sharedContextPanelsAvailable) return EMPTY_STATUS_SECTIONS;
+      const monitor = guests.find((guest) => isResourceMonitorMobileReady(guest) && guest.statusSource);
+      return monitor ? [monitor] : EMPTY_STATUS_SECTIONS;
+    }
     const sections = guests.filter((guest) => (guest.statusEntry || guest.statusSource) && isGuestActive(guest));
     return sections.length > 0 ? sections : EMPTY_STATUS_SECTIONS;
-  }, [guests]);
+  }, [catalogRuntimeKey, guests, runtimeKey, sharedContextPanelsAvailable, status]);
 };
 
 /**
  * Message and session menu entries from active guests. Empty on VS Code and
- * mobile, which never mount guests. Reads the store only: every transcript
- * row and sidebar row calls this, and the rail (`useGuestSurfaces`) already
- * owns loading the catalog and following runtime switches. The store is
- * emptied on a switch, so a memo on `guests` alone stays current.
+ * mobile; Resource Monitor contributes no actions or commands, and mobile does
+ * not load unrelated guests. Reads the store only: every transcript row and
+ * sidebar row calls this, and the rail (`useGuestSurfaces`) already owns loading
+ * the catalog and following runtime switches. The store is emptied on a switch,
+ * so a memo on `guests` alone stays current.
  */
 export const useGuestActions = (): GuestActionEntry[] => {
   const guests = useGuestsStore((state) => state.guests);

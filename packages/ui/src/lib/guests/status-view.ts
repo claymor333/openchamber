@@ -136,6 +136,8 @@ export type StatusViewPoller = {
    * the caller knows the view it shows reflects what happened before.
    */
   refresh: () => Promise<void>;
+  /** Stop/continue polling without creating a second timer chain. */
+  setActive: (active: boolean) => void;
   stop: () => void;
 };
 
@@ -144,6 +146,7 @@ type StatusViewPolling = {
   interval: number;
   onRead: (result: GuestStatusViewRead) => void;
   visibility?: StatusViewVisibility;
+  active?: boolean;
   schedule?: (callback: () => void, delay: number) => number;
   cancel?: (id: number) => void;
 };
@@ -151,19 +154,24 @@ type StatusViewPolling = {
 /**
  * Reads a source section now and then every `interval` after the previous
  * read finished, so a slow service is never asked twice at once. Nothing is
- * read while the document is hidden; the next read happens when it shows.
- * Results that arrive after `stop` are dropped.
+ * read while the document is hidden or the owning surface is inactive; the
+ * next read happens when it becomes visible/active. Results that arrive after
+ * `stop`, or while inactive, are dropped.
  */
 export const startStatusViewPolling = ({
   read,
   interval,
   onRead,
   visibility = documentVisibility(),
+  active: initiallyActive = true,
   schedule = (callback, delay) => window.setTimeout(callback, delay),
   cancel = (id) => window.clearTimeout(id),
 }: StatusViewPolling): StatusViewPoller => {
   let stopped = false;
+  let active = initiallyActive;
   let running = false;
+  let activityGeneration = 0;
+  let resumeAfterCurrentRead = false;
   let again = false;
   let timer: number | null = null;
   // Reads are numbered as they start; a waiter wants one numbered at least `from`.
@@ -178,17 +186,26 @@ export const startStatusViewPolling = ({
 
   const tick = async (): Promise<void> => {
     timer = null;
-    if (stopped || visibility.isHidden()) return;
+    if (stopped || !active || visibility.isHidden()) return;
     if (running) {
       again = true;
       return;
     }
     running = true;
+    const generation = activityGeneration;
     started += 1;
     const number = started;
     const result = await read();
     running = false;
     if (stopped) return;
+    if (!active || generation !== activityGeneration) {
+      if (active && resumeAfterCurrentRead) {
+        resumeAfterCurrentRead = false;
+        again = false;
+        void tick();
+      }
+      return;
+    }
     onRead(result);
     release(number);
     if (again) {
@@ -215,8 +232,29 @@ export const startStatusViewPolling = ({
       void tick();
       return fresh;
     },
+    setActive: (nextActive) => {
+      if (stopped || active === nextActive) return;
+      active = nextActive;
+      if (!active) {
+        activityGeneration += 1;
+        resumeAfterCurrentRead = false;
+        again = false;
+        if (timer !== null) cancel(timer);
+        timer = null;
+        return;
+      }
+      if (running) {
+        resumeAfterCurrentRead = true;
+        return;
+      }
+      if (timer === null) {
+        again = false;
+        void tick();
+      }
+    },
     stop: () => {
       stopped = true;
+      active = false;
       if (timer !== null) cancel(timer);
       unsubscribe();
       release(Number.POSITIVE_INFINITY);

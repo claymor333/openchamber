@@ -30,6 +30,8 @@ import {
 import { useWorkStatusExtensionSections } from './useWorkStatusExtensionSections';
 import { WorkStatusPresenceProvider } from './presence';
 import { Icon } from '@/components/icon/Icon';
+import { useMobileWorkspaceActivityContext } from '@/lib/mobileWorkspaceActivity';
+import { getRuntimeKey } from '@/lib/runtime-switch';
 
 type Props = {
   /** Null on a new-session draft: repository readouts still apply. */
@@ -76,6 +78,7 @@ const PANEL_TRANSITION_EASING = LAYOUT_ANIMATION_EASING;
  */
 export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible, reserved = false, repositoryEnabled = true, overlay = false }) => {
   const { t, direction } = useI18n();
+  const touchTargets = useMobileWorkspaceActivityContext() !== null;
   // The card's fade and lift follow the side columns' animation setting.
   const panelTransitionMs = useLayoutAnimationMs();
   const setScrollTop = useUIStore((state) => state.setWorkStatusScrollTop);
@@ -291,7 +294,10 @@ export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible
         type="button"
         aria-label={t('chat.workStatus.sections.open')}
         onClick={() => setSectionsDialogOpen(true)}
-        className="absolute inset-e-2 top-1.5 z-10 rounded p-0.5 text-muted-foreground transition-colors hover:text-foreground"
+        className={cn(
+          'absolute inset-e-2 top-1.5 z-10 flex items-center justify-center rounded p-0.5 text-muted-foreground transition-colors hover:text-foreground',
+          touchTargets && 'inset-e-0 top-2 min-h-10 min-w-10',
+        )}
       >
         <Icon name="equalizer-2" className="size-4" />
       </button>
@@ -304,7 +310,13 @@ export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible
         size={24}
         // Sections returning null leave no DOM node, so this reserves room for
         // settings in the first rendered heading, regardless of saved order.
-        className="oc-hide-scrollbar min-h-0 flex-1 overflow-y-auto overflow-x-hidden p-2 [&>section:first-child>[data-work-status-heading]]:pe-7"
+        className={cn(
+          'oc-hide-scrollbar min-h-0 flex-1 overflow-y-auto overflow-x-hidden p-2 [&>section:first-child>[data-work-status-heading]]:pe-7',
+          touchTargets && [
+            '[&>section:first-child>[data-work-status-heading]]:pe-10',
+            '[&>section:first-child>[data-work-status-heading]]:min-h-10',
+          ],
+        )}
       >
         <WorkStatusPrimaryGroup
           sessionId={sessionId}
@@ -317,7 +329,11 @@ export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible
             if (!sectionVisible(id)) return null;
             if (isExtensionSectionId(id)) {
               const guest = extensionSections.byId.get(id);
-              return guest ? <WorkStatusExtensionSection key={id} guest={guest} directory={directory} /> : null;
+              if (!guest) return null;
+              const sectionKey = guest.statusSource
+                ? JSON.stringify([id, getRuntimeKey(), guest.storageId ?? '', guest.version ?? '', guest.statusSource.path, directory ?? ''])
+                : id;
+              return <WorkStatusExtensionSection key={sectionKey} guest={guest} directory={directory} active={visible && !sectionsDialogOpen} />;
             }
             return <React.Fragment key={id}>{id === 'session' || id === 'repository' ? primary[id] : secondarySections[id]}</React.Fragment>;
           })}

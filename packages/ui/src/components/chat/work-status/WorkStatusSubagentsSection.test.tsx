@@ -5,14 +5,19 @@ import { Window } from 'happy-dom';
 import { OpenCode } from '@opencode/client';
 import { useUIStore } from '@/stores/useUIStore';
 import { I18nProvider } from '@/lib/i18n';
+import { getZoneView, resolveZoneActiveTab } from '@/lib/workspace/zones';
+import { closeAllContextZones } from '@/apps/mobileTabletContext';
+import { DedicatedMobileAppProvider, type MobileAppActions } from '@/apps/mobileAppContext';
 import { SyncProvider } from '@/sync/sync-context';
 import { getSyncChildStores } from '@/sync/sync-refs';
 import { useSessionActivityTimingStore } from '@/sync/session-activity-timing';
 import { useGlobalSessionStatusStore } from '@/sync/global-session-status';
+import { useSessionUIStore } from '@/sync/session-ui-store';
 import type { State } from '@/sync/types';
 import type { FormRequest, PermissionRequest, Session } from '@/lib/opencode/model';
 
 let WorkStatusSubagentsSection: typeof import('./WorkStatusSubagentsSection').WorkStatusSubagentsSection;
+let sharedContextPanelsAvailable = false;
 const directory = '/subagent-test';
 const parent: Session = { id: 'parent', projectID: 'project', directory, title: 'Parent', cost: 0, tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } }, time: { created: 1, updated: 1 } };
 const child: Session = { ...parent, id: 'child', parentID: parent.id, title: 'Child', cost: 0.25 };
@@ -25,11 +30,20 @@ describe('subagent status rows', () => {
   let container: HTMLElement;
   let restoreGlobals: () => void;
   const sdk = OpenCode.make({ baseUrl: 'http://subagents.test', fetch: () => new Promise<Response>(() => undefined) });
+  const mobileActions = (): MobileAppActions => ({
+    sharedContextPanelsAvailable,
+    openChanges: () => undefined,
+    openFiles: () => undefined,
+    openSettings: () => undefined,
+    openSourceBoard: () => undefined,
+  });
   const render = async () => {
     await act(async () => root.render(
-      <SyncProvider sdk={sdk} directory={directory}>
-        <I18nProvider><WorkStatusSubagentsSection sessionId={parent.id} directory={directory} /></I18nProvider>
-      </SyncProvider>,
+      <DedicatedMobileAppProvider actions={mobileActions()}>
+        <SyncProvider sdk={sdk} directory={directory}>
+          <I18nProvider><WorkStatusSubagentsSection sessionId={parent.id} directory={directory} /></I18nProvider>
+        </SyncProvider>
+      </DedicatedMobileAppProvider>,
     ));
   };
   const publish = async (patch: Partial<State>) => {
@@ -65,7 +79,14 @@ describe('subagent status rows', () => {
       }
     };
     ({ WorkStatusSubagentsSection } = await import('./WorkStatusSubagentsSection'));
-    useUIStore.setState({ workStatusExpandedSections: {} });
+    sharedContextPanelsAvailable = false;
+    useUIStore.setState({
+      workStatusExpandedSections: {},
+      isMobile: false,
+      contextPanelByDirectory: {},
+      contextSurfaceZones: {},
+      workStatusOverlayOpen: false,
+    });
     useSessionActivityTimingStore.setState({ startedAt: new Map(), settledMs: new Map() });
     useGlobalSessionStatusStore.setState({ observedById: new Map(), statusById: new Map() });
     container = document.createElement('div');
@@ -77,6 +98,7 @@ describe('subagent status rows', () => {
 
   afterEach(async () => {
     await act(async () => root.unmount());
+    useSessionUIStore.getState().setCurrentSession(null);
     await win.happyDOM.close();
     restoreGlobals();
   });
@@ -196,5 +218,73 @@ describe('subagent status rows', () => {
     expect(rowContent().querySelector('span[title]')).not.toBeNull();
     await publish({ session_status: { child: { type: 'idle' } } });
     expect(rowContent().querySelector('span[title]')).toBeNull();
+  });
+
+  test('opens one child chat in the canonical context zone on hybrid tablets without selecting it', async () => {
+    const childDirectory = '/subagent-worktree';
+    await publish({ session: [parent, { ...child, directory: childDirectory }] });
+    await act(async () => useSessionUIStore.getState().setCurrentSession(parent.id, directory));
+    await act(async () => useUIStore.setState({ isMobile: true, workStatusOverlayOpen: true }));
+    sharedContextPanelsAvailable = true;
+    await render();
+
+    const selectedParent = useSessionUIStore.getState().currentSessionId;
+    await act(async () => row().click());
+
+    const store = useUIStore.getState();
+    const panel = store.contextPanelByDirectory[directory];
+    if (!panel) throw new Error('Expected a parent context panel');
+    const childTabs = panel.tabs.filter((tab) => tab.mode === 'chat' && tab.dedupeKey === `session:${child.id}`);
+    expect(childTabs).toHaveLength(1);
+    expect(childTabs[0]).toMatchObject({
+      mode: 'chat',
+      dedupeKey: `session:${child.id}`,
+      targetDirectory: childDirectory,
+      label: 'Child',
+      readOnly: true,
+    });
+    expect(resolveZoneActiveTab(panel, store.contextSurfaceZones, 'right')?.id).toBe(childTabs[0]?.id);
+    expect(getZoneView(panel, 'right').isOpen).toBe(true);
+    expect(useSessionUIStore.getState().currentSessionId).toBe(selectedParent);
+    expect(useUIStore.getState().workStatusOverlayOpen).toBe(false);
+
+    await act(async () => row().click());
+    expect(useUIStore.getState().contextPanelByDirectory[directory]?.tabs.filter((tab) => tab.dedupeKey === `session:${child.id}`)).toHaveLength(1);
+
+    expect(closeAllContextZones(directory)).toBe(1);
+    const closed = useUIStore.getState().contextPanelByDirectory[directory];
+    if (!closed) throw new Error('Expected the child tab to remain after zone close');
+    expect(getZoneView(closed, 'right').isOpen).toBe(false);
+    expect(resolveZoneActiveTab(closed, useUIStore.getState().contextSurfaceZones, 'right')?.id).toBe(childTabs[0]?.id);
+    expect(useSessionUIStore.getState().currentSessionId).toBe(selectedParent);
+  });
+
+  test('keeps the phone fallback in the main chat', async () => {
+    const childDirectory = '/subagent-worktree';
+    await publish({ session: [parent, { ...child, directory: childDirectory }] });
+    await act(async () => useSessionUIStore.getState().setCurrentSession(parent.id, directory));
+    await act(async () => useUIStore.setState({ isMobile: true }));
+    await render();
+
+    await act(async () => row().click());
+
+    expect(useSessionUIStore.getState().currentSessionId).toBe(child.id);
+    expect(useSessionUIStore.getState().getDirectoryForSession(child.id)).toBe(childDirectory);
+    expect(useUIStore.getState().contextPanelByDirectory[directory]).toBeUndefined();
+  });
+
+  test('keeps the VS Code fallback even if a shared-panel capability is supplied', async () => {
+    const childDirectory = '/subagent-worktree';
+    await publish({ session: [parent, { ...child, directory: childDirectory }] });
+    await act(async () => useSessionUIStore.getState().setCurrentSession(parent.id, directory));
+    Object.defineProperty(win, '__VSCODE_CONFIG__', { configurable: true, value: { panelType: 'chat' } });
+    sharedContextPanelsAvailable = true;
+    await render();
+
+    await act(async () => row().click());
+
+    expect(useSessionUIStore.getState().currentSessionId).toBe(child.id);
+    expect(useSessionUIStore.getState().getDirectoryForSession(child.id)).toBe(childDirectory);
+    expect(useUIStore.getState().contextPanelByDirectory[directory]).toBeUndefined();
   });
 });

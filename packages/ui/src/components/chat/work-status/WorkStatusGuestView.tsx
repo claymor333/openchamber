@@ -25,12 +25,15 @@ import { toast } from '@/components/ui/toast';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { isGuestIconName } from '@/lib/guests/icon';
 import { openGuestUrl } from '@/lib/guests/open-url';
+import { useMobileWorkspaceActivityContext } from '@/lib/mobileWorkspaceActivity';
+import { getRuntimeKey } from '@/lib/runtime-switch';
 import {
   createGuestStatusViewReader,
   postGuestStatusAction,
   startStatusViewPolling,
   type GuestStatusViewFailure,
   type StatusViewPoller,
+  type StatusViewVisibility,
 } from '@/lib/guests/status-view';
 import type { GuestStatusControlBinding } from '@/lib/guests/status-controls';
 import { getCurrentIntlLocale, useI18n } from '@/lib/i18n';
@@ -97,13 +100,29 @@ const EMPTY_STATE: ViewState = { view: null, failure: null };
  * section is shown and expanded. The caller keys the body by guest and
  * directory, so a project change starts from an empty state.
  */
-const useGuestStatusView = (guestId: string, path: string, interval: number, directory: string | null, locale: string) => {
+const useGuestStatusView = (
+  guestId: string,
+  path: string,
+  interval: number,
+  directory: string | null,
+  locale: string,
+  runtimeKey: string,
+  active: boolean,
+  visibility?: StatusViewVisibility,
+) => {
   const [state, setState] = React.useState<ViewState>(EMPTY_STATE);
   const pollerRef = React.useRef<StatusViewPoller | null>(null);
+  const activeRef = React.useRef(active);
+  React.useLayoutEffect(() => {
+    activeRef.current = active;
+    pollerRef.current?.setActive(active);
+  }, [active]);
   React.useEffect(() => {
     const poller = startStatusViewPolling({
       read: createGuestStatusViewReader(guestId, path, { directory, locale }),
       interval,
+      active: activeRef.current,
+      visibility,
       onRead: (result) => setState((current) => {
         // An unchanged answer keeps the same view object, so nothing redraws.
         if (result.ok) return current.view === result.view && current.failure === null ? current : { view: result.view, failure: null };
@@ -115,7 +134,7 @@ const useGuestStatusView = (guestId: string, path: string, interval: number, dir
       poller.stop();
       pollerRef.current = null;
     };
-  }, [directory, guestId, interval, locale, path]);
+  }, [directory, guestId, interval, locale, path, runtimeKey, visibility]);
   const refresh = React.useCallback(() => pollerRef.current?.refresh() ?? Promise.resolve(), []);
   return { ...state, refresh };
 };
@@ -128,8 +147,10 @@ type ActionState = {
    * answered, which then has the service's own word on it.
    */
   chosen: ReadonlyMap<string, string>;
+  /** Mobile status controls keep a touch-sized target. */
+  touchTargets: boolean;
   act: (event: GuestStatusActionEvent) => void;
-  openUrl: (url: string) => void;
+  openUrl: ((url: string) => void) | null;
 };
 
 const ActionContext = React.createContext<ActionState | null>(null);
@@ -218,8 +239,8 @@ const Chip: React.FC<{ chip: GuestStatusChip }> = ({ chip }) => {
   const { openUrl } = useActions();
   const className = 'shrink-0 rounded-full px-1.5 py-px text-[11px] font-medium leading-4 tabular-nums';
   const fallback = !chip.tone || chip.tone === 'default' || chip.tone === 'muted';
-  if (!chip.url) {
-    return <span dir="auto" className={cn(className, fallback && 'bg-[var(--interactive-hover)] text-muted-foreground')} style={pillStyle(chip.tone)}>{chip.label}</span>;
+  if (!chip.url || !openUrl) {
+    return <span dir="auto" title={chip.url} className={cn(className, fallback && 'bg-[var(--interactive-hover)] text-muted-foreground')} style={pillStyle(chip.tone)}>{chip.label}</span>;
   }
   const url = chip.url;
   return (
@@ -237,7 +258,7 @@ const Chip: React.FC<{ chip: GuestStatusChip }> = ({ chip }) => {
 };
 
 const Segmented: React.FC<Extract<GuestStatusContent, { kind: 'segmented' }>> = ({ id, label, value, options, disabled }) => {
-  const { busy, chosen, act } = useActions();
+  const { busy, chosen, act, touchTargets } = useActions();
   const current = chosen.get(id) ?? value;
   return (
     <div role="group" aria-label={label} className="flex min-w-0 flex-1 items-center gap-1">
@@ -249,6 +270,7 @@ const Segmented: React.FC<Extract<GuestStatusContent, { kind: 'segmented' }>> = 
           aria-pressed={option.value === current}
           disabled={disabled || busy.has(id)}
           onClick={() => { if (option.value !== current) act({ id, value: option.value }); }}
+          className={touchTargets ? 'min-h-10 min-w-10' : undefined}
         >
           {option.label}
         </Button>
@@ -277,7 +299,7 @@ const Content: React.FC<{ content: GuestStatusContent }> = ({ content }) => {
 const CONFIRM_MS = 4_000;
 
 const ActionButton: React.FC<Extract<GuestStatusAction, { kind: 'button' }>> = ({ id, label, variant, confirm, disabled }) => {
-  const { busy, act } = useActions();
+  const { busy, act, touchTargets } = useActions();
   const [armed, setArmed] = React.useState(false);
   React.useEffect(() => {
     if (!armed) return;
@@ -298,7 +320,7 @@ const ActionButton: React.FC<Extract<GuestStatusAction, { kind: 'button' }>> = (
         setArmed(false);
         act({ id });
       }}
-      className="max-w-[8rem]"
+       className={cn('max-w-[8rem]', touchTargets && 'min-h-10')}
     >
       <span className="truncate">{armed && confirm ? confirm : label}</span>
     </Button>
@@ -306,7 +328,7 @@ const ActionButton: React.FC<Extract<GuestStatusAction, { kind: 'button' }>> = (
 };
 
 const ActionSwitch: React.FC<Extract<GuestStatusAction, { kind: 'switch' }>> = ({ id, label, checked, disabled }) => {
-  const { busy, chosen, act } = useActions();
+  const { busy, chosen, act, touchTargets } = useActions();
   const choice = chosen.get(id);
   const current = choice === undefined ? checked : choice === 'on';
   return (
@@ -316,18 +338,19 @@ const ActionSwitch: React.FC<Extract<GuestStatusAction, { kind: 'switch' }>> = (
       disabled={disabled || busy.has(id)}
       loading={busy.has(id)}
       onCheckedChange={(next) => act({ id, value: next ? 'on' : 'off' })}
+      className={touchTargets ? 'min-h-10 min-w-10' : undefined}
     />
   );
 };
 
 const ActionSelect: React.FC<Extract<GuestStatusAction, { kind: 'select' }>> = ({ id, label, value, options, disabled }) => {
-  const { busy, chosen, act } = useActions();
+  const { busy, chosen, act, touchTargets } = useActions();
   const current = chosen.get(id) ?? value;
   const selected = options.find((option) => option.value === current);
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size="xs" aria-label={`${label}: ${selected?.label ?? current}`} disabled={disabled || busy.has(id)} className="max-w-[8rem] gap-1">
+         <Button variant="ghost" size="xs" aria-label={`${label}: ${selected?.label ?? current}`} disabled={disabled || busy.has(id)} className={cn('max-w-[8rem] gap-1', touchTargets && 'min-h-10')}>
           <span className="min-w-0 truncate">{selected?.label ?? current}</span>
           <Icon name="arrow-down-s" className="size-3 shrink-0" />
         </Button>
@@ -335,7 +358,7 @@ const ActionSelect: React.FC<Extract<GuestStatusAction, { kind: 'select' }>> = (
       <DropdownMenuContent data-work-status-popup align="end" className="min-w-32">
         <DropdownMenuRadioGroup value={current} onValueChange={(next) => { if (next !== current) act({ id, value: next }); }}>
           {options.map((option) => (
-            <DropdownMenuRadioItem key={option.value} value={option.value}>
+             <DropdownMenuRadioItem key={option.value} value={option.value} className={touchTargets ? 'min-h-10' : undefined}>
               <span className="truncate">{option.label}</span>
             </DropdownMenuRadioItem>
           ))}
@@ -382,6 +405,7 @@ const RowTooltip: React.FC<{ text: string; children: React.ReactElement }> = ({ 
 );
 
 const Line: React.FC<{ row: Extract<GuestStatusRow, { kind: 'line' }> }> = ({ row }) => {
+  const { touchTargets } = useActions();
   // An icon the app does not have is left out rather than replaced.
   const icon = row.icon && isGuestIconName(row.icon) ? row.icon : null;
   // A chart has its own hover label, so the row's tooltip moves to the label.
@@ -392,7 +416,7 @@ const Line: React.FC<{ row: Extract<GuestStatusRow, { kind: 'line' }> }> = ({ ro
     <span dir="auto" tabIndex={labelTooltip ? 0 : undefined} className={cn('min-w-0 truncate', row.content ? 'w-24 shrink-0' : 'flex-1')}>{row.label}</span>
   );
   const body = (
-    <div className="flex h-7 w-full items-center gap-2 rounded-md px-1 text-start text-[13px] text-muted-foreground" tabIndex={rowTooltip ? 0 : undefined}>
+    <div className={cn('flex h-7 w-full items-center gap-2 rounded-md px-1 text-start text-[13px] text-muted-foreground', touchTargets && 'h-auto min-h-10 py-1')} tabIndex={rowTooltip ? 0 : undefined}>
       {row.dot ? <span aria-hidden="true" className="size-1.5 shrink-0 rounded-full" style={{ backgroundColor: strokeColor(row.dot) }} /> : null}
       {icon ? <Icon name={icon} className="size-3.5 shrink-0 text-muted-foreground" /> : null}
       {labelTooltip ? <RowTooltip text={labelTooltip}>{label}</RowTooltip> : label}
@@ -415,6 +439,15 @@ Row.displayName = 'GuestStatusRow';
 
 const EMPTY_SET: ReadonlySet<string> = new Set();
 const EMPTY_CHOICES: ReadonlyMap<string, string> = new Map();
+type GuestStatusActionState = {
+  scope: string;
+  busy: ReadonlySet<string>;
+  chosen: ReadonlyMap<string, string>;
+};
+const MOBILE_ACTIVITY_VISIBILITY: StatusViewVisibility = {
+  isHidden: () => false,
+  onVisible: () => () => undefined,
+};
 
 /**
  * The body of a source section. Reads the extension's service, draws its rows
@@ -425,30 +458,77 @@ export const GuestStatusViewBody: React.FC<{
   guestId: string;
   source: { path: string; interval: number };
   directory: string | null;
+  /** The containing Work Status panel can remain mounted briefly while hidden. */
+  active?: boolean;
   onStatusControls: (binding: GuestStatusControlBinding | null) => void;
-}> = ({ guestId, source, directory, onStatusControls }) => {
+}> = ({ guestId, source, directory, active = true, onStatusControls }) => {
   const { t, locale } = useI18n();
-  const { view, failure, refresh } = useGuestStatusView(guestId, source.path, source.interval, directory, locale);
-  const [busy, setBusy] = React.useState<ReadonlySet<string>>(EMPTY_SET);
-  const [chosen, setChosen] = React.useState<ReadonlyMap<string, string>>(EMPTY_CHOICES);
+  const workspaceActivity = useMobileWorkspaceActivityContext();
+  const touchTargets = workspaceActivity !== null;
+  const actionRuntimeKey = getRuntimeKey();
+  const mobileActive = workspaceActivity?.documentVisible !== false
+    && workspaceActivity?.nativeAppActive !== false
+    && workspaceActivity?.workspaceSurfaceVisible !== false
+    && workspaceActivity?.dialogOpen !== true;
+  const { view, failure, refresh } = useGuestStatusView(
+    guestId,
+    source.path,
+    source.interval,
+    directory,
+    locale,
+    actionRuntimeKey,
+    active && mobileActive,
+    touchTargets ? MOBILE_ACTIVITY_VISIBILITY : undefined,
+  );
+  const actionScope = JSON.stringify([actionRuntimeKey, guestId, source.path, directory, locale]);
+  const [actionState, setActionState] = React.useState<GuestStatusActionState>(() => ({
+    scope: actionScope,
+    busy: EMPTY_SET,
+    chosen: EMPTY_CHOICES,
+  }));
+  const currentActionState = actionState.scope === actionScope
+    ? actionState
+    : { scope: actionScope, busy: EMPTY_SET, chosen: EMPTY_CHOICES };
+  const { busy, chosen } = currentActionState;
+  const mountedRef = React.useRef(false);
+  const actionScopeRef = React.useRef(actionScope);
+  React.useLayoutEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
+  React.useLayoutEffect(() => {
+    actionScopeRef.current = actionScope;
+  }, [actionScope]);
+  const isActionCurrent = React.useCallback((runtimeKey: string, scope: string) => (
+    mountedRef.current
+    && getRuntimeKey() === runtimeKey
+    && actionScopeRef.current === scope
+  ), []);
+  const updateActionState = React.useCallback((update: (current: GuestStatusActionState) => GuestStatusActionState) => {
+    setActionState((current) => update(current.scope === actionScope
+      ? current
+      : { scope: actionScope, busy: EMPTY_SET, chosen: EMPTY_CHOICES }));
+  }, [actionScope]);
 
   const act = React.useCallback((event: GuestStatusActionEvent) => {
-    setBusy((current) => new Set(current).add(event.id));
+    if (!isActionCurrent(actionRuntimeKey, actionScope)) return;
+    updateActionState((current) => ({ ...current, busy: new Set(current.busy).add(event.id) }));
     if (event.value !== undefined) {
       const value = event.value;
-      setChosen((current) => new Map(current).set(event.id, value));
+      updateActionState((current) => ({ ...current, chosen: new Map(current.chosen).set(event.id, value) }));
     }
-    const forget = () => setChosen((current) => {
-      if (!current.has(event.id)) return current;
-      const next = new Map(current);
+    const forget = () => updateActionState((current) => {
+      if (!current.chosen.has(event.id)) return current;
+      const next = new Map(current.chosen);
       next.delete(event.id);
-      return next;
+      return { ...current, chosen: next };
     });
     void postGuestStatusAction(guestId, source.path, { directory, locale }, event).then(async (result) => {
-      setBusy((current) => {
-        const next = new Set(current);
+      if (!isActionCurrent(actionRuntimeKey, actionScope)) return;
+      updateActionState((current) => {
+        const next = new Set(current.busy);
         next.delete(event.id);
-        return next;
+        return { ...current, busy: next };
       });
       if (!result.ok) {
         forget();
@@ -459,9 +539,10 @@ export const GuestStatusViewBody: React.FC<{
       // A read already under way may predate the action; the choice stays
       // until one that started after the answer is on screen.
       await refresh();
+      if (!isActionCurrent(actionRuntimeKey, actionScope)) return;
       forget();
     });
-  }, [directory, guestId, locale, refresh, source.path, t]);
+  }, [actionRuntimeKey, actionScope, directory, guestId, isActionCurrent, locale, refresh, source.path, t, updateActionState]);
 
   const openUrl = React.useCallback((url: string) => {
     void openGuestUrl(url, directory, true);
@@ -480,7 +561,15 @@ export const GuestStatusViewBody: React.FC<{
   }, [act, controls, onStatusControls]);
   React.useEffect(() => () => onStatusControls(null), [onStatusControls]);
 
-  const actions = React.useMemo<ActionState>(() => ({ busy, chosen, act, openUrl }), [act, busy, chosen, openUrl]);
+  const actions = React.useMemo<ActionState>(() => ({
+    busy,
+    chosen,
+    touchTargets,
+    act,
+    // A source section's local service URLs belong to the connected host, not
+    // the phone. Desktop keeps its existing browser handoff.
+    openUrl: touchTargets ? null : openUrl,
+  }), [act, busy, chosen, openUrl, touchTargets]);
 
   if (!view) {
     return failure

@@ -112,6 +112,7 @@ import { useWorkStatusVisibility } from './work-status/useWorkStatusVisibility';
 import { useShownSessionSelection } from './useShownSessionSelection';
 import { usePinnedSessionDirectory } from './usePinnedSessionDirectory';
 import { useRightSlotStore } from '@/components/layout/rightSlot';
+import { useMobileAppActions } from '@/apps/mobileAppContext';
 import { buildPromptPreviewsByTurnId } from './lib/promptPreviews';
 import { resolveChatPromptReadOnly } from './chatPromptReadOnly';
 import { PermissionDock } from './PermissionDock';
@@ -1119,6 +1120,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
 
     const { isMobile } = useDeviceInfo();
     const isVSCode = isVSCodeRuntime();
+    const sharedContextPanelsAvailable = useMobileAppActions()?.sharedContextPanelsAvailable ?? false;
     const chatSurfaceMode = useChatSurfaceMode();
     // The new-session draft is the main chat's; a pinned column never shows it.
     const draftOpen = !pinned && Boolean(newSessionDraft?.open);
@@ -1141,9 +1143,10 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
     // It yields to the context panel and to a narrow chat; `rowRef` goes on the
     // row that holds both columns, so its width never depends on the panel's
     // own visibility.
-    const { rowRef: workStatusRowRef, visible: workStatusVisible, fits: workStatusFits, roomy: workStatusRoomy } = useWorkStatusVisibility({
+    const { rowRef: workStatusRowRef, available: workStatusAvailable, visible: workStatusVisible, fits: workStatusFits, roomy: workStatusRoomy } = useWorkStatusVisibility({
         isMobile,
         isVSCode,
+        sharedContextPanelsAvailable,
     });
     const attachColumnRoot = React.useCallback((node: HTMLDivElement | null) => {
         columnRootRef.current = node;
@@ -1153,8 +1156,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
     // mounted so its visibility can animate rather than snap.
     // A pinned column leaves the panel, and the app-wide flags below, to the
     // main chat.
-    const workStatusPanelMountable = !isMobile
-        && !isVSCode
+    const workStatusPanelMountable = workStatusAvailable
         && !pinned
         && chatSurfaceMode !== 'mini-chat';
     const showWorkStatusPanel = workStatusPanelMountable && workStatusVisible;

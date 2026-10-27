@@ -17,6 +17,11 @@ export const MobileWorkspaceActivityProvider: React.FC<{
   React.createElement(MobileWorkspaceActivityContext.Provider, { value: activity }, children)
 );
 
+/** Null outside the dedicated mobile shell; consumers add no native listeners. */
+export const useMobileWorkspaceActivityContext = (): MobileWorkspaceActivity | null => (
+  React.useContext(MobileWorkspaceActivityContext)
+);
+
 /** The browser document, or null where there is none; `in` probes the global object without a typeof check. */
 const readBrowserDocument = (): Document | null => ('document' in globalThis ? globalThis.document : null);
 

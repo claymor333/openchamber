@@ -9,11 +9,67 @@ import { useUIStore } from '@/stores/useUIStore';
 import { useGitStore, useIsGitRepo } from '@/stores/useGitStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSession } from '@/sync/sync-context';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { useMobileAppActions } from './mobileAppContext';
 
 import { SpaceAccessButton } from '@/components/session/spaces/SpaceAccessButton';
 
 import { MobileSessionMetadataButton } from './MobileSessionMetadata';
 import { MobileSessionSwitcher } from './MobileSessionSwitcher';
+
+const MobileWorkStatusToggleButton: React.FC<{ onToggle?: () => void }> = ({ onToggle }) => {
+  const { t } = useI18n();
+  const enabled = useUIStore((state) => state.workStatusPanelEnabled);
+  const fits = useUIStore((state) => state.workStatusPanelFits);
+  const setEnabled = useUIStore((state) => state.setWorkStatusPanelEnabled);
+  const overlayOpen = useUIStore((state) => state.workStatusOverlayOpen);
+  const setOverlayOpen = useUIStore((state) => state.setWorkStatusOverlayOpen);
+  const shownInline = enabled && fits;
+  const toggleActive = shownInline || overlayOpen;
+  const tooltip = enabled && !fits
+    ? (overlayOpen ? t('header.workStatusPanel.hide') : t('header.workStatusPanel.showOverlay'))
+    : enabled
+      ? t('header.workStatusPanel.hide')
+      : t('header.workStatusPanel.show');
+
+  const handleToggle = () => {
+    onToggle?.();
+    if (enabled && !fits) {
+      setOverlayOpen(!overlayOpen);
+      return;
+    }
+    setEnabled(!enabled);
+  };
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          data-work-status-toggle="true"
+          aria-pressed={toggleActive}
+          aria-label={t('header.workStatusPanel.toggleAria')}
+          onClick={handleToggle}
+          className={cn(
+            'flex size-10 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+            toggleActive && 'text-foreground',
+          )}
+          style={{ touchAction: 'manipulation' }}
+        >
+          <Icon name="list-indefinite" className="size-5" />
+        </button>
+      </TooltipTrigger>
+      <TooltipContent side="bottom">{tooltip}</TooltipContent>
+    </Tooltip>
+  );
+};
+
+export const MobileWorkStatusToggle: React.FC<{ onToggle?: () => void }> = ({ onToggle }) => {
+  const mobileActions = useMobileAppActions();
+  return mobileActions?.sharedContextPanelsAvailable
+    ? <MobileWorkStatusToggleButton onToggle={onToggle} />
+    : null;
+};
 
 export const MobileHeader: React.FC<{
   onOpenSessions: () => void;
@@ -24,6 +80,8 @@ export const MobileHeader: React.FC<{
   compactTitle?: boolean;
 }> = ({ onOpenSessions, onOpenWorkspace, compactTitle = false }) => {
   const { t } = useI18n();
+  const mobileActions = useMobileAppActions();
+  const sharedContextPanelsAvailable = mobileActions?.sharedContextPanelsAvailable === true;
   const [metadataOpen, setMetadataOpen] = React.useState(false);
   const [switcherOpen, setSwitcherOpen] = React.useState(false);
   const titleRef = React.useRef<HTMLButtonElement>(null);
@@ -60,6 +118,10 @@ export const MobileHeader: React.FC<{
     setMetadataOpen(false);
     setSwitcherOpen(false);
   }, [currentSessionId, effectiveDirectory]);
+
+  React.useEffect(() => {
+    if (sharedContextPanelsAvailable) setMetadataOpen(false);
+  }, [sharedContextPanelsAvailable]);
 
   const handleOpenSessions = React.useCallback(() => {
     setMetadataOpen(false);
@@ -133,7 +195,7 @@ export const MobileHeader: React.FC<{
               controls stay pinned to the right edge. */}
           {compactTitle ? <div className="min-w-0 flex-1" /> : null}
 
-          {runOverviewKey ? null : (
+          {runOverviewKey || sharedContextPanelsAvailable ? null : (
             <MobileSessionMetadataButton
               open={metadataOpen}
               onOpenChange={handleMetadataOpenChange}
@@ -148,6 +210,11 @@ export const MobileHeader: React.FC<{
             className="flex size-10 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             iconClassName="size-5"
           />
+
+          <MobileWorkStatusToggle onToggle={() => {
+            setMetadataOpen(false);
+            setSwitcherOpen(false);
+          }} />
 
           <button
             type="button"

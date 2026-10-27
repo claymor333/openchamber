@@ -35,9 +35,10 @@ the inline card keeps its lighter, non-blurred fill instead.
 ## Placement
 
 `ChatContainer` owns the card's state, but the inline card renders through a
-portal into the right slot (`components/layout/rightSlot.ts`): the context
-panel's `aside` in `MainLayout`, which holds a right-anchored host for the card
-under the panel's content. The slot animates one width for both, from the
+portal into the right slot (`components/layout/rightSlot.ts`): the right-zone
+`ContextPanel` owns a right-anchored host for the card under the panel's
+content. The host is mounted by `MainLayout` on desktop and
+`MobileTabletContextWorkspace` on roomy tablets. The slot animates one width for both, from the
 card's column (`WORK_STATUS_COLUMN_WIDTH`, the card and its margins) to the
 panel's width and back, while the card fades out and the panel fades in over
 it. The chat column therefore narrows or widens once, in one direction.
@@ -54,7 +55,11 @@ The overlay form stays inside the chat column in `ChatContainer`.
 `useWorkStatusVisibility` hides the panel when any of these hold:
 
 - the user switched it off;
-- the runtime is mobile or VS Code;
+- the runtime is VS Code, or mobile without a shared tablet context-panel
+  layout. `MobileApp` publishes that capability only while the same
+  `workspaceAsPanel` condition mounts the rail and zones; the device remains a
+  mobile runtime, so this exception does not change composer, menu or other
+  mobile behavior;
 - the context panel is open for the directory the app is effectively on —
   looked up through `useEffectiveDirectory` and `normalizeContextPanelDirectoryKey`,
   the same key the rail and the panel use. It is deliberately **not** the
@@ -156,6 +161,14 @@ do not wait for unrelated older history pages. Partial pages add coverage withou
 removing cached sessions. Only the completed list establishes authoritative
 coverage and removes absent records; newer live updates and deletions win over
 both partial pages and the final snapshot.
+
+On desktop and while the mobile tablet context panels are mounted, opening a
+row creates or selects its deduplicated read-only chat tab in the configured
+zone without changing the main session. The tab stays under the work-status
+panel's directory and targets the child's own directory when it differs.
+Phones and VS Code keep their existing main-chat session switch behavior. The
+tablet's narrow-layout handoff closes visible context zones without discarding
+their tabs.
 
 Hovering or focusing a row shows its session model's catalog display name,
 falling back to the formatted model ID. Missing model metadata produces no
@@ -360,13 +373,23 @@ hidden and empty sections do not claim that space. Both heading variants expose
 width. Heading summaries truncate within a bounded share of the available width
 so project names and usage summaries cannot push actions under settings.
 
+Touch layouts use an 8px gap between sections; desktop keeps the 20px gap. Only
+the first visible heading reserves a 40px chooser row and trailing space, so a
+first Session or Project heading stays aligned without making later plain
+headings taller. Collapsible headings keep their 40px interactive target. The
+chooser stays centered at the row's logical end; desktop keeps its compact
+heading and control offsets.
+
 ## Extension sections
 
 An installed extension can add its own section (`contributes.statusSection`,
 see `packages/sdk/DOCUMENTATION.md`). `WorkStatusExtensionSection` draws the
-header from the extension's `statusTitle` (else its name) and panel icon, and
-its body is a `PluginPane` with `surface="status"`: the same sandboxed iframe,
-guest-scoped token, context, grants and pause gates as a rail panel.
+header from the extension's `statusTitle` (else its name) and panel icon. A
+`statusEntry` uses a `PluginPane` with `surface="status"`: the same sandboxed
+iframe, guest-scoped token, context, grants and pause gates as a rail panel.
+Roomy mobile tablets have one narrower exception: the curated, approved
+Resource Monitor's `statusSource` is drawn here; generic mobile status frames
+and other guest contributions remain unavailable.
 
 Cost is bounded by mounting. The frame exists only while the panel's content is
 mounted, the section is visible, and the section is expanded; the collapsible
@@ -399,13 +422,13 @@ under Anchored popovers.
 
 ### Sections the app draws
 
-An extension that declares `statusSection.source` gets no frame. `WorkStatusGuestView` reads its service (`lib/guests/status-view.ts`) and draws the answer with the panel's own row vocabulary: the same 28px rows, muted text, tone colours from the theme, pills for chips and badges, the shared `Button`, `Switch` and dropdown. The body is mounted under the same rule as a frame (shown, expanded), so reading starts and stops with it, and is keyed by guest and directory, so a project change starts from an empty view rather than showing the last project's numbers. Reads pause while the document is hidden. Header controls in the answer go through the same `GuestStatusControlBinding` a frame's `setStatusControls` uses, so `StatusHeaderControls` draws both.
+An extension that declares `statusSection.source` gets no frame. `WorkStatusGuestView` reads its service (`lib/guests/status-view.ts`) and draws the answer with the panel's own row vocabulary: 28px desktop rows, 40px minimum mobile touch targets, muted text, theme tones, pills for chips and badges, and the shared `Button`, `Switch` and dropdown. On mobile, URL chips remain informational and cannot open host-local URLs in the device browser. The body is mounted under the same rule as a frame (shown, expanded), so reading starts and stops with it, and is keyed by guest, directory and runtime on every surface, so a scope change starts from an empty view rather than showing the last scope's numbers. Reads pause while the document is hidden. Mobile reads also pause while the native app is inactive, `MobileApp.workspaceSurfaceVisible` is false (full-screen surfaces, open plans, run overview, or a covered chat), any app `Dialog` is open (`oc-dialog-open`), or the Work Status card/its Sections dialog covers the body. Dismissal resumes one poll chain. Header controls in the answer go through the same `GuestStatusControlBinding` a frame's `setStatusControls` uses, so `StatusHeaderControls` draws both.
 
-A failed read keeps the last view on screen, faded, under an error note; before the first answer the body says it is reading. An action holds its control, in a row or in the header, while the request runs, shows a chosen value at once, and keeps it until a read that started after the service's answer is on screen (`StatusViewPoller.refresh` resolves then), so a read already under way cannot flip it back. A refused action drops the choice and shows the service's message, or a generic one, in a toast. A row's tooltip covers the whole row, except on a row with a chart, whose own hover label owns the middle; there the tooltip sits on the label.
+A failed read keeps the last view on screen, faded, under an error note; before the first answer the body says it is reading. An action holds its control while the request runs, shows a chosen value at once, and keeps it until a read started after the answer is on screen. The action is scoped to its mounted guest/path/directory/runtime: a callback from an old scope never posts, and a late answer cannot toast or refresh the new runtime. A refused current-scope action drops the choice and shows the service's message, or a generic one, in a toast. A row's tooltip covers the whole row, except on a row with a chart, whose own hover label owns the middle; there the tooltip sits on the label.
 
 #### Why the host polls and not the service pushing
 
-Polling a path keeps the service a plain HTTP handler, which is what every extension service already is, and reuses the authenticated `service/request` proxy with its pause, approval and size checks. A push channel would save requests while nothing changes, but needs a socket per section and reconnect logic in every extension. The interval has a floor of one second, reads never overlap, and a hidden document reads nothing.
+Polling a path keeps the service a plain HTTP handler, which is what every extension service already is, and reuses the authenticated `service/request` proxy with its pause, approval and size checks. A push channel would save requests while nothing changes, but needs a socket per section and reconnect logic in every extension. The interval has a floor of one second and reads never overlap. On mobile, the root publishes document, native, workspace-surface and dialog activity once; a covered or hidden Work Status body reads nothing, and dismissal starts one chain without per-section native listeners.
 
 #### Why only theme tones and not colours
 
@@ -415,11 +438,14 @@ The section sits among the app's own sections and follows the theme, light and d
 
 `createGuestStatusViewReader` returns the previous view untouched when the answer's body is byte-identical, and otherwise reuses each row object, and the header controls, whose JSON did not change. Rows are memoized by identity and the header binding follows the controls' identity, so a sample that moves one number redraws one row instead of the section and its header.
 
-`useWorkStatusExtensionSections` lists active guests with a `statusEntry` or `statusSource` from
-the catalog store (`useGuestStatusSections`). It is empty on VS Code and
-mobile, which load no guests; the panel is hidden there anyway, but the empty
-list is explicit rather than an accident of visibility. The rail owns loading
-the catalog.
+`useWorkStatusExtensionSections` lists active guests with a `statusEntry` or
+`statusSource` from the catalog store (`useGuestStatusSections`). Desktop keeps
+its full catalog behavior. VS Code remains empty. Mobile requires a ready
+catalog for the current runtime and the existing shared-tablet capability, then
+allows only the approved, enabled, compatible Resource Monitor's host-drawn
+`statusSource`; phones, narrow layouts, `statusEntry` frames and other guests
+stay empty. The rail owns loading the catalog; stale catalog/runtime state does
+not create a mobile section.
 
 Section ids are `ext:<extension id>` and share the persisted order and hidden
 lists with built-in ids. Sanitizing keeps well-formed `ext:` ids even when that
@@ -434,8 +460,9 @@ search anchor (they are dynamic entities).
 
 ## Switching it off
 
-A persisted preference (`workStatusPanelEnabled`) drives a header toggle, and a
-dialog behind the equalizer icon switches individual sections off. Hidden
+A persisted preference (`workStatusPanelEnabled`) drives the desktop header
+toggle and the mobile tablet header toggle when shared context panels are
+mounted. A dialog behind the equalizer icon switches individual sections off. Hidden
 sections are stored rather than visible ones. Every section, including Turn
 stats, is enabled by default. UI-store v21 migration and server-list hydration
 remove the old automatic telemetry hiding unless `workStatusHiddenSectionsExplicit`

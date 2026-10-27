@@ -10,6 +10,7 @@ import { useUIStore } from '@/stores/useUIStore';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { getProviderModelDisplayName } from '@/lib/modelDisplay';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useMobileAppActions } from '@/apps/mobileAppContext';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { normalizePath } from '@/lib/pathNormalization';
 import { spaceIdOfDirectory } from '@/lib/spaces/space-route';
@@ -18,6 +19,7 @@ import { useReportWorkStatusPresence } from './presenceContext';
 import { formatCost } from './subagentCost';
 import { computeRollup } from './useSubagentCostRollup';
 import type { State } from '@/sync/types';
+import type { Session } from '@/lib/opencode/model';
 
 type Props = {
   sessionId: string | null;
@@ -39,6 +41,7 @@ const SubagentDuration: React.FC<{ sessionId: string }> = ({ sessionId }) => {
 export const WorkStatusSubagentsSection: React.FC<Props> = ({ sessionId, directory }) => {
   const { t } = useI18n();
   const isMobile = useUIStore((state) => state.isMobile);
+  const sharedContextPanelsAvailable = useMobileAppActions()?.sharedContextPanelsAvailable ?? false;
   const providers = useConfigStore((state) => state.providers);
 
   const liveSessions = useAllLiveSessions();
@@ -97,19 +100,23 @@ export const WorkStatusSubagentsSection: React.FC<Props> = ({ sessionId, directo
 
   // Same branch the transcript's Task tool takes: surfaces that cannot host an
   // side panel navigate to the child session instead of opening a tab.
-  const openChildSession = React.useCallback((childId: string, label: string) => {
-    if (!directory) return;
-    if (isMobile || isVSCodeRuntime()) {
-      setCurrentSession(childId, directory);
+  const openChildSession = React.useCallback((child: Session, label: string) => {
+    if (!directory || !child.directory) return;
+    if (isVSCodeRuntime() || (isMobile && !sharedContextPanelsAvailable)) {
+      setCurrentSession(child.id, child.directory);
       return;
+    }
+    if (sharedContextPanelsAvailable && useUIStore.getState().workStatusOverlayOpen) {
+      useUIStore.getState().setWorkStatusOverlayOpen(false);
     }
     openContextPanelTab(directory, {
       mode: 'chat',
-      dedupeKey: `session:${childId}`,
+      dedupeKey: `session:${child.id}`,
+      targetDirectory: normalizePath(child.directory) === normalizePath(directory) ? null : child.directory,
       label,
       readOnly: true,
     });
-  }, [directory, isMobile, openContextPanelTab, setCurrentSession]);
+  }, [directory, isMobile, openContextPanelTab, setCurrentSession, sharedContextPanelsAvailable]);
 
   useReportWorkStatusPresence('subagents', children.length > 0);
 
@@ -188,7 +195,7 @@ export const WorkStatusSubagentsSection: React.FC<Props> = ({ sessionId, directo
           return (
             <WorkStatusRow
               key={child.id}
-              onClick={directory ? () => openChildSession(child.id, label) : undefined}
+              onClick={directory ? () => openChildSession(child, label) : undefined}
               ariaLabel={[t('chat.workStatus.action.openSubagent', { name: label }), statusLabel].filter(Boolean).join('. ')}
               // The smaller status glyph sits centred in the panel's 14px icon
               // slot, so it lines up under the section icon and the label

@@ -83,6 +83,7 @@ test('draws the service view, posts actions with confirmation, and publishes hea
     expect(reads).toEqual(['/repo en']);
     expect(container.textContent).toContain('CPU');
     expect(container.textContent).toContain(':5173');
+    expect([...container.querySelectorAll('button')].some((button) => button.textContent === ':5173')).toBe(true);
     expect(container.textContent).toContain('Compose file found.');
     expect(container.querySelectorAll('iframe')).toHaveLength(0);
     expect(bindings.at(-1)?.controls).toEqual([{ kind: 'button', id: 'refresh', label: 'Refresh', disabled: false }]);

@@ -6,10 +6,12 @@ import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 import { guestPackageIconSrc, resolveGuestIconName } from '@/lib/guests/icon';
 import { useI18n } from '@/lib/i18n';
 import type { InstalledGuest } from '@/lib/guests/types';
+import { getRuntimeKey } from '@/lib/runtime-switch';
 import { getRuntimeUrlResolver } from '@/lib/runtime-url';
 import { pluginModeFromId } from '@/lib/surfaces/modes';
 import type { GuestStatusControlBinding } from '@/lib/guests/status-controls';
 import { useUIStore } from '@/stores/useUIStore';
+import { useMobileWorkspaceActivityContext } from '@/lib/mobileWorkspaceActivity';
 import { WorkStatusCollapsibleSection } from './WorkStatusPrimitives';
 import { StatusHeaderControls } from './StatusHeaderControls';
 import { GuestStatusViewBody } from './WorkStatusGuestView';
@@ -41,8 +43,11 @@ const rememberedHeights = new Map<string, number>();
 export const WorkStatusExtensionSection: React.FC<{
   guest: InstalledGuest;
   directory: string | null;
-}> = ({ guest, directory }) => {
+  /** A covered panel remains mounted for its fade, but must stop reading now. */
+  active?: boolean;
+}> = ({ guest, directory, active = true }) => {
   const { t } = useI18n();
+  const mobileWorkspace = useMobileWorkspaceActivityContext() !== null;
   const sectionId = extensionSectionId(guest.id);
   const expanded = useUIStore(React.useCallback(
     (state) => state.workStatusExpandedSections[sectionId] ?? (guest.statusDefaultExpanded ?? true),
@@ -87,10 +92,13 @@ export const WorkStatusExtensionSection: React.FC<{
         <div data-guest-status-body={guest.id}>
           <ErrorBoundary fallback={<div className="px-1 text-xs text-muted-foreground">{t('contextPanel.plugin.loadFailed')}</div>}>
             <GuestStatusViewBody
-              key={`${guest.id}:${directory ?? ''}`}
+              key={mobileWorkspace
+                ? JSON.stringify([getRuntimeKey(), guest.id, guest.storageId ?? '', guest.version ?? '', guest.statusSource.path, directory ?? ''])
+                : `${guest.id}:${directory ?? ''}`}
               guestId={guest.id}
               source={guest.statusSource}
               directory={directory}
+              active={active}
               onStatusControls={setStatusControls}
             />
           </ErrorBoundary>
