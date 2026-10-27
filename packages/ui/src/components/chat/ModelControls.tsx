@@ -794,8 +794,10 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         extractSessionRecordModelChoice,
         areModelChoicesEqual,
     );
+    // A controlled selection owner restores its own history, so this picker
+    // skips a duplicate parts subscription while that selection is set.
     const latestReplyChoice = useSessionMessagesSelector(
-        currentSessionId ?? '',
+        selection ? '' : currentSessionId ?? '',
         currentSessionDirectory ?? undefined,
         selectLatestReplyModelChoice,
         areModelChoicesEqual,
@@ -1494,6 +1496,9 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             addRecentAgent(agentName);
             if (options?.closeModelSelector ?? true) {
                 setAgentMenuOpen(false);
+            }
+            if (isCompact) {
+                closeMobilePanel();
             }
             return;
         }
@@ -2950,6 +2955,9 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         if (!isReady || !hasVariants || isAutoSelected) {
             return null;
         }
+        if (selection && agentSelectable && !selection.agent) {
+            return null;
+        }
 
         const displayVariant = currentVariant ? formatEffortLabel(currentVariant) : t('chat.modelControls.default');
         const isDefault = !currentVariant;
@@ -3260,7 +3268,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
 
             {renderMobileModelPanel()}
             {renderMobileVariantPanel()}
-            {!selection && !isAutoSelected && renderMobileAgentPanel()}
+            {(!selection || agentSelectable) && !isAutoSelected && renderMobileAgentPanel()}
             {renderMobileModelTooltip()}
             {!selection && !isAutoSelected && renderMobileAgentTooltip()}
         </>

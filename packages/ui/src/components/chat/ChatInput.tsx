@@ -29,7 +29,8 @@ import {
 import type { AttachedFile } from '@/stores/types/sessionTypes';
 import type { RepositoryReferenceKind } from '@/lib/api/types';
 import * as sessionActions from '@/sync/session-actions';
-// Guest surfaces load on demand: VS Code and mobile never mount them, and the
+// General guest surfaces load on demand: VS Code does not support them, and
+// mobile only mounts the curated Resource Monitor panel in its workspace. The
 // composer must not pay for the guest bridge before an extension is installed.
 const GuestAttachDialog = React.lazy(() => import('@/components/layout/GuestAttachDialog').then((module) => ({ default: module.GuestAttachDialog })));
 import type { AttachIssueRequest } from '@openchamber/sdk';
@@ -631,8 +632,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const configProviderId = useConfigStore((state) => state.currentProviderId);
     const configModelId = useConfigStore((state) => state.currentModelId);
     const configCatalogLoaded = useConfigStore((state) => state.providersLoaded && state.agentsLoaded);
-    const currentProviderId = pinnedComposerSelection?.model?.providerId ?? configProviderId;
-    const currentModelId = pinnedComposerSelection?.model?.modelId ?? configModelId;
+    const currentProviderId = columnPinned ? pinnedComposerSelection?.model?.providerId ?? '' : configProviderId;
+    const currentModelId = columnPinned ? pinnedComposerSelection?.model?.modelId ?? '' : configModelId;
     const getModelMetadata = useConfigStore((state) => state.getModelMetadata);
     // Subscribe to both sources read by getModelMetadata so async metadata and provider updates are observed.
     useConfigStore((state) => state.modelsMetadata);
@@ -642,10 +643,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         ? getModelMetadata(currentProviderId, currentModelId)
         : undefined;
     const configVariant = useConfigStore((state) => state.currentVariant);
-    const currentVariant = pinnedComposerSelection ? pinnedComposerSelection.variant ?? undefined : configVariant;
+    const currentVariant = columnPinned ? pinnedComposerSelection?.variant ?? undefined : configVariant;
     const currentVariantSelection = useConfigStore((state) => state.currentVariantSelection);
     const configAgentName = useConfigStore((state) => state.currentAgentName);
-    const currentAgentName = pinnedComposerSelection?.agent ?? configAgentName;
+    const currentAgentName = columnPinned ? pinnedComposerSelection?.agent ?? '' : configAgentName;
     const setAgent = useConfigStore((state) => state.setAgent);
     // Filtered here rather than through `getVisibleAgents()`, which returns a
     // new array on every call: that identity would rebuild the language
@@ -663,7 +664,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             : undefined,
         [btwAgentSelection, btwComposerSessionId, btwModelSelection],
     ));
-    const btwComposerVariant = currentVariantSelection.override === null ? null : currentVariantSelection.override ?? configVariant;
+    const btwComposerVariant = columnPinned
+        ? pinnedComposerSelection?.variant
+        : currentVariantSelection.override === null ? null : currentVariantSelection.override ?? configVariant;
     // Memoized: the footer and its model controls compare this selection by
     // identity, and nothing in it changes while the user types.
     const effectiveBtwSelection = React.useMemo(() => resolveBtwSelection({
@@ -1374,6 +1377,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             void handleSubmitRef.current();
             return;
         }
+        if (columnPinned && (!currentProviderId || !currentModelId)) {
+            toast.error(t('chat.chatInput.toast.noModelSelected'));
+            return;
+        }
         const queueRuntimeKey = getRuntimeKey();
         const queueTarget = messageQueueTarget;
         const queueSessionId = currentSessionId;
@@ -1502,7 +1509,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         }
         void resumeAfterQueue().catch(console.warn);
         recordLinkedReferences(queueSessionId, queueTarget.directory, linked);
-    }, [getCurrentInputSnapshot, currentSessionId, messageQueueTarget, inputMode, hasDrafts, guestCommands, attachedFiles, sanitizeAttachmentsForSend, prepareReadOnSendMentions, extractInlineFileMentions, agents, currentDirectory, consumePendingSyntheticParts, mailboxTarget, inlineDraftTarget, consumeDrafts, linkedReferences, scrollToLatest, clearAttachedFiles, chatDraftIdentity, isMobile, isMobileCommentOpen, addToQueue, currentProviderId, currentModelId, currentAgentName, currentVariant, t]);
+    }, [getCurrentInputSnapshot, columnPinned, currentSessionId, messageQueueTarget, inputMode, hasDrafts, guestCommands, attachedFiles, sanitizeAttachmentsForSend, prepareReadOnSendMentions, extractInlineFileMentions, agents, currentDirectory, consumePendingSyntheticParts, mailboxTarget, inlineDraftTarget, consumeDrafts, linkedReferences, scrollToLatest, clearAttachedFiles, chatDraftIdentity, isMobile, isMobileCommentOpen, addToQueue, currentProviderId, currentModelId, currentAgentName, currentVariant, t]);
 
     /** Put the context a queued message was captured with back on the composer chips. */
     const restoreQueuedContext = React.useCallback((context: readonly QueuedContextPart[]) => {
@@ -1865,11 +1872,17 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                 } else if (actionName === 'handoff-review') {
                     setReviewDialogOpen(true);
                 } else if (actionName === 'fork') {
+                    const forkProviderId = capturedSendConfig?.providerID ?? (columnPinned ? currentProviderId : configProviderId);
+                    const forkModelId = capturedSendConfig?.modelID ?? (columnPinned ? currentModelId : configModelId);
+                    if (!forkProviderId || !forkModelId) {
+                        toast.error(t('chat.chatInput.toast.noModelSelected'));
+                        return;
+                    }
                     const forkOutcome = await runForkCommand(currentSessionId, commandPlan.command.argument, {
                         // The fork branches the main session, so it keeps that session's
                         // selection even while the btw panel owns the composer.
-                        providerID: capturedSendConfig?.providerID ?? currentProviderId,
-                        modelID: capturedSendConfig?.modelID ?? currentModelId,
+                        providerID: forkProviderId,
+                        modelID: forkModelId,
                         agent: capturedSendConfig?.agent ?? currentAgentName,
                         variant: capturedSendConfig?.variant ?? currentVariant ?? undefined,
                     }, {
@@ -3755,9 +3768,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         }
         if (reference.data !== undefined) issue.data = reference.data;
         // A chip can outlive the place it was attached in: the session may be
-        // open on mobile or VS Code, where extensions never load, or the
-        // extension may be paused or removed here. Say so instead of opening
-        // an empty surface.
+        // open on mobile or VS Code, where general guest surfaces are not
+        // mounted, or the extension may be paused or removed here. Say so
+        // instead of opening an empty surface.
         const installed = useGuestsStore.getState().guests.find((entry) => entry.id === issue.providerId);
         if (!installed || !isGuestActive(installed)) {
             toast.info(t('chat.chatInput.toast.guestUnavailableHere'));
@@ -4178,11 +4191,16 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         // and mic icons above them; the buttons drop their own padding so the
         // row alone owns the inset.
         <div className="flex items-center justify-between gap-x-2 px-3.5 pb-2 pt-0.5">
-            <MemoMobileModelButton onOpenModel={() => handleOpenMobilePanel('model')} className="min-w-0 px-0" />
+            <MemoMobileModelButton
+                onOpenModel={() => handleOpenMobilePanel('model')}
+                className="min-w-0 px-0"
+                model={pinnedComposerSelection?.model}
+            />
             <MemoMobileAgentButton
                 onOpenAgentPanel={handleOpenAgentPanel}
                 onCycleAgent={handleCycleAgent}
                 className="flex-shrink-0 px-0"
+                selection={pinnedComposerSelection}
             />
         </div>
     ) : null;
@@ -4713,7 +4731,16 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                 {/* Hidden host for the model/agent/variant bottom sheets. Kept
                     outside the pill conditional so an open panel survives (and
                     stays visible over) the collapsed composer. */}
-                {isMobile && !isBtwActive ? (
+                {isMobile && !isBtwActive ? pinnedComposerSelection ? (
+                    <MemoModelControls
+                        className="hidden"
+                        mobilePanel={mobileControlsPanel}
+                        onMobilePanelChange={setMobileControlsPanel}
+                        sessionId={currentSessionId}
+                        selection={pinnedComposerSelection}
+                        agentSelectable
+                    />
+                ) : (
                     <MemoModelControls
                         className="hidden"
                         mobilePanel={mobileControlsPanel}

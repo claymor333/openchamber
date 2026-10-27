@@ -740,9 +740,11 @@ move to the fork's draft identity. Normal and BTW drafts remain independent,
 including in memory when persistence is disabled.
 
 Both modes reuse `ComposerEditor` and `ModelControls`; BTW transitions put the
-caret at the end. BTW copies the main model/effort once, including explicit
-Default, and uses `plan` or the first selectable agent. Its controlled model
-path only writes BTW selections. Files attach as in the normal composer
+caret at the end. BTW copies the active composer's model/effort once, including
+explicit Default: the main selection in the main chat, or the pinned session's
+selection in a side panel. A saved BTW choice keeps precedence, and the panel
+uses `plan` or the first selectable agent. Its controlled model path only
+writes BTW selections. Files attach as in the normal composer
 (picker, paste, drop) and live in the BTW draft identity's attachment slot,
 so they never mix with the main draft's files; the attach control offers
 only local files. Goals, expansion, shell, linked context (issues, PRs,
@@ -769,13 +771,21 @@ chat's (see the sync documentation, *Pinned chat columns*). What used to be
 one app-wide composer state is split per column:
 
 - **Model, agent and effort.** The app-wide current model belongs to the main
-  chat. A pinned composer sends with `usePinnedComposerSelection`: what was
-  picked in it, saved for its session in the selection store the way the BTW
-  composer saves its picks, otherwise the session record's model, variant and
-  agent. Its picker is `ModelControls` in controlled mode with
-  `agentSelectable`, so the agent pick is saved for the session and never
-  changes the main chat's agent. "Run in parallel" is offered only in the main
-  chat.
+  chat. A pinned composer sends with `usePinnedComposerSelection`: its saved
+  session choice first, then the OpenCode session record's model, variant and
+  agent. When the record has no model, the latest assistant reply supplies the
+  model and its effort; the record's agent still takes precedence. Each effort
+  stays with the model it came from. Until the pinned session has either source,
+  its model remains unresolved and the main chat's model is not used. Its picker
+  is `ModelControls` in controlled mode with `agentSelectable`; mobile model and
+  agent buttons and their hidden picker host use the same selection. An unresolved
+  mobile selection shows no main-chat model or agent. A picker choice is saved for
+  the pinned session and never changes the main chat's selection. "Run in
+  parallel" is offered only in the main chat. Queueing waits for the pinned
+  provider and model to resolve; the existing no-model notice leaves its draft,
+  attachments, pending context, and archive state untouched. Local and guest
+  slash commands still route before that check, and queued messages capture the
+  pinned send configuration.
 - **Attachments.** Each draft's files live under its draft identity in the
   input store, and `useDraftAttachedFiles(identity)` shows a composer its own
   files. The selected slot (`attachedFiles`) belongs to the composer the user

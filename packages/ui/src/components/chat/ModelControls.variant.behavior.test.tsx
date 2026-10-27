@@ -920,6 +920,45 @@ describe('ModelControls effort restore', () => {
     });
   }
 
+  test('pinned controlled effort waits until the session has an agent', async () => {
+    const { dom, cleanup } = await renderModelControls({
+      sessionId: 'session-pinned-no-agent',
+      selection: { model: { providerId: PROVIDER_ID, modelId: MODEL_ID }, agent: undefined, variant: undefined },
+      agentSelectable: true,
+    });
+    try {
+      expect(dom.container.querySelector('.model-controls__variant-trigger')).toBeNull();
+      expect(useConfigStore.getState().currentAgentName).toBe(AGENT);
+      expect(variantWrites).toEqual([]);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test('pinned controlled effort writes under its session and selected agent', async () => {
+    const sessionId = 'session-pinned-agent';
+    const selections = useSelectionStore.getState();
+    const saveVariant = spyOn(selections, 'saveAgentModelVariantForSession');
+    const { dom, cleanup } = await renderModelControls({
+      sessionId,
+      selection: { model: { providerId: PROVIDER_ID, modelId: MODEL_ID }, agent: 'plan', variant: undefined },
+      agentSelectable: true,
+    });
+    try {
+      expect(dom.container.querySelector('.model-controls__variant-trigger')).not.toBeNull();
+      await act(async () => dom.container.querySelector<HTMLButtonElement>('.model-controls__variant-trigger')?.click());
+      const defaultButton = Array.from(dom.container.querySelectorAll('button')).find((button) => button.textContent?.trim() === 'Default');
+      await act(async () => defaultButton?.click());
+
+      expect(saveVariant.mock.calls.at(-1)).toEqual([sessionId, 'plan', PROVIDER_ID, MODEL_ID, null]);
+      expect(overrideWrites).toEqual([]);
+    } finally {
+      await cleanup();
+      saveVariant.mockRestore();
+      useSelectionStore.setState(selections);
+    }
+  });
+
   describe('following the session agent', () => {
     const OTHER_MODEL_ID = 'gpt-other';
     const recordOn = (agentName: string) => ({

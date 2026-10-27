@@ -1026,18 +1026,24 @@ const createSessionWithDraftLifecycle = async (
  * The effort a send should record for its session.
  *
  * A send carries `undefined` both when no effort was ever chosen and when the
- * user explicitly picked "Default", so the sent value alone cannot tell the two
- * apart, and recording it raw clears a real "Default". The live selection can
- * tell them apart, because its `override` keeps `null` for "Default" — but only
- * while it still describes the agent and model being sent to. Otherwise the
- * send's own value is all there is to go on.
+ * user explicitly picked "Default". A matching live selection preserves that
+ * distinction for the current session; a different target may use its own
+ * saved `Default`, but never the main session's global effort.
  */
 const resolveVariantToRecord = (
   agentName: string | undefined,
   providerID: string,
   modelID: string,
   sentVariant: string | null | undefined,
+  targetSessionId?: string | null,
 ): string | null | undefined => {
+  if (targetSessionId && targetSessionId !== useSessionUIStore.getState().currentSessionId) {
+    const targetVariant = agentName
+      ? useSelectionStore.getState().getAgentModelVariantForSession(targetSessionId, agentName, providerID, modelID)
+      : undefined
+    return sentVariant === undefined && targetVariant === null ? null : sentVariant
+  }
+
   const config = useConfigStore.getState()
   const describesThisSend = config.currentProviderId === providerID
     && config.currentModelId === modelID
@@ -1973,7 +1979,8 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       const sessionAgentSelection = targetSessionId
         ? useSelectionStore.getState().getSessionAgentSelection(targetSessionId)
         : null
-      const configAgentName = useConfigStore.getState().currentAgentName
+      const currentTarget = Boolean(targetSessionId) && targetSessionId === get().currentSessionId
+      const configAgentName = currentTarget ? useConfigStore.getState().currentAgentName : undefined
       const effectiveAgent = trimmedAgent || sessionAgentSelection || configAgentName || undefined
 
       if (targetSessionId) {
@@ -1987,7 +1994,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
           effectiveAgent,
           providerID,
           modelID,
-          resolveVariantToRecord(effectiveAgent, providerID, modelID, variant),
+          resolveVariantToRecord(effectiveAgent, providerID, modelID, variant, targetSessionId),
         )
       }
 

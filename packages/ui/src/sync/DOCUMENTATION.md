@@ -1302,6 +1302,10 @@ tab. The main chat follows the app's selection; a pinned column keeps its own
 and changes only through its own navigation (open a subtask in place, return
 to the parent), never the main chat's selection or draft.
 
+A send addressed to a pinned session uses that session's saved model, agent and
+effort. The main composer supplies those defaults only when the target is the
+current session.
+
 Everything inside a chat reads its session through `chatColumnSession.ts`:
 `useChatSessionSelection()` is the column's session inside a column and the
 live selection elsewhere (it does not subscribe to the selection inside one),

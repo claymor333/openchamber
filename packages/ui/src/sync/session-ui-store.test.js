@@ -1992,15 +1992,23 @@ describe('sendMessage effort record', () => {
   let originalSendMessage;
 
   const SESSION = 'session-effort';
+  const TARGET_SESSION = 'session-effort-target';
   const PROVIDER = 'provider-a';
   const MODEL = 'model-a';
   const AGENT = 'build';
+  const sentMessages = [];
 
   const readRecord = () => useSelectionStore
     .getState()
     .getAgentModelVariantForSession(SESSION, AGENT, PROVIDER, MODEL);
+  const readTargetRecord = (agent = AGENT) => useSelectionStore
+    .getState()
+    .getAgentModelVariantForSession(TARGET_SESSION, agent, PROVIDER, MODEL);
 
   beforeEach(() => {
+    sentMessages.length = 0;
+    useSelectionStore.getState().clearSessionSelections(SESSION);
+    useSelectionStore.getState().clearSessionSelections(TARGET_SESSION);
     const childStore = {
       getState: () => ({ session: [], message: {}, part: {}, session_status: {} }),
       setState: () => {},
@@ -2026,16 +2034,27 @@ describe('sendMessage effort record', () => {
       newSessionDraft: { open: false, directoryOverride: null, parentID: null },
     });
     originalSendMessage = opencodeClient.sendMessage;
-    opencodeClient.sendMessage = async () => 'msg';
+    opencodeClient.sendMessage = async (params) => {
+      sentMessages.push(params);
+      return 'msg';
+    };
   });
 
   afterEach(() => {
     opencodeClient.sendMessage = originalSendMessage;
+    useSelectionStore.getState().clearSessionSelections(TARGET_SESSION);
     useSelectionStore.getState().saveAgentModelVariantForSession(SESSION, AGENT, PROVIDER, MODEL, undefined);
   });
 
   const send = (variant) => useSessionUIStore.getState().sendMessage(
     'hello', PROVIDER, MODEL, AGENT, undefined, undefined, undefined, variant, 'normal',
+  );
+  const sendToCurrentWithoutAgent = () => useSessionUIStore.getState().sendMessage(
+    'hello', PROVIDER, MODEL, undefined, undefined, undefined, undefined, undefined, 'normal',
+  );
+  const sendToTarget = (agent, variant) => useSessionUIStore.getState().sendMessage(
+    'hello', PROVIDER, MODEL, agent, undefined, undefined, undefined, variant, 'normal',
+    { target: { runtimeKey: getRuntimeKey(), sessionId: TARGET_SESSION, directory: '/target/project' } },
   );
 
   test('keeps an explicit Default across the send that follows it', async () => {
@@ -2066,6 +2085,51 @@ describe('sendMessage effort record', () => {
     await send('high');
 
     expect(readRecord()).toBe(undefined);
+  });
+
+  test('does not use the main agent for a send to another session', async () => {
+    await sendToTarget(undefined, undefined);
+
+    expect(sentMessages).toHaveLength(1);
+    expect(sentMessages[0].agent).toBeUndefined();
+    expect(useSelectionStore.getState().getSessionAgentSelection(TARGET_SESSION)).toBeNull();
+  });
+
+  test('keeps the main agent fallback for a send to the current session', async () => {
+    await sendToCurrentWithoutAgent();
+
+    expect(sentMessages).toHaveLength(1);
+    expect(sentMessages[0].agent).toBe(AGENT);
+  });
+
+  test('uses an explicit or saved agent for a send to another session', async () => {
+    useSelectionStore.getState().saveSessionAgentSelection(TARGET_SESSION, 'plan');
+    await sendToTarget(undefined, undefined);
+    expect(sentMessages[0].agent).toBe('plan');
+
+    await sendToTarget('review', undefined);
+    expect(sentMessages[1].agent).toBe('review');
+    expect(useSelectionStore.getState().getSessionAgentSelection(TARGET_SESSION)).toBe('review');
+  });
+
+  test('records a pinned effort instead of the main session inherited effort', async () => {
+    useSelectionStore.getState().saveSessionAgentSelection(TARGET_SESSION, AGENT);
+    useSelectionStore.getState().saveAgentModelVariantForSession(TARGET_SESSION, AGENT, PROVIDER, MODEL, 'high');
+    useConfigStore.setState({ currentVariantSelection: { override: undefined, inherited: 'low' } });
+
+    await sendToTarget(undefined, 'high');
+
+    expect(readTargetRecord()).toBe('high');
+  });
+
+  test('preserves a pinned Default when the send carries no effort', async () => {
+    useSelectionStore.getState().saveSessionAgentSelection(TARGET_SESSION, AGENT);
+    useSelectionStore.getState().saveAgentModelVariantForSession(TARGET_SESSION, AGENT, PROVIDER, MODEL, null);
+    useConfigStore.setState({ currentVariantSelection: { override: 'low', inherited: 'low' } });
+
+    await sendToTarget(undefined, undefined);
+
+    expect(readTargetRecord()).toBeNull();
   });
 });
 
