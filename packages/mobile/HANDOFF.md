@@ -11,7 +11,7 @@ renderer), not the desktop shell. The native app is a WKWebView (iOS) / Android 
 bundled copy of the web build; native capabilities are added via Capacitor plugins and two iOS app
 extensions.
 
-- App id / package: `com.openchamber.app`; app name `OpenChamber`.
+- App id / package: `com.openchamber.app` on iOS; Android uses `com.openchamber.fork` (see the Android identity note in `README.md`); app name `OpenChamber`.
 - Capacitor config: `capacitor.config.json`. It is JSON because the Capacitor CLI reads a
   `capacitor.config.ts` through the TypeScript JS API (`transpileModule`), which TypeScript 7 no
   longer ships. Why its values are what they are:
